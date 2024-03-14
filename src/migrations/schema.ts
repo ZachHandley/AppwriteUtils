@@ -305,6 +305,32 @@ export const CollectionCreateSchema = collectionSchema.omit({
 export type Collection = z.infer<typeof collectionSchema>;
 export type CollectionCreate = z.infer<typeof CollectionCreateSchema>;
 
+export const BackupSchema = z.object({
+  $id: z.string(),
+  $createdAt: z.string(),
+  $updatedAt: z.string(),
+  database: z.string(),
+  collections: z.array(z.string()),
+  documents: z
+    .array(
+      z.object({
+        collectionId: z.string(),
+        data: z.string(),
+      })
+    )
+    .default([]),
+});
+
+export type Backup = z.infer<typeof BackupSchema>;
+
+export const BackupCreateSchema = BackupSchema.omit({
+  $id: true,
+  $createdAt: true,
+  $updatedAt: true,
+});
+
+export type BackupCreate = z.infer<typeof BackupCreateSchema>;
+
 export const BatchSchema = z.object({
   $id: z.string(),
   $createdAt: z.string(),
