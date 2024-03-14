@@ -24,9 +24,18 @@ export const createOrUpdateAttribute = async (
 
   // Relationship attribute logic with adjustments
   if (attribute.type === "relationship") {
-    const relatedCollectionId = nameToIdMapping.get(
-      attribute.relatedCollection
-    );
+    let collectionFoundViaRelatedCollection: Models.Collection | undefined;
+    let relatedCollectionId: string | undefined;
+    try {
+      collectionFoundViaRelatedCollection = await db.getCollection(
+        dbId,
+        attribute.relatedCollection
+      );
+      relatedCollectionId = collectionFoundViaRelatedCollection.$id;
+    } catch (e) {
+      console.log(`${attribute.relatedCollection} must be a name :)`);
+      relatedCollectionId = nameToIdMapping.get(attribute.relatedCollection);
+    }
     if (!relatedCollectionId) {
       enqueueOperation({
         type: "attribute",

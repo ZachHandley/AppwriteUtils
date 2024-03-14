@@ -1,9 +1,10 @@
-import { ID, type Databases } from "node-appwrite";
+import { ID, Query, type Databases, type Models } from "node-appwrite";
 import type { Attribute, CollectionCreate } from "./schema";
 
 export interface QueuedOperation {
-  type: "collection" | "attribute";
+  type: "attribute";
   collectionId?: string;
+  relCollectionId?: string;
   attribute?: Attribute;
   collection?: CollectionCreate;
   dependencies?: string[];
@@ -24,30 +25,43 @@ export const processQueue = async (db: Databases, dbId: string) => {
     progress = false;
     for (let i = 0; i < queuedOperations.length; i++) {
       const operation = queuedOperations[i];
-      if (operation.type === "collection" && operation.collection) {
-        const collectionId = operation.collectionId || ID.unique();
-        console.log(
-          `Processing collection: ${operation.collection.name} with ID: ${collectionId}`
+      let collectionFound: Models.Collection | undefined;
+      try {
+        if (
+          operation.attribute?.type === "relationship" &&
+          operation.relCollectionId
+        ) {
+          collectionFound = await db.getCollection(
+            dbId,
+            operation.relCollectionId
+          );
+        } else if (
+          operation.attribute?.type === "relationship" &&
+          operation.attribute?.relatedCollection
+        ) {
+          const collectionsFound = await db.listCollections(dbId, [
+            Query.equal("name", operation.attribute?.relatedCollection),
+          ]);
+          if (collectionsFound.total > 0) {
+            collectionFound = collectionsFound.collections[0];
+          }
+        } else if (
+          operation.collectionId &&
+          operation.attribute?.type !== "relationship"
+        ) {
+          collectionFound = await db.getCollection(
+            dbId,
+            operation.collectionId
+          );
+        }
+      } catch (e) {
+        console.error(
+          `Collection not found for operation: ${operation.collectionId}`,
+          e
         );
-        const collection = await db.createCollection(
-          dbId,
-          collectionId,
-          operation.collection.name,
-          operation.collection.$permissions,
-          operation.collection.documentSecurity,
-          operation.collection.enabled
-        );
-        // Correctly mapping the collection name to its ID after creation or using the predefined ID
-        nameToIdMapping.set(operation.collection.name, collection.$id);
-        operation.collectionId = collectionId; // Preserving the logic of using predefined IDs
-        queuedOperations.splice(i, 1);
-        i--;
-        progress = true;
-      } else if (
-        operation.type === "attribute" &&
-        operation.collectionId &&
-        operation.attribute
-      ) {
+        collectionFound = undefined;
+      }
+      if (collectionFound && operation.attribute) {
         const canProcess =
           !operation.dependencies ||
           operation.dependencies.every((depName) =>
@@ -55,19 +69,26 @@ export const processQueue = async (db: Databases, dbId: string) => {
           );
         if (canProcess) {
           console.log(
-            `Processing attribute: ${operation.attribute.key} for collection ID: ${operation.collectionId}`
+            `Processing attribute: ${operation.attribute.key} for collection ID: ${collectionFound.$id}`
           );
           // Here, you'll process the attribute creation or update logic, ensuring to use the correct collection ID and handling relationships as needed.
           queuedOperations.splice(i, 1);
           i--;
           progress = true;
         }
+      } else {
+        console.error(
+          `Collection not found for operation: ${operation.collectionId}`
+        );
+        queuedOperations.splice(i, 1);
+        i--;
       }
     }
   }
 
   if (queuedOperations.length > 0) {
     console.error("Unresolved operations remain due to unmet dependencies.");
+    console.log(queuedOperations);
   }
 
   console.log("---------------------------------");

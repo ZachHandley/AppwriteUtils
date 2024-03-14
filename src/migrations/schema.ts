@@ -597,33 +597,13 @@ export const typeToZod = (attribute: Attribute) => {
       }
       break;
     case "relationship":
-      baseSchemaCode = `z.object({
-          key: z.string().describe("The key of the attribute"),
-          type: z.literal("relationship").describe("The type of the attribute"),
-          error: z.string().describe("The error message if the attribute is invalid"),
-          required: z.boolean().describe("Whether the attribute is required or not"),
-          array: z.boolean().optional().describe("Whether the attribute is an array or not"),
-          relatedCollection: z.string().describe("The collection ID of the related collection"),
-          relationType: z.union([
-            z.literal("oneToMany"),
-            z.literal("manyToOne"),
-            z.literal("oneToOne"),
-            z.literal("manyToMany")
-          ]).describe("The relation type of the relationship attribute"),
-          twoWay: z.boolean().describe("Whether the relationship is two way or not"),
-          twoWayKey: z.string().describe("The ID of the foreign key in the other collection"),
-          onDelete: z.union([
-            z.literal("setNull"),
-            z.literal("cascade"),
-            z.literal("restrict")
-          ]).describe("The action to take when the related document is deleted"),
-          side: z.union([
-            z.literal("parent"),
-            z.literal("child")
-          ]).describe("The side of the relationship"),
-        })`;
-      if (!attribute.required) {
-        baseSchemaCode += ".nullish()";
+      const relatedSchemaName =
+        toPascalCase(attribute.relatedCollection) + "Schema";
+      baseSchemaCode = `z.lazy(() => ${relatedSchemaName}`;
+      if (attribute.required) {
+        baseSchemaCode += ")";
+      } else {
+        baseSchemaCode += ".nullish())";
       }
       break;
     default:

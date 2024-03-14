@@ -125,16 +125,29 @@ const createOrUpdateCollections = async (
           (coll) => coll.collectionName === collection.name
         );
         if (foundColl) {
-          enqueueOperation({
-            type: "collection",
-            collection,
-            collectionId: foundColl.collectionId,
-          });
+          const collectionId = foundColl.collectionId || ID.unique();
+          console.log(
+            `Processing collection: ${collection.name} with ID: ${collectionId}`
+          );
+          collectionToUse = await database.createCollection(
+            databaseId,
+            collectionId,
+            collection.name,
+            collection.$permissions,
+            collection.documentSecurity,
+            collection.enabled
+          );
+          nameToIdMapping.set(collection.name, collectionToUse.$id);
         } else {
-          enqueueOperation({
-            type: "collection",
-            collection,
-          });
+          collectionToUse = await database.createCollection(
+            databaseId,
+            ID.unique(),
+            collection.name,
+            collection.$permissions,
+            collection.documentSecurity,
+            collection.enabled
+          );
+          nameToIdMapping.set(collection.name, collectionToUse.$id);
         }
       } else {
         collectionToUse = await database.createCollection(
@@ -145,6 +158,7 @@ const createOrUpdateCollections = async (
           collection.documentSecurity,
           collection.enabled
         );
+        nameToIdMapping.set(collection.name, collectionToUse.$id);
       }
     } else {
       console.log(`Collection ${collection.name} already exists.`);
