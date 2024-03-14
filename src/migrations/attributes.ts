@@ -35,11 +35,24 @@ export const createOrUpdateAttribute = async (
     } catch (e) {
       console.log(`${attribute.relatedCollection} must be a name :)`);
       relatedCollectionId = nameToIdMapping.get(attribute.relatedCollection);
+      try {
+        if (relatedCollectionId) {
+          collectionFoundViaRelatedCollection = await db.getCollection(
+            dbId,
+            relatedCollectionId
+          );
+        }
+      } catch (e) {
+        console.log(
+          `Could not find collection with name: ${attribute.relatedCollection}`
+        );
+      }
     }
-    if (!relatedCollectionId) {
+    if (!relatedCollectionId || !collectionFoundViaRelatedCollection) {
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
+        collection: collection,
         attribute,
         dependencies: [attribute.relatedCollection],
       });

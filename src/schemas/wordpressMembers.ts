@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { generateMock } from "@anatine/zod-mock";
+import { MembersSchema } from "./members";
+
 
 export const WordpressMembersSchema = z.object({
   $id: z.string(),

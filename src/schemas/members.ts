@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { generateMock } from "@anatine/zod-mock";
+import { 65f347a1974de66e8989Schema } from "./65f347a1974de66e8989";
+
 
 export const MembersSchema = z.object({
   $id: z.string(),
   $createdAt: z.date().or(z.string()),
   $updatedAt: z.date().or(z.string()),
   billingAddress: z.string().max(200, "Maximum length of 200 characters exceeded").nullish(),
-  member: z.lazy(() => 65f347a1974de66e8989Schema.nullish()),
+  wordpressMember: z.lazy(() => 65f347a1974de66e8989Schema.nullish()),
 });
 
 export type Members = z.infer<typeof MembersSchema>;

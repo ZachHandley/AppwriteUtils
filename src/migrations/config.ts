@@ -64,7 +64,7 @@ export const COLLECTIONS_CONFIG = {
         size: 200,
       }),
       attributeSchema.parse({
-        key: "member",
+        key: "wordpressMember",
         type: "relationship",
         relatedCollection: "WordpressMembers",
         relationType: "oneToOne",

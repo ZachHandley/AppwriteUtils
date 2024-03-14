@@ -1,4 +1,4 @@
-import { toPascalCase } from "@/utils";
+import { toCamelCase, toPascalCase } from "@/utils";
 import { z } from "zod";
 
 const stringAttributeSchema = z.object({
@@ -468,7 +468,23 @@ export const createSchemaString = (
   // What if there's more than just the first letter?
   // What if the name is already PascalCase?
   const pascalName = toPascalCase(name);
-  let schemaString = `import { z } from "zod";\nimport { generateMock } from "@anatine/zod-mock";\n\n`;
+
+  let imports = `import { z } from "zod";\nimport { generateMock } from "@anatine/zod-mock";\n`;
+
+  // Collect unique related collections for relationship attributes
+  const relatedCollections = attributes
+    .filter((attr) => attr.type === "relationship" && attr.relatedCollection)
+    .map((attr) => (attr as RelationshipAttribute).relatedCollection)
+    .filter((value, index, self) => self.indexOf(value) === index);
+
+  // Generate import statements for each unique related collection
+  relatedCollections.forEach((relatedCollection) => {
+    const relatedPascalName = toPascalCase(relatedCollection);
+    const relatedCamelName = toCamelCase(relatedCollection);
+    imports += `import { ${relatedPascalName}Schema } from "./${relatedCamelName}";\n`;
+  });
+
+  let schemaString = `${imports}\n\n`;
   schemaString += `export const ${pascalName}Schema = z.object({\n`;
   schemaString += `  $id: z.string(),\n`;
   schemaString += `  $createdAt: z.date().or(z.string()),\n`;
