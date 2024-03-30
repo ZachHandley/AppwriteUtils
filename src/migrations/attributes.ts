@@ -15,8 +15,9 @@ export const createOrUpdateAttribute = async (
   } catch (error) {
     foundAttribute = undefined;
   }
+  let numSameAttributes = 0;
   if (foundAttribute && foundAttribute.key === attribute.key) {
-    console.log("Same attribute key, continuing...");
+    numSameAttributes++;
     return;
   } else if (foundAttribute) {
     action = "update";
@@ -281,6 +282,9 @@ export const createOrUpdateAttribute = async (
       console.error("Invalid attribute type");
       break;
   }
+  console.log(
+    `Found ${numSameAttributes} attributes with the same name and did nothing`
+  );
 };
 
 export const createUpdateCollectionAttributes = async (

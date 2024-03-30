@@ -56,3 +56,9 @@ export const mkdirSync = (filePath: string) => {
 export const readdirSync = (filePath: string) => {
   return fs.readdirSync(filePath);
 };
+
+export const safeParseDate = (dateStr: string | undefined): string | null => {
+  if (!dateStr) return null;
+  const date = new Date(dateStr);
+  return isNaN(date.getTime()) ? null : date.toISOString();
+};

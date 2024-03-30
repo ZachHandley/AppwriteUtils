@@ -21,7 +21,12 @@ import {
 } from "./schema";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { nameToIdMapping, enqueueOperation, processQueue } from "./queue";
+import {
+  nameToIdMapping,
+  enqueueOperation,
+  processQueue,
+  documentExists,
+} from "./queue";
 import {
   writeFileSync,
   ensureDirectoryExistence,
@@ -33,9 +38,12 @@ import { createUpdateCollectionAttributes } from "./attributes";
 import { sortCollections } from "./dbHelpers";
 import {
   findOrCreateOperation,
+  maxDataLength,
   splitIntoBatches,
   updateOperation,
 } from "./migrationHelper";
+import { globallyConvertAll } from "./conversions";
+import { resolveAndUpdateRelationships } from "./relationships";
 
 // Derive __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -99,7 +107,7 @@ const generateSchemas = async (
     const camelCaseName = toCamelCase(collection.name);
     const schemaName = toPascalCase(collection.name);
     const schemaString = createSchemaString(schemaName, attributes);
-    const schemaPath = join(__dirname, "../schemas");
+    const schemaPath = join(__dirname, "../../schemas");
     const schemaFile = `${schemaPath}/${camelCaseName}.ts`;
 
     ensureDirectoryExistence(schemaFile);
@@ -114,15 +122,18 @@ const createOrUpdateCollections = async (
   deletedCollections?: { collectionId: string; collectionName: string }[]
 ): Promise<void> => {
   for (const { collection, attributes } of configCollections) {
-    let collectionToUse = await database
-      .listCollections(databaseId, [Query.equal("name", collection.name)])
-      .then((res) => res.collections[0] || null);
+    let collectionsFound = await database.listCollections(databaseId, [
+      Query.equal("name", collection.name),
+    ]);
+    let collectionToUse =
+      collectionsFound.total > 0 ? collectionsFound.collections[0] : null;
 
     if (!collectionToUse) {
       console.log(`Creating collection: ${collection.name}`);
       if (deletedCollections && deletedCollections.length > 0) {
         const foundColl = deletedCollections.find(
-          (coll) => coll.collectionName === collection.name
+          (coll) =>
+            coll.collectionName.toLowerCase() === collection.name.toLowerCase()
         );
         if (foundColl) {
           const collectionId = foundColl.collectionId || ID.unique();
@@ -194,15 +205,23 @@ const generateMockData = async (
   }
 };
 
-const BATCH_SIZE = 20;
+// Map of collection name to array of documents so we can update the relationships
+const documentsWithRelationships = new Map<string, Models.Document[]>();
 
 const importData = async (
   database: Databases,
   databaseId: string,
   configCollections: any[]
 ): Promise<void> => {
-  for (const { collection, convertFunction } of configCollections) {
+  // let relationshipInfo: Record<string, any[]> = {};
+  await globallyConvertAll();
+  for (const { collection, attributes, convertFunction } of configCollections) {
     if (!convertFunction) continue;
+
+    // Identify if the collection has a relationship with any other collection
+    const hasRelationship = attributes.some(
+      (attribute: Attribute) => attribute.type === "relationship"
+    );
 
     const existingCollection = await checkForCollection(
       database,
@@ -229,10 +248,18 @@ const importData = async (
       const dataToImport = await convertFunction();
       total = dataToImport.length;
       processed = 0;
-      const batches = splitIntoBatches(dataToImport, BATCH_SIZE);
+      const batches = splitIntoBatches(dataToImport);
       console.log(`Creating ${batches.length} batches...`);
       for (const batchData of batches) {
-        console.log(`Creating batch with ${batchData.length} documents...`);
+        console.log(
+          `Creating batch with ${batchData.length} documents of length ${
+            JSON.stringify(batchData).length
+          }`
+        );
+        const batchDataLength = JSON.stringify(batchData);
+        if (batchDataLength.length > maxDataLength) {
+          console.log(`batchData bigger than allowed, handling`);
+        }
         const batchDocument = await database.createDocument(
           "migrations",
           "batches",
@@ -269,46 +296,61 @@ const importData = async (
       const batchDocument = BatchSchema.parse(batchDocumentPulled);
       const batchData = JSON.parse(batchDocument.data);
 
-      for (const data of batchData) {
-        // Check for the data's existence to avoid duplicates
-        const validEntries = Object.entries(data)
-          .filter(([key, value]) => key !== undefined && value !== undefined)
-          .slice(0, 5);
-
-        // Construct the queries using the valid entries
-        const queries = validEntries.map(([key, value]) =>
-          Query.equal(key as string, value as string)
+      // Prepare to check each document in the batch for existence
+      const existenceChecks = batchData.map((data: any) =>
+        documentExists(database, databaseId, existingCollection.$id, data)
+      );
+      if (hasRelationship) {
+        const relationshipInfo = attributes.filter(
+          (attribute: Attribute) => attribute.type === "relationship"
         );
-
-        // Assuming listDocuments can take an array of queries to filter documents
-        const existingDocuments = await database.listDocuments(
-          databaseId,
-          existingCollection.$id,
-          [...queries, Query.limit(1)] // Add the limit to the queries array directly
-        );
-
-        if (existingDocuments.documents.length === 0) {
-          // Document does not exist, proceed with creation
-          await database.createDocument(
-            databaseId,
-            existingCollection.$id,
-            ID.unique(),
-            data
-          );
-          processed++;
-          await updateOperation(database, operation.$id, {
-            progress: processed,
-          });
-        } else {
-          console.log(`Document with ID ${batchDocument.$id} already exists.`);
-          processed++;
-          await updateOperation(database, operation.$id, {
-            total: total,
-            progress: processed,
-          });
-          continue;
+        for (const relationship of relationshipInfo) {
+          if (relationship.relatedCollection) {
+            documentsWithRelationships.set(
+              relationship.relatedCollection,
+              batchData
+            );
+          }
         }
       }
+
+      // Execute all existence checks in parallel
+      const existenceResults = await Promise.all(existenceChecks);
+
+      // Process documents based on existence check results
+      const creationPromises: Promise<Models.Document>[] = [];
+      const processingPromises = batchData.map(
+        async (data: any, index: number) => {
+          // If document does not exist, create it
+          if (!existenceResults[index]) {
+            creationPromises.push(
+              database.createDocument(
+                databaseId,
+                existingCollection.$id,
+                ID.unique(),
+                data
+              )
+            );
+            processed++;
+          } else {
+            console.log(`Document already exists, skipping creation.`);
+            processed++;
+            return Promise.resolve(); // No operation needed, return resolved promise
+          }
+        }
+      );
+
+      // Wait for all processing promises to complete
+      console.log(`Processing ${processingPromises.length} documents...`);
+      await Promise.all(processingPromises);
+      console.log(`Processed ${processingPromises.length} documents...`);
+      const createdDocuments = await Promise.all(creationPromises);
+      console.log(`Created ${createdDocuments.length} documents...`);
+
+      // Update operation progress after processing the batch
+      await updateOperation(database, operation.$id, {
+        progress: processed,
+      });
 
       // Mark batch as processed and cleanup
       await database.deleteDocument("migrations", "batches", batchId);
@@ -330,6 +372,73 @@ const importData = async (
   }
 };
 
+export const checkForDuplicatesInCollections = async (
+  database: Databases,
+  databaseId: string
+): Promise<void> => {
+  console.log(
+    `Checking for duplicates in all collections of database: ${databaseId}`
+  );
+  try {
+    // List all collections in the database
+    const { collections } = await database.listCollections(databaseId);
+    for (const collection of collections) {
+      console.log(`Checking collection: ${collection.name} for duplicates`);
+
+      let lastDocumentId: string | undefined;
+      let moreDocuments = true;
+      let duplicateCount = 0;
+
+      while (moreDocuments) {
+        // Fetch documents in batches of 500
+        const documentsResponse = await database.listDocuments(
+          databaseId,
+          collection.$id,
+          [
+            Query.limit(500),
+            ...(lastDocumentId ? [Query.cursorAfter(lastDocumentId)] : []),
+          ]
+        );
+
+        // Check each document for duplicates using the documentExists function
+        for (const document of documentsResponse.documents) {
+          const exists = await documentExists(
+            database,
+            databaseId,
+            collection.$id,
+            document
+          );
+          if (exists) {
+            console.log(
+              `Potential duplicate found in collection ${collection.name} for document ID: ${document.$id}`
+            );
+            duplicateCount++;
+          }
+        }
+
+        // Determine if there are more documents to fetch
+        moreDocuments = documentsResponse.documents.length === 500;
+        if (moreDocuments) {
+          lastDocumentId =
+            documentsResponse.documents[documentsResponse.documents.length - 1]
+              .$id;
+        }
+      }
+
+      if (duplicateCount > 0) {
+        console.log(
+          `Found ${duplicateCount} potential duplicates in collection ${collection.name}.`
+        );
+      } else {
+        console.log(`No duplicates found in collection ${collection.name}.`);
+      }
+    }
+    console.log("Finished checking for duplicates.");
+  } catch (error) {
+    console.error(`Error checking for duplicates: ${error}`);
+  }
+};
+
 export const initOrUpdateCollections = async (
   database: Databases,
   storage: Storage,
@@ -337,11 +446,14 @@ export const initOrUpdateCollections = async (
   shouldWipeDb: boolean = false,
   generateSchemasFlag: boolean = false,
   shouldGenerateMockData: boolean = false,
-  shouldImportData: boolean = false
+  shouldImportData: boolean = false,
+  checkDuplicates: boolean = false
 ): Promise<void> => {
-  const configCollections = Object.values(COLLECTIONS_CONFIG);
+  const configCollections: any[] = Object.values(COLLECTIONS_CONFIG);
   const sortedCollections = sortCollections(configCollections);
-  await backupDatabase(database, databaseId, storage);
+  if (shouldWipeDb || shouldGenerateMockData || shouldImportData) {
+    await backupDatabase(database, databaseId, storage);
+  }
 
   let deletedCollections:
     | { collectionId: string; collectionName: string }[]
@@ -384,6 +496,7 @@ export const initOrUpdateCollections = async (
     console.log("---------------------------------");
     console.log("Starting Generate Mock Data");
     console.log("---------------------------------");
+
     await generateMockData(database, databaseId, sortedCollections);
 
     console.log("---------------------------------");
@@ -394,10 +507,31 @@ export const initOrUpdateCollections = async (
     console.log("---------------------------------");
     console.log("Starting Import Data");
     console.log("---------------------------------");
-    await importData(database, databaseId, sortedCollections);
 
+    await importData(database, databaseId, sortedCollections);
     console.log("---------------------------------");
     console.log("Finished Import Data");
+    console.log("---------------------------------");
+
+    console.log("---------------------------------");
+    console.log("Starting Resolve Relationships");
+    console.log("---------------------------------");
+    await resolveAndUpdateRelationships(databaseId, database);
+
+    console.log("---------------------------------");
+    console.log("Finished Resolve Relationships");
+    console.log("---------------------------------");
+  }
+
+  if (checkDuplicates) {
+    console.log("---------------------------------");
+    console.log("Starting Check Duplicates");
+    console.log("---------------------------------");
+
+    // await checkForDuplicatesInCollections(database, databaseId);
+
+    console.log("---------------------------------");
+    console.log("Finished Check Duplicates");
     console.log("---------------------------------");
   }
 };

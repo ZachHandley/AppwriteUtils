@@ -70,6 +70,7 @@ interface SetupOptions {
   generateSchemas: boolean;
   generateMockData: boolean;
   importData: boolean;
+  checkDuplicates: boolean;
 }
 
 async function ensureDatabasesExist(database: Databases, runMain: boolean) {
@@ -118,6 +119,7 @@ export async function performDatabaseSetupActions(
     generateSchemas,
     generateMockData,
     importData,
+    checkDuplicates,
   } = options;
 
   await ensureDatabasesExist(database, runMain);
@@ -132,6 +134,7 @@ export async function performDatabaseSetupActions(
       true,
       false,
       false,
+      false,
       false
     );
     if (runMain) {
@@ -140,6 +143,7 @@ export async function performDatabaseSetupActions(
         storage,
         "main",
         true,
+        false,
         false,
         false,
         false
@@ -160,7 +164,8 @@ export async function performDatabaseSetupActions(
       wipeDatabases,
       generateSchemas,
       generateMockData,
-      importData
+      importData,
+      checkDuplicates
     );
     if (runMain) {
       await initOrUpdateCollections(
@@ -170,7 +175,8 @@ export async function performDatabaseSetupActions(
         wipeDatabases,
         generateSchemas,
         generateMockData,
-        importData
+        importData,
+        checkDuplicates
       );
     }
   }

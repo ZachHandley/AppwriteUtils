@@ -55,10 +55,46 @@ export const updateOperation = async (
   );
 };
 
-export const splitIntoBatches = (data: any[], batchSize: number): any[][] => {
+// Actual max 1073741824
+export const maxDataLength = 1073741820;
+export const maxBatchItems = 100;
+
+export const splitIntoBatches = (data: any[]): any[][] => {
   let batches = [];
-  for (let i = 0; i < data.length; i += batchSize) {
-    batches.push(data.slice(i, i + batchSize));
+  let currentBatch: any[] = [];
+  let currentBatchLength = 0;
+  let currentBatchItemCount = 0;
+
+  data.forEach((item, index) => {
+    const itemLength = JSON.stringify(item).length;
+    if (itemLength > maxDataLength) {
+      console.log(
+        item,
+        `Large item found at index ${index} with length ${itemLength}:`
+      );
+    }
+    // Check if adding the current item would exceed the max length or max items per batch
+    if (
+      currentBatchLength + itemLength >= maxDataLength ||
+      currentBatchItemCount >= maxBatchItems
+    ) {
+      // If so, start a new batch
+      batches.push(currentBatch);
+      currentBatch = [item];
+      currentBatchLength = itemLength;
+      currentBatchItemCount = 1; // Reset item count for the new batch
+    } else {
+      // Otherwise, add the item to the current batch
+      currentBatch.push(item);
+      currentBatchLength += itemLength;
+      currentBatchItemCount++;
+    }
+  });
+
+  // Don't forget to add the last batch if it's not empty
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
   }
+
   return batches;
 };

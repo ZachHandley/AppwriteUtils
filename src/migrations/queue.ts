@@ -1,6 +1,7 @@
-import { ID, Query, type Databases, type Models } from "node-appwrite";
-import type { Attribute, CollectionCreate } from "./schema";
+import { Query, type Databases, type Models } from "node-appwrite";
+import type { Attribute } from "./schema";
 import { createOrUpdateAttribute } from "./attributes";
+import _ from "lodash";
 
 export interface QueuedOperation {
   type: "attribute";
@@ -15,6 +16,44 @@ export const nameToIdMapping: Map<string, string> = new Map();
 export const enqueueOperation = (operation: QueuedOperation) => {
   queuedOperations.push(operation);
 };
+
+export const documentExists = async (
+  db: Databases,
+  dbId: string,
+  targetCollectionId: string,
+  toCreateObject: any
+): Promise<boolean> => {
+  // Validate and prepare query parameters
+  const validQueryParams = _.chain(toCreateObject)
+    .pickBy(
+      (value, key) =>
+        !key.startsWith("$") &&
+        !_.isNull(value) &&
+        !_.isUndefined(value) &&
+        !_.isEmpty(value) &&
+        !_.isObject(value) && // Excludes arrays and objects
+        (_.isString(value) ? value.length < 4096 : true) // String length check
+    )
+    .mapValues((value, key) =>
+      _.isString(value) || _.isNumber(value) || _.isBoolean(value)
+        ? value
+        : null
+    )
+    .omitBy(_.isNull) // Remove any null values that might have been added in mapValues
+    .toPairs()
+    .slice(0, 25) // Limit to 25 to adhere to query limit
+    .map(([key, value]) => Query.equal(key, value as any))
+    .value();
+
+  // Execute the query with the validated and prepared parameters
+  const result = await db.listDocuments(
+    dbId,
+    targetCollectionId,
+    validQueryParams
+  );
+  return result.documents.length > 0 && result.total > 0;
+};
+
 export const processQueue = async (db: Databases, dbId: string) => {
   console.log("---------------------------------");
   console.log(`Starting Queue processing of ${dbId}`);

@@ -18,7 +18,8 @@ export const runMigrations = async (
   wipeDatabases: boolean = false,
   generateSchemas: boolean = false,
   generateMockData: boolean = false,
-  importData: boolean = false
+  importData: boolean = false,
+  checkDuplicates: boolean = false
 ) => {
   // Assuming you have initialized `database` and `storage` here
   await performDatabaseSetupActions(database, storage, {
@@ -27,5 +28,6 @@ export const runMigrations = async (
     generateSchemas: generateSchemas,
     generateMockData: generateMockData,
     importData: importData,
+    checkDuplicates: checkDuplicates,
   });
 };

@@ -2,6 +2,18 @@
   "name": "appwritemigrations",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "migrate:reset": "npm run migrate:wipe && npm run migrate:generate && npm run migrate:apply",
+    "migrate:reset:prod": "npm run migrate:wipe:prod && npm run migrate:generate:prod && npm run migrate:apply:prod",
+    "migrate:update": "npm run migrate:generate --dev && npm run migrate:apply --dev",
+    "migrate:wipe": "tsx --no-cache ./src/migrate.ts --wipe --dev",
+    "migrate:wipe:prod": "tsx --no-cache ./src/migrate.ts --wipe",
+    "migrate:generate": "tsx --no-cache ./src/migrate.ts --generate --dev",
+    "migrate:generate:prod": "tsx --no-cache ./src/migrate.ts --generate",
+    "migrate:apply": "tsx --no-cache ./src/migrate.ts --apply --dev",
+    "migrate:apply:prod": "tsx --no-cache ./src/migrate.ts --apply",
+    "migrate:prod": "tsx --no-cache ./src/migrate.ts --prod"
+  },
   "devDependencies": {
     "@types/bun": "^1.0.8"
   },
@@ -10,6 +22,8 @@
   },
   "dependencies": {
     "@anatine/zod-mock": "^3.13.3",
+    "@types/lodash": "^4.17.0",
+    "lodash": "^4.17.21",
     "node-appwrite": "^12.0.0",
     "zod": "^3.22.4"
   }

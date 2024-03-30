@@ -398,14 +398,14 @@ export const getMigrationCollectionSchemas = () => {
       key: "batches",
       type: "string",
       error: "Invalid Batches",
-      size: 1000000,
+      size: 1073741824,
       array: true,
     }),
     attributeSchema.parse({
       key: "data",
       type: "string",
       error: "Invalid Data",
-      size: 100000,
+      size: 1073741824,
     }),
     attributeSchema.parse({
       key: "progress",
@@ -450,7 +450,7 @@ export const getMigrationCollectionSchemas = () => {
     attributeSchema.parse({
       key: "data",
       type: "string",
-      size: 100000,
+      size: 1073741824,
       error: "Invalid Data",
       required: true,
       array: false,
@@ -500,39 +500,72 @@ export const createSchemaString = (
   // Collect unique related collections for relationship attributes
   const relatedCollections = attributes
     .filter((attr) => attr.type === "relationship" && attr.relatedCollection)
-    .map((attr) => (attr as RelationshipAttribute).relatedCollection)
+    .map((attr) => [
+      (attr as RelationshipAttribute).relatedCollection,
+      attr.key,
+      attr.array ? "array" : "",
+    ])
     .filter((value, index, self) => self.indexOf(value) === index);
 
   // Generate import statements for each unique related collection
+  let relatedTypes = "";
+  let relatedTypesLazy = "";
+  let curNum = 0;
+  let maxNum = relatedCollections.length;
   relatedCollections.forEach((relatedCollection) => {
-    const relatedPascalName = toPascalCase(relatedCollection);
-    const relatedCamelName = toCamelCase(relatedCollection);
-    imports += `import { ${relatedPascalName}Schema } from "./${relatedCamelName}";\n`;
+    const relatedPascalName = toPascalCase(relatedCollection[0]);
+    const relatedCamelName = toCamelCase(relatedCollection[0]);
+    curNum++;
+    let endNameTypes = relatedPascalName;
+    let endNameLazy = `${relatedPascalName}Schema`;
+    if (relatedCollection[2] === "array") {
+      endNameTypes += "[]";
+      endNameLazy += ".array()";
+    }
+    endNameLazy += ".optional()";
+    imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
+    relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
+    if (relatedTypes.length > 0 && curNum !== maxNum) {
+      relatedTypes += "  ";
+    }
+    relatedTypesLazy += `${relatedCollection[1]}: z.lazy(() => ${endNameLazy}),\n`;
+    if (relatedTypesLazy.length > 0 && curNum !== maxNum) {
+      relatedTypesLazy += "  ";
+    }
   });
 
   let schemaString = `${imports}\n\n`;
-  schemaString += `export const ${pascalName}Schema = z.object({\n`;
-  schemaString += `  $id: z.string(),\n`;
-  schemaString += `  $createdAt: z.date().or(z.string()),\n`;
-  schemaString += `  $updatedAt: z.date().or(z.string()),\n`;
+  schemaString += `export const ${pascalName}SchemaBase = z.object({\n`;
+  schemaString += `  $id: z.string().optional(),\n`;
+  schemaString += `  $createdAt: z.date().or(z.string()).optional(),\n`;
+  schemaString += `  $updatedAt: z.date().or(z.string()).optional(),\n`;
   for (const attribute of attributes) {
+    if (attribute.type === "relationship") {
+      continue;
+    }
     schemaString += `  ${attribute.key}: ${typeToZod(attribute)},\n`;
   }
   schemaString += `});\n\n`;
+  schemaString += `export type ${pascalName}Base = z.infer<typeof ${pascalName}SchemaBase>`;
+  if (relatedTypes.length > 0) {
+    schemaString += ` & {\n  ${relatedTypes}};\n\n`;
+  } else {
+    schemaString += `;\n\n`;
+  }
+  schemaString += `export const ${pascalName}Schema: z.ZodType<${pascalName}Base> = ${pascalName}SchemaBase`;
+  if (relatedTypes.length > 0) {
+    schemaString += `.extend({\n  ${relatedTypesLazy}});\n\n`;
+  } else {
+    schemaString += `;\n`;
+  }
   schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
-  schemaString += `export const ${pascalName}CreateSchema = ${pascalName}Schema.omit({\n`;
-  schemaString += `  $id: true,\n`;
-  schemaString += `  $createdAt: true,\n`;
-  schemaString += `  $updatedAt: true,\n`;
-  schemaString += `});\n\n`;
   schemaString += `export const get${pascalName}MockData = (numMocks: number = 1) => {\n`;
-  schemaString += `  const mocksGenerated: ${pascalName}Create[] = [];\n`;
+  schemaString += `  const mocksGenerated: ${pascalName}[] = [];\n`;
   schemaString += `  for (let i = 0; i < numMocks; i++) {\n`;
-  schemaString += `    mocksGenerated.push(generateMock(${pascalName}CreateSchema, { seed: i }));\n`;
+  schemaString += `    mocksGenerated.push(generateMock(${pascalName}Schema, { seed: i }));\n`;
   schemaString += `  }\n`;
   schemaString += `  return mocksGenerated;\n`;
   schemaString += `};\n\n`;
-  schemaString += `export type ${pascalName}Create = z.infer<typeof ${pascalName}CreateSchema>;\n\n`;
   return schemaString;
 };
 
@@ -548,7 +581,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default("${attribute.xdefault}")`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -563,7 +596,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default(${attribute.xdefault})`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -578,7 +611,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default(${attribute.xdefault})`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -587,7 +620,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default(${attribute.xdefault})`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -596,7 +629,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default(new Date("${attribute.xdefault}"))`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -605,7 +638,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default("${attribute.xdefault}")`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -614,7 +647,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default("${attribute.xdefault}")`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -623,7 +656,7 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default("${attribute.xdefault}")`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
@@ -634,19 +667,21 @@ export const typeToZod = (attribute: Attribute) => {
       if (attribute.xdefault !== undefined) {
         baseSchemaCode += `.default("${attribute.xdefault}")`;
       }
-      if (!attribute.required) {
+      if (!attribute.required && !attribute.array) {
         baseSchemaCode += ".nullish()";
       }
       break;
     case "relationship":
-      const relatedSchemaName =
-        toPascalCase(attribute.relatedCollection) + "Schema";
-      baseSchemaCode = `z.lazy(() => ${relatedSchemaName}`;
-      if (attribute.required) {
-        baseSchemaCode += ")";
-      } else {
-        baseSchemaCode += ".nullish())";
-      }
+      // const relatedSchemaName =
+      //   toCamelCase(attribute.relatedCollection) + "Schema";
+      // baseSchemaCode = `z.lazy(() => ${relatedSchemaName}`;
+      // if (attribute.array) {
+      //   baseSchemaCode += `.array()`;
+      // }
+      // if (!attribute.required && !attribute.array) {
+      //   baseSchemaCode += ".nullish()";
+      // }
+      // baseSchemaCode += ")";
       break;
     default:
       baseSchemaCode = "z.any()";
@@ -654,7 +689,10 @@ export const typeToZod = (attribute: Attribute) => {
 
   // Handle arrays
   if (attribute.array) {
-    baseSchemaCode = `z.array(${baseSchemaCode}).default([])`;
+    baseSchemaCode = `z.array(${baseSchemaCode})`;
+  }
+  if (attribute.array && !attribute.required) {
+    baseSchemaCode += ".nullish()";
   }
 
   return baseSchemaCode;

@@ -6,11 +6,8 @@ import {
   type Models,
   ID,
 } from "node-appwrite";
-import {
-  type BackupCreate,
-  BackupCreateSchema,
-  type OperationCreate,
-} from "./schema";
+import { type OperationCreate, type BackupCreate } from "./schema";
+import { splitIntoBatches } from "./migrationHelper";
 
 export const logOperation = async (
   db: Databases,
@@ -60,6 +57,32 @@ export const initOrGetBackupStorage = async (storage: Storage) => {
   }
 };
 
+async function retryFailedPromises(
+  batch: Promise<Models.Document>[],
+  maxRetries = 3
+) {
+  const results = await Promise.allSettled(batch);
+  const toRetry: Promise<any>[] = [];
+
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error("Promise rejected with reason:", result.reason);
+      if (maxRetries > 0) {
+        toRetry.push(batch[index]);
+      }
+    }
+  });
+
+  if (toRetry.length > 0) {
+    console.log(`Retrying ${toRetry.length} promises`);
+    return retryFailedPromises(toRetry, maxRetries - 1);
+  } else {
+    return results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result);
+  }
+}
+
 export const backupDatabase = async (
   database: Databases,
   databaseId: string,
@@ -73,10 +96,11 @@ export const backupDatabase = async (
     collections: [],
     documents: [],
   };
+
   const backupOperation = await logOperation(database, databaseId, {
     operationType: "backup",
     collectionId: "",
-    data: JSON.stringify(data, undefined, 4),
+    data: "Starting backup...",
     progress: 0,
     total: 100, // This will be dynamically updated later
     error: "",
@@ -95,7 +119,7 @@ export const backupDatabase = async (
       {
         operationType: "backup",
         collectionId: "",
-        data: JSON.stringify(data, undefined, 4),
+        data: "Error fetching database, skipping...",
         progress: 0,
         total: 100, // This will be dynamically updated later
         error: `Error fetching database: ${e}`,
@@ -115,7 +139,7 @@ export const backupDatabase = async (
 
   while (moreCollections) {
     const collectionResponse = await database.listCollections(databaseId, [
-      Query.limit(150), // Adjust the limit as needed
+      Query.limit(500), // Adjust the limit as needed
       ...(lastCollectionId ? [Query.cursorAfter(lastCollectionId)] : []),
     ]);
 
@@ -143,26 +167,31 @@ export const backupDatabase = async (
             databaseId,
             collectionId,
             [
-              Query.limit(150), // Adjust the limit as needed
+              Query.limit(500), // Adjust the limit as needed
               ...(lastDocumentId ? [Query.cursorAfter(lastDocumentId)] : []),
             ]
           );
 
           total += documentResponse.documents.length; // Update total with number of documents
           collectionDocumentCount += documentResponse.documents.length; // Update document count for the current collection
-
+          let documentPromises: Promise<Models.Document>[] = [];
           for (const { $id: documentId } of documentResponse.documents) {
-            const document = await database.getDocument(
-              databaseId,
-              collectionId,
-              documentId
+            documentPromises.push(
+              database.getDocument(databaseId, collectionId, documentId)
             );
-            progress++;
-            data.documents.push({
-              collectionId: collectionId,
-              data: JSON.stringify(document),
-            });
           }
+          const promiseBatches = splitIntoBatches(documentPromises);
+          const documentsPulled = [];
+          for (const batch of promiseBatches) {
+            const successfulDocuments = await retryFailedPromises(batch);
+            documentsPulled.push(...successfulDocuments);
+          }
+          const documents = documentsPulled;
+          data.documents.push({
+            collectionId: collectionId,
+            data: JSON.stringify(documents),
+          });
+          progress += documents.length;
 
           console.log(
             `Collection ${collectionName} backed up ${collectionDocumentCount} documents (so far)`
@@ -185,7 +214,7 @@ export const backupDatabase = async (
           );
 
           // Check if there are more documents to fetch
-          moreDocuments = documentResponse.documents.length === 150;
+          moreDocuments = documentResponse.documents.length === 500;
           if (moreDocuments) {
             lastDocumentId =
               documentResponse.documents[documentResponse.documents.length - 1]
@@ -196,13 +225,15 @@ export const backupDatabase = async (
           `Collection ${collectionName} backed up with ${collectionDocumentCount} documents.`
         );
       } catch (error) {
-        console.log("Collection must not exist, continuing...");
+        console.log(
+          `Collection ${collectionName} must not exist, continuing...`
+        );
         continue;
       }
     }
 
     // Check if there are more collections to fetch
-    moreCollections = collectionResponse.collections.length === 150;
+    moreCollections = collectionResponse.collections.length === 500;
     if (moreCollections) {
       lastCollectionId =
         collectionResponse.collections[
