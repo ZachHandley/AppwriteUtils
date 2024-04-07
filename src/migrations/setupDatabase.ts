@@ -1,15 +1,23 @@
-import { Databases, Query, Storage, type Models } from "node-appwrite";
+import { Databases, ID, Query, Storage, type Models } from "node-appwrite";
 import { createOrUpdateAttribute } from "./attributes";
-import { initOrUpdateCollections } from "./collections";
-import { getMigrationCollectionSchemas } from "./schema";
+import {
+  createOrUpdateCollections,
+  generateSchemas,
+  initOrUpdateCollections,
+  wipeDatabase,
+} from "./collections";
+import { getMigrationCollectionSchemas } from "./backup";
 import { toCamelCase } from "@/utils";
-import { initOrGetBackupStorage } from "./storage";
+import { backupDatabase, initOrGetBackupStorage } from "./storage";
+import { type AppwriteConfig } from "./schema";
+import type { SetupOptions } from "@/utilsController";
 
-export const setupMigrationDatabase = async (database: Databases) => {
+export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   // Create the migrations database if needed
   console.log("---------------------------------");
   console.log("Starting Migrations Setup");
   console.log("---------------------------------");
+  const database = new Databases(config.appwriteClient!);
   let db: Models.Database | null = null;
   const dbCollections: Models.Collection[] = [];
   const migrationCollectionsSetup = getMigrationCollectionSchemas();
@@ -64,120 +72,86 @@ export const setupMigrationDatabase = async (database: Databases) => {
   console.log("---------------------------------");
 };
 
-interface SetupOptions {
-  runMain: boolean;
-  wipeDatabases: boolean;
-  generateSchemas: boolean;
-  generateMockData: boolean;
-  importData: boolean;
-  checkDuplicates: boolean;
-}
+export const ensureDatabasesExist = async (config: AppwriteConfig) => {
+  const database = new Databases(config.appwriteClient);
+  const databasesToEnsure = config.databases;
+  databasesToEnsure.push({
+    $id: "migrations",
+    name: "Migrations",
+  });
+  const dbNames = databasesToEnsure.map((db) => db.name);
 
-async function ensureDatabasesExist(database: Databases, runMain: boolean) {
-  const databasesToEnsure = ["dev", "migrations"];
-  if (runMain) {
-    databasesToEnsure.push("main");
-  }
+  const existingDatabases = await database.list([Query.equal("name", dbNames)]);
 
-  const existingDatabases = await database.list([
-    Query.equal("$id", databasesToEnsure),
-  ]);
-
-  const existingDatabaseIds = existingDatabases.databases.map((db) => db.$id);
-
-  for (const dbId of databasesToEnsure) {
-    if (!existingDatabaseIds.includes(dbId)) {
-      let name = dbId.charAt(0).toUpperCase() + dbId.slice(1);
-      if (dbId === "dev") {
-        name = "Development";
-      }
-      await database.create(dbId, name, true);
-      console.log(`${dbId} database created`);
+  for (const db of databasesToEnsure) {
+    if (!existingDatabases.databases.some((d) => d.name === db.name)) {
+      await database.create(db.$id || ID.unique(), db.name, true);
+      console.log(`${db.name} database created`);
     }
   }
-}
+};
 
-async function wipeOtherDatabases(database: Databases) {
-  const databasesToKeep = ["dev", "main", "migrations"];
-  const allDatabases = await database.list();
+export const wipeOtherDatabases = async (
+  database: Databases,
+  config: AppwriteConfig
+) => {
+  const databasesToKeep = config.databases.map((db) => db.name);
+  databasesToKeep.push("migrations");
+  const allDatabases = await database.list([
+    Query.notEqual("name", databasesToKeep),
+  ]);
   for (const db of allDatabases.databases) {
-    if (!databasesToKeep.includes(db.$id)) {
+    if (!databasesToKeep.includes(db.name)) {
       await database.delete(db.$id);
       console.log(`Deleted database: ${db.name}`);
     }
   }
-}
+};
 
-export async function performDatabaseSetupActions(
+export const startSetup = async (
   database: Databases,
   storage: Storage,
-  options: SetupOptions
-) {
-  const {
-    runMain,
-    wipeDatabases,
-    generateSchemas,
-    generateMockData,
-    importData,
-    checkDuplicates,
-  } = options;
+  config: AppwriteConfig,
+  setupOptions: SetupOptions
+) => {
+  await setupMigrationDatabase(config);
 
-  await ensureDatabasesExist(database, runMain);
-  await setupMigrationDatabase(database);
-
-  if (wipeDatabases) {
-    await wipeOtherDatabases(database);
-    await initOrUpdateCollections(
-      database,
-      storage,
-      "dev",
-      true,
-      false,
-      false,
-      false,
-      false
-    );
-    if (runMain) {
-      await initOrUpdateCollections(
-        database,
-        storage,
-        "main",
-        true,
-        false,
-        false,
-        false,
-        false
-      );
-    }
+  if (config.enableBackups) {
+    await initOrGetBackupStorage(storage);
   }
-
-  // Assuming initOrGetBackupStorage is a function that initializes or retrieves backup storage
-  await initOrGetBackupStorage(storage);
-
-  // Assuming initOrUpdateCollections is a function that initializes or updates collections
-  // This is a placeholder for where you would implement generating schemas, mock data, and importing data
-  if (generateSchemas || generateMockData || importData) {
-    await initOrUpdateCollections(
-      database,
-      storage,
-      "dev",
-      wipeDatabases,
-      generateSchemas,
-      generateMockData,
-      importData,
-      checkDuplicates
-    );
-    if (runMain) {
-      await initOrUpdateCollections(
-        database,
-        storage,
-        "main",
-        wipeDatabases,
-        generateSchemas,
-        generateMockData,
-        importData,
-        checkDuplicates
-      );
-    }
+  if (config.enableWipeOtherDatabases) {
+    await wipeOtherDatabases(database, config);
   }
-}
+  await ensureDatabasesExist(config);
+
+  for (const db of config.databases) {
+    console.log(`---------------------------------`);
+    console.log(`Starting setup for database: ${db.name}`);
+    console.log(`---------------------------------`);
+    let deletedCollections:
+      | { collectionId: string; collectionName: string }[]
+      | undefined;
+    if (setupOptions.wipeDatabases) {
+      if (config.enableBackups) {
+        await backupDatabase(database, db.$id, storage);
+      }
+      deletedCollections = await wipeDatabase(database, db.$id);
+    }
+    if (setupOptions.generateSchemas) {
+      await generateSchemas(config.collections);
+    }
+    await createOrUpdateCollections(
+      database,
+      db.$id,
+      config,
+      deletedCollections
+    );
+    deletedCollections = undefined;
+    if (setupOptions.importData) {
+      // TODO: Figure out data importing
+    }
+    console.log(`---------------------------------`);
+    console.log(`Finished setup for database: ${db.name}`);
+    console.log(`---------------------------------`);
+  }
+};

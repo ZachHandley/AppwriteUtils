@@ -1,4 +1,8 @@
-import type { Attribute, RelationshipAttribute } from "./schema";
+import type {
+  AppwriteConfig,
+  Attribute,
+  RelationshipAttribute,
+} from "./schema";
 
 // Helper function to categorize collections based on relationship sides
 export const categorizeCollectionByRelationshipSide = (
@@ -33,7 +37,9 @@ export const getDependencies = (attributes: Attribute[]): string[] => {
 };
 
 // Function to sort collections based on dependencies and relationship sides
-export const sortCollections = (configCollections: any[]): any[] => {
+export const sortCollections = (
+  configCollections: AppwriteConfig["collections"]
+): AppwriteConfig["collections"] => {
   // Categorize collections based on their relationship sides
   const parentCollections = configCollections.filter(
     ({ attributes }) =>
@@ -58,7 +64,8 @@ export const sortCollections = (configCollections: any[]): any[] => {
   });
 
   // Combine them back into a single array with the desired order
-  return [...parentCollections, ...mixedCollections, ...childCollections];
+  // Children first because they have no dependencies and parents will create the relationship if it's twoWay
+  return [...childCollections, ...parentCollections, ...mixedCollections];
 };
 
 // Function to sort attributes within a collection based on relationship sides
@@ -76,6 +83,7 @@ export const sortAttributesByRelationshipSide = (
     (attr) => attr.type !== "relationship"
   );
 
-  // Combine them back into a single array with parent attributes first, then other attributes, and child attributes last
-  return [...parentAttributes, ...otherAttributes, ...childAttributes];
+  // Combine them back into a single array with child attributes first, then other attributes, and parent attributes last
+  // as parent attributes will create the relationship with the child if needed
+  return [...childAttributes, ...otherAttributes, ...parentAttributes];
 };

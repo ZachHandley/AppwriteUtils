@@ -11,14 +11,15 @@ import {
   type CollectionCreate,
   type Collection,
   type Attribute,
-  createSchemaString,
   attributeSchema,
+} from "./schema";
+import { createSchemaString } from "./schemaStrings";
+import {
   type OperationCreate,
   OperationCreateSchema,
   OperationSchema,
   BatchSchema,
-  type RelationshipAttribute,
-} from "./schema";
+} from "./backup";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -44,6 +45,10 @@ import {
 } from "./migrationHelper";
 import { globallyConvertAll } from "./conversions";
 import { resolveAndUpdateRelationships } from "./relationships";
+import { type AppwriteConfig } from "./schema";
+import type { SetupOptions } from "@/utilsController";
+import { createOrUpdateIndexes } from "./indexes";
+import { ImportDataActions } from "./importDataActions";
 
 // Derive __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -57,12 +62,12 @@ function isDependencyResolved(collectionName: string): boolean {
 const checkForCollection = async (
   db: Databases,
   dbId: string,
-  collection: CollectionCreate
+  collection: Partial<CollectionCreate>
 ): Promise<Models.Collection | null> => {
   try {
     console.log(`Checking for collection with name: ${collection.name}`);
     const response = await db.listCollections(dbId, [
-      Query.equal("name", collection.name),
+      Query.equal("name", collection.name!),
     ]);
     if (response.collections.length > 0) {
       console.log(`Collection found: ${response.collections[0].$id}`);
@@ -77,7 +82,7 @@ const checkForCollection = async (
   }
 };
 
-const wipeDatabase = async (
+export const wipeDatabase = async (
   database: Databases,
   databaseId: string
 ): Promise<{ collectionId: string; collectionName: string }[]> => {
@@ -98,11 +103,10 @@ const wipeDatabase = async (
   return collectionsDeleted;
 };
 
-const generateSchemas = async (
-  configCollections: any[],
-  databaseId: string
+export const generateSchemas = async (
+  configCollections: AppwriteConfig["collections"]
 ): Promise<void> => {
-  for (const { collection, attributes } of configCollections) {
+  for (const { attributes, ...collection } of configCollections) {
     console.log(`Processing schema for collection: ${collection.name}`);
     const camelCaseName = toCamelCase(collection.name);
     const schemaName = toPascalCase(collection.name);
@@ -115,13 +119,14 @@ const generateSchemas = async (
   }
 };
 
-const createOrUpdateCollections = async (
+export const createOrUpdateCollections = async (
   database: Databases,
   databaseId: string,
-  configCollections: any[],
+  config: AppwriteConfig,
   deletedCollections?: { collectionId: string; collectionName: string }[]
 ): Promise<void> => {
-  for (const { collection, attributes } of configCollections) {
+  const configCollections = config.collections;
+  for (const { attributes, indexes, ...collection } of configCollections) {
     let collectionsFound = await database.listCollections(databaseId, [
       Query.equal("name", collection.name),
     ]);
@@ -174,6 +179,12 @@ const createOrUpdateCollections = async (
     } else {
       console.log(`Collection ${collection.name} already exists.`);
     }
+    await createOrUpdateIndexes(
+      databaseId,
+      database,
+      collectionToUse.$id,
+      indexes
+    );
     await createUpdateCollectionAttributes(
       database,
       databaseId,
@@ -210,13 +221,15 @@ const documentsWithRelationships = new Map<string, Models.Document[]>();
 
 const importData = async (
   database: Databases,
+  storage: Storage,
   databaseId: string,
-  configCollections: any[]
+  config: AppwriteConfig,
 ): Promise<void> => {
   // let relationshipInfo: Record<string, any[]> = {};
   await globallyConvertAll();
-  for (const { collection, attributes, convertFunction } of configCollections) {
-    if (!convertFunction) continue;
+  for (const { attributes, importDefs, ...collection } of config.collections) {
+    if (!importDefs) continue;
+    const importDataActions = new ImportDataActions(database, storage, config)
 
     // Identify if the collection has a relationship with any other collection
     const hasRelationship = attributes.some(
@@ -245,7 +258,7 @@ const importData = async (
       if (!operation.batches) {
         operation.batches = [];
       }
-      const dataToImport = await convertFunction();
+      const dataToImport = await importDataActions.;
       total = dataToImport.length;
       processed = 0;
       const batches = splitIntoBatches(dataToImport);
@@ -355,7 +368,9 @@ const importData = async (
       // Mark batch as processed and cleanup
       await database.deleteDocument("migrations", "batches", batchId);
       // Update the operation's batches array because it contains the batchId
-      operation.batches = operation.batches.filter((id) => id !== batchId);
+      operation.batches = operation.batches.filter(
+        (id: string) => id !== batchId
+      );
 
       await updateOperation(database, operation.$id, {
         batches: operation.batches,
@@ -443,22 +458,23 @@ export const initOrUpdateCollections = async (
   database: Databases,
   storage: Storage,
   databaseId: string,
-  shouldWipeDb: boolean = false,
-  generateSchemasFlag: boolean = false,
-  shouldGenerateMockData: boolean = false,
-  shouldImportData: boolean = false,
-  checkDuplicates: boolean = false
+  config: AppwriteConfig,
+  setupOptions: SetupOptions
 ): Promise<void> => {
-  const configCollections: any[] = Object.values(COLLECTIONS_CONFIG);
+  const configCollections = config.collections;
   const sortedCollections = sortCollections(configCollections);
-  if (shouldWipeDb || shouldGenerateMockData || shouldImportData) {
+  if (
+    setupOptions.wipeDatabases ||
+    setupOptions.generateMockData ||
+    setupOptions.importData
+  ) {
     await backupDatabase(database, databaseId, storage);
   }
 
   let deletedCollections:
     | { collectionId: string; collectionName: string }[]
     | undefined;
-  if (shouldWipeDb) {
+  if (setupOptions.wipeDatabases) {
     console.log("---------------------------------");
     console.log("Starting Wipe Databases");
     console.log("---------------------------------");
@@ -468,11 +484,11 @@ export const initOrUpdateCollections = async (
     console.log("Finished Wipe Databases");
     console.log("---------------------------------");
   }
-  if (generateSchemasFlag) {
+  if (setupOptions.generateSchemas) {
     console.log("---------------------------------");
     console.log("Starting Generate Schemas");
     console.log("---------------------------------");
-    await generateSchemas(sortedCollections, databaseId);
+    await generateSchemas(sortedCollections);
 
     console.log("---------------------------------");
     console.log("Finished Generate Schemas");
@@ -485,14 +501,14 @@ export const initOrUpdateCollections = async (
   await createOrUpdateCollections(
     database,
     databaseId,
-    sortedCollections,
+    config,
     deletedCollections
   );
   console.log("---------------------------------");
   console.log("Finished Create/Update Collections");
   console.log("---------------------------------");
 
-  if (shouldGenerateMockData) {
+  if (setupOptions.generateMockData) {
     console.log("---------------------------------");
     console.log("Starting Generate Mock Data");
     console.log("---------------------------------");
@@ -503,12 +519,12 @@ export const initOrUpdateCollections = async (
     console.log("Finished Generate Mock Data");
     console.log("---------------------------------");
   }
-  if (shouldImportData) {
+  if (setupOptions.importData) {
     console.log("---------------------------------");
     console.log("Starting Import Data");
     console.log("---------------------------------");
 
-    await importData(database, databaseId, sortedCollections);
+    await importData(database, storage, databaseId, config);
     console.log("---------------------------------");
     console.log("Finished Import Data");
     console.log("---------------------------------");
@@ -523,7 +539,7 @@ export const initOrUpdateCollections = async (
     console.log("---------------------------------");
   }
 
-  if (checkDuplicates) {
+  if (setupOptions.checkDuplicates) {
     console.log("---------------------------------");
     console.log("Starting Check Duplicates");
     console.log("---------------------------------");

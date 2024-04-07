@@ -1,4 +1,4 @@
-# AppwriteMigrations
+# AppwriteUtils
 
 The AppwriteMigrations project is designed to facilitate the migration of data and schema for Appwrite projects. It includes a comprehensive setup for managing database migrations, including creating and updating collections, attributes, and handling data conversions. The project structure and key components are outlined below:
 
