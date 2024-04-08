@@ -7,18 +7,8 @@ import {
 } from "node-appwrite";
 import type { AppwriteConfig } from "./schema";
 import validationRules from "./validationRules";
-import {
-  anyToString,
-  anyToNumber,
-  anyToBoolean,
-  anyToAnyArray,
-  safeParseDate,
-  deepAnyToString,
-  deepConvert,
-  convertObjectBySchema,
-  immutableConvert,
-  validateString,
-} from "./converters";
+import { converterFunctions, convertObjectBySchema } from "./converters";
+import { afterImportActions } from "./afterImportActions";
 
 type AttributeMappings =
   AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];
@@ -27,53 +17,39 @@ export class ImportDataActions {
   private db: Databases;
   private storage: Storage;
   private config: AppwriteConfig;
-  converterFunctions: {
-    [key: string]: (
-      value: any,
-      context?: { [key: string]: any }
-    ) => any | any[];
-  } = {
-    anyToString,
-    anyToNumber,
-    anyToBoolean,
-    deepAnyToString,
-    safeParseDate,
-  };
+
   constructor(db: Databases, storage: Storage, config: AppwriteConfig) {
     this.db = db;
     this.storage = storage;
     this.config = config;
   }
 
-  async runConverterFunctions(
-    dataItems: any[], // Consider typing this more specifically if possible
-    attributeMappings: AttributeMappings,
-    context: { [key: string]: any }
-  ) {
-    dataItems.forEach((item) => {
-      const conversionSchema = Object.entries(attributeMappings).reduce(
-        (schema, [key, { oldKey, targetKey, converters }]) => {
-          schema[targetKey] = (originalValue: any) => {
-            return converters.reduce((value, converterName) => {
-              const converterFunction = this.converterFunctions[converterName];
-              if (converterFunction) {
-                return converterFunction(value, context);
-              } else {
-                console.warn(
-                  `Converter function '${converterName}' is not defined.`
-                );
-                return value;
-              }
-            }, item[oldKey]);
-          };
-          return schema;
-        },
-        {} as Record<string, (value: any) => any>
-      );
+  async runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
+    const conversionSchema = attributeMappings.reduce((schema, mapping) => {
+      schema[mapping.targetKey] = (originalValue: any) => {
+        return mapping.converters.reduce((value, converterName) => {
+          const converterFunction =
+            converterFunctions[
+              converterName as keyof typeof converterFunctions
+            ];
+          if (converterFunction) {
+            return converterFunction(value);
+          } else {
+            console.warn(
+              `Converter function '${converterName}' is not defined.`
+            );
+            return value;
+          }
+        }, originalValue);
+      };
+      return schema;
+    }, {} as Record<string, (value: any) => any>);
 
-      const convertedItem = convertObjectBySchema(item, conversionSchema);
-      Object.assign(item, convertedItem);
-    });
+    // Convert the item using the constructed schema
+    const convertedItem = convertObjectBySchema(item, conversionSchema);
+    // Merge the converted item back into the original item object
+    Object.assign(item, convertedItem);
+    return item;
   }
 
   /**
@@ -87,8 +63,8 @@ export class ImportDataActions {
     attributeMap: AttributeMappings,
     context: { [key: string]: any }
   ): Promise<boolean> {
-    for (const [key, value] of Object.entries(attributeMap)) {
-      const { validationActions } = value;
+    for (const mapping of attributeMap) {
+      const { validationActions } = mapping;
       if (
         !validationActions ||
         !Array.isArray(validationActions) ||
@@ -129,6 +105,83 @@ export class ImportDataActions {
     return true; // The item passed all validations
   }
 
+  async executeAfterImportActions(
+    item: any,
+    attributeMap: AttributeMappings,
+    context: { [key: string]: any }
+  ): Promise<void> {
+    for (const mapping of attributeMap) {
+      console.log(
+        `Processing post-import actions for attribute: ${mapping.targetKey}`
+      );
+      const { postImportActions } = mapping;
+      if (!postImportActions || !Array.isArray(postImportActions)) {
+        console.warn(
+          `No post-import actions defined for attribute: ${mapping.targetKey}`,
+          postImportActions
+        );
+        continue; // Skip to the next attribute if no actions are defined
+      }
+      for (const actionDef of postImportActions) {
+        const { action, params } = actionDef;
+        console.log(
+          `Executing post-import action '${action}' for attribute '${
+            mapping.targetKey
+          }' with params ${params.join(", ")}...`
+        );
+        try {
+          await this.executeAction(action, params, context, item);
+        } catch (error) {
+          console.error(
+            `Failed to execute post-import action '${action}' for attribute '${mapping.targetKey}':`,
+            error
+          );
+          throw error; // Rethrow the error to stop the import process
+        }
+      }
+    }
+  }
+
+  async executeAction(
+    actionName: string,
+    params: string[],
+    context: { [key: string]: any },
+    item: any
+  ): Promise<void> {
+    const actionMethod =
+      afterImportActions[actionName as keyof typeof afterImportActions];
+    console.log(
+      `Executing after-import action '${actionName}' with params ${params.join(
+        ", "
+      )}...`
+    );
+    if (typeof actionMethod === "function") {
+      try {
+        // Resolve string templates in params
+        const resolvedParams = params.map((param) =>
+          this.resolveTemplate(param, context, item)
+        );
+        console.log(
+          `Resolved parameters for action '${actionName}': ${resolvedParams.join(
+            ", "
+          )}`
+        );
+        // Execute the action with resolved parameters
+        // Use 'any' type assertion to bypass TypeScript's strict type checking
+        await (actionMethod as any)(this.config, ...resolvedParams);
+        console.log(`Action '${actionName}' executed successfully.`);
+      } catch (error: any) {
+        console.error(`Error executing action '${actionName}':`, error);
+        throw new Error(
+          `Execution failed for action '${actionName}': ${error.message}`
+        );
+      }
+    } else {
+      console.warn(`Action '${actionName}' is not defined.`);
+      throw new Error(`Action '${actionName}' is not defined.`);
+    }
+  }
+
   /**
    * Resolves a templated string using the provided context and current data item.
    * @param template The templated string.
@@ -145,208 +198,5 @@ export class ImportDataActions {
       return item[key] ?? context[key] ?? template; // Fallback to template if neither item nor context has the key
     }
     return template;
-  }
-
-  async executeAfterImportActions(
-    item: any,
-    attributeMap: AttributeMappings,
-    context: { [key: string]: any }
-  ): Promise<void> {
-    for (const [key, value] of Object.entries(attributeMap)) {
-      const { postImportActions } = value;
-      if (!postImportActions || !Array.isArray(postImportActions)) {
-        console.warn(`No post-import actions defined for attribute: ${key}`);
-        continue; // Skip to the next attribute if no actions are defined
-      }
-      for (const actionDef of postImportActions) {
-        const { action, params } = actionDef;
-        try {
-          await this.executeAction(action, params, context, item);
-        } catch (error) {
-          console.error(
-            `Failed to execute post-import action '${action}' for attribute '${key}':`,
-            error
-          );
-          throw error; // Rethrow the error to stop the import process
-        }
-      }
-    }
-  }
-
-  async executeAction(
-    actionName: string,
-    params: string[],
-    context: { [key: string]: any },
-    item: any
-  ): Promise<void> {
-    const resolvedParams = params.map((param) =>
-      this.resolveTemplate(param, context, item)
-    );
-
-    const actionMethod = (this as any)[actionName];
-    if (typeof actionMethod === "function") {
-      try {
-        await actionMethod.apply(this, [...resolvedParams, item]);
-      } catch (error: any) {
-        console.error(`Error executing action '${actionName}':`, error);
-        throw new Error(
-          `Execution failed for action '${actionName}': ${error.message}`
-        );
-      }
-    } else {
-      console.warn(`Action '${actionName}' is not defined.`);
-      throw new Error(`Action '${actionName}' is not defined.`);
-    }
-  }
-
-  /**
-   * Update a document in the database with new data (a dict or anything) after import has been completed
-   * @param dbId The ID of the database
-   * @param collId The ID of the collection
-   * @param docId The ID of the document
-   * @param data The data to update
-   */
-  async updateCreatedDocument(
-    dbId: string,
-    collId: string,
-    docId: string,
-    data: any
-  ) {
-    try {
-      await this.db.updateDocument(dbId, collId, docId, data);
-    } catch (error) {
-      console.error("Error updating document: ", error);
-    }
-  }
-
-  /**
-   * Update a document's field in the database with new data after import has been completed
-   * @param dbId The ID of the database
-   * @param collId The ID of the collection
-   * @param docId The ID of the document
-   * @param fieldName The name of the field to update
-   * @param oldFieldValue The old value of the field
-   * @param newFieldValue The new value of the field
-   */
-  async checkAndUpdateFieldInDocument(
-    dbId: string,
-    collId: string,
-    docId: string,
-    fieldName: string,
-    oldFieldValue: any,
-    newFieldValue: any
-  ) {
-    try {
-      const doc = await this.db.getDocument(dbId, collId, docId);
-      if (doc[fieldName as keyof typeof doc] == oldFieldValue) {
-        await this.db.updateDocument(dbId, collId, docId, {
-          [fieldName]: newFieldValue,
-        });
-      }
-    } catch (error) {
-      console.error("Error updating document: ", error);
-    }
-  }
-
-  /**
-   * Create a bucket or get it if it already exists
-   * @param bucketName The name of the bucket
-   * @param bucketId The ID of the bucket
-   * @param permisions The permissions of the bucket
-   * @param fileSecurity The file security of the bucket
-   * @param enabled The enabled status of the bucket
-   * @param maxFileSize The maximum file size of the bucket
-   * @param allowedExtensions The allowed extensions of the bucket
-   * @param compression The compression of the bucket
-   * @param encryption The encryption of the bucket
-   * @param antivirus The antivirus of the bucket
-   */
-  async createOrGetBucket(
-    bucketName: string,
-    bucketId?: string,
-    permisions?: string[],
-    fileSecurity?: boolean,
-    enabled?: boolean,
-    maxFileSize?: number,
-    allowedExtensions?: string[],
-    compression?: string,
-    encryption?: boolean,
-    antivirus?: boolean
-  ) {
-    try {
-      const bucket = await this.storage.listBuckets([
-        Query.equal("name", bucketName),
-      ]);
-      if (bucket.buckets.length > 0) {
-        return bucket.buckets[0];
-      } else if (bucketId) {
-        try {
-          return await this.storage.getBucket(bucketId);
-        } catch (error) {
-          // This means that the ID was the wanted ID, but the bucket was not found
-          return await this.storage.createBucket(
-            bucketId,
-            bucketName,
-            permisions,
-            fileSecurity,
-            enabled,
-            maxFileSize,
-            allowedExtensions,
-            compression,
-            encryption,
-            antivirus
-          );
-        }
-      } else {
-        return await this.storage.createBucket(
-          bucketId || ID.unique(),
-          bucketName,
-          permisions,
-          fileSecurity,
-          enabled,
-          maxFileSize,
-          allowedExtensions,
-          compression,
-          encryption,
-          antivirus
-        );
-      }
-    } catch (error) {
-      console.error("Error creating bucket: ", error);
-    }
-  }
-
-  /**
-   * Create a file and update a document's field with the file's ID, for use with for instance
-   * uploading a file to a storage bucket and then updating the document with the file's ID
-   * @param dbId The ID of the database
-   * @param collId The ID of the collection
-   * @param docId The ID of the document
-   * @param fieldName The name of the field to update
-   * @param bucketId The ID of the bucket
-   * @param filePath The path of the file
-   */
-  async createFileAndUpdateField(
-    dbId: string,
-    collId: string,
-    docId: string,
-    fieldName: string,
-    bucketId: string,
-    filePath: string,
-    fileName: string
-  ) {
-    try {
-      const inputFile = InputFile.fromPath(filePath, fileName);
-      const file = await this.storage.createFile(
-        bucketId,
-        ID.unique(),
-        inputFile
-      );
-      await this.db.updateDocument(dbId, collId, docId, {
-        [fieldName]: file.$id,
-      });
-    } catch (error) {
-      console.error("Error creating file: ", error);
-    }
   }
 }

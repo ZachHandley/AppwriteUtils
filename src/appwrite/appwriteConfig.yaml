@@ -1,4 +1,4 @@
-# appwriteConfig.yaml
+# yaml-language-server: $schema=./.appwrite/appwriteUtilsConfigSchema.json
 appwriteEndpoint: 'https://cloud.appwrite.io/v1' # Your Appwrite endpoint
 appwriteProject: 'YOUR_PROJECT_ID' # Your Appwrite project
 appwriteKey: 'YOUR_API_KEY' # Your Appwrite API key (needs storage and databases at minimum)
@@ -19,42 +19,115 @@ databases:
   - $id: 'dev'
     name: 'Development'
 collections:
-  - $id: 'exampleCollection'
-    name: 'Example Collection'
+  - name: 'Members'
     $permissions:
-      read:
-        - any
-      create:
-        - users
-      update:
-        - users
-      delete:
-        - users
+      - permission: read
+        target: any
+      - permission: create
+        target: users
+      - permission: update
+        target: users
+      - permission: delete
+        target: users
     attributes:
       - key: 'name'
         type: 'string'
-        size: 50
+        size: 255
         required: true
+      - key: 'email'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'idOrig'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'dogs'
+        type: 'relationship'
+        relatedCollection: 'Dogs'
+        relationType: 'oneToMany'
+        twoWay: true
+        twoWayKey: 'owner'
+        side: 'parent'
+        onDelete: 'cascade'
+        importMapping: { originalIdField: 'idOrig', targetField: 'ownerIdOrig' }
+      - key: 'dogIds'
+        type: 'string'
+        size: 255
+        array: true
     indexes:
       - key: 'name_index'
         type: 'key'
         attributes: ['name']
     importDefs:
-      - filePath: 'path/to/your/data.json'
+      - filePath: 'importData/members.json'
         basePath: 'RECORDS'
         attributeMappings:
-          _id:
-            oldKey: '_id'
-            targetKey: 'oldId'
-            converters: ['anyNumToString']
-            postImportActions: ['checkAndUpdateFieldInDocument']
-          someName:
-            oldKey: 'someName'
+          - oldKey: 'id'
+            targetKey: 'idOrig'
+            converters: ['anyToString']
+            postImportActions:
+              - action: 'updateCreatedDoc'
+                params:
+                  - "{dbId}"
+                  - "{collectionId}"
+                  - "{createdDocId}"
+                  - { key: "ownerIdOrig", value: "{createdDocId}"}
+          - oldKey: 'name'
             targetKey: 'name'
-            converters: []
-            validationActions: ['checkStringLength']
-          councilId:
-            oldKey: 'councilId'
-            targetKey: 'councilId'
-            converters: ['anyNumToString']
-            postImportActions: ['updateCreatedDocument']
+          - oldKey: 'email'
+            targetKey: 'email'
+  - name: 'Dogs'
+    $permissions:
+      - permission: read
+        target: any
+      - permission: create
+        target: users
+      - permission: update
+        target: users
+      - permission: delete
+        target: users
+    attributes:
+      - key: 'name'
+        type: 'string'
+        size: 255
+        required: true
+      - key: 'breed'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'age'
+        type: 'integer'
+        required: false
+        min: 0
+        max: 100
+      - key: 'ownerIdOrig'
+        type: 'string'
+        size: 255
+        required: false
+      # - key: 'owner'
+      #   type: 'relationship'
+      #   relatedCollection: 'Members'
+      #   relationType: 'manyToOne'
+      #   twoWay: true
+      #   twoWayKey: 'dogs'
+      #   side: 'child'
+      #   onDelete: 'cascade'
+    indexes:
+      - key: 'ownerIdIndex'
+        type: 'key'
+        attributes: ['ownerIdOrig']
+    importDefs:
+      - filePath: 'importData/dogs.json'
+        basePath: 'RECORDS'
+        attributeMappings:
+          - oldKey: 'id'
+            targetKey: '$id'
+          - oldKey: 'name'
+            targetKey: 'name'
+          - oldKey: 'breed'
+            targetKey: 'breed'
+          - oldKey: 'age'
+            targetKey: 'age'
+          - oldKey: 'ownerId'
+            targetKey: 'ownerIdOrig'

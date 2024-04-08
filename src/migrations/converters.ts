@@ -1,106 +1,147 @@
 import { DateTime } from "luxon";
-import { cloneDeep, isObject } from "lodash";
+import _ from "lodash";
 import type { AppwriteConfig } from "./schema";
 
-/**
- * Converts any value to a string. Handles null and undefined explicitly.
- * @param {any} value The value to convert.
- * @return {string | null} The converted string or null if the value is null or undefined.
- */
-export const anyToString = (value: any): string | null => {
-  if (value == null) return null;
-  return typeof value === "string" ? value : JSON.stringify(value);
-};
+const { cloneDeep, isObject } = _;
 
-/**
- * Converts any value to a number. Returns null for non-numeric values, null, or undefined.
- * @param {any} value The value to convert.
- * @return {number | null} The converted number or null.
- */
-export const anyToNumber = (value: any): number | null => {
-  if (value == null) return null;
-  const number = Number(value);
-  return isNaN(number) ? null : number;
-};
+export const converterFunctions = {
+  /**
+   * Converts any value to a string. Handles null and undefined explicitly.
+   * @param {any} value The value to convert.
+   * @return {string | null} The converted string or null if the value is null or undefined.
+   */
+  anyToString(value: any): string | null {
+    if (value == null) return null;
+    return typeof value === "string" ? value : JSON.stringify(value);
+  },
 
-/**
- * Converts any value to a boolean. Specifically handles string representations.
- * @param {any} value The value to convert.
- * @return {boolean | null} The converted boolean or null if conversion is not possible.
- */
-export const anyToBoolean = (value: any): boolean | null => {
-  if (value == null) return null;
-  if (typeof value === "string") {
-    value = value.trim().toLowerCase();
-    return value === "true" ? true : value === "false" ? false : null;
-  }
-  return Boolean(value);
-};
+  /**
+   * Converts any value to a number. Returns null for non-numeric values, null, or undefined.
+   * @param {any} value The value to convert.
+   * @return {number | null} The converted number or null.
+   */
+  anyToNumber(value: any): number | null {
+    if (value == null) return null;
+    const number = Number(value);
+    return isNaN(number) ? null : number;
+  },
 
-/**
- * Converts any value to an array, attempting to split strings by a specified separator.
- * @param {any} value The value to convert.
- * @param {string | undefined} separator The separator to use when splitting strings.
- * @return {any[]} The resulting array after conversion.
- */
-export const anyToAnyArray = (value: any, separator?: string): any[] => {
-  if (Array.isArray(value)) {
-    return value.map((element) => anyToString(element));
-  } else if (typeof value === "string" && separator) {
-    return value
-      .split(separator)
-      .map((element) => element.trim())
-      .filter((element) => element);
-  }
-  return [value];
-};
-
-/**
- * Tries to parse a date from various formats using Luxon with enhanced error reporting.
- * @param {string | number} input The input date as a string or timestamp.
- * @return {DateTime | null} The parsed Luxon DateTime object or null if parsing failed.
- */
-export const safeParseDate = (input: string | number): DateTime | null => {
-  const formats = [
-    "dd-LL-yyyy",
-    "LL-dd-yyyy",
-    "dd/LL/yyyy",
-    "LL/dd/yyyy",
-    "yyyy/LL/dd",
-    "yyyy-LL-dd",
-    "yyyy-MM-dd",
-    "dd/MM/yyyy",
-    "MM/dd/yyyy",
-    "dd.MM.yyyy",
-    "MM.dd.yyyy",
-    "yyyy.MM.dd",
-    "yyyy/MM/dd",
-    "yyyy/MM/dd HH:mm:ss",
-    "yyyy-MM-dd HH:mm:ss",
-    "yyyy-MM-dd HH:mm:ss.SSS",
-    "yyyy-MM-dd'T'HH:mm:ss.SSS",
-    "yyyy-MM-dd'T'HH:mm:ss",
-    "yyyy-MM-dd HH:mm",
-  ];
-
-  let date = DateTime.fromISO(String(input));
-  if (!date.isValid)
-    date = DateTime.fromMillis(
-      typeof input === "number" ? input : parseInt(input)
-    );
-  if (!date.isValid) date = DateTime.fromSQL(String(input));
-  formats.forEach((format) => {
-    if (!date.isValid) {
-      date = DateTime.fromFormat(String(input), format);
+  /**
+   * Converts any value to a boolean. Specifically handles string representations.
+   * @param {any} value The value to convert.
+   * @return {boolean | null} The converted boolean or null if conversion is not possible.
+   */
+  anyToBoolean(value: any): boolean | null {
+    if (value == null) return null;
+    if (typeof value === "string") {
+      value = value.trim().toLowerCase();
+      return value === "true" ? true : value === "false" ? false : null;
     }
-  });
+    return Boolean(value);
+  },
 
-  if (!date.isValid) {
-    console.error(`Failed to parse date from input: ${input}`);
-    return null;
-  }
+  /**
+   * Converts any value to an array, attempting to split strings by a specified separator.
+   * @param {any} value The value to convert.
+   * @param {string | undefined} separator The separator to use when splitting strings.
+   * @return {any[]} The resulting array after conversion.
+   */
+  anyToAnyArray(value: any): any[] {
+    if (Array.isArray(value)) {
+      return value.map((element) => converterFunctions.anyToString(element));
+    } else if (typeof value === "string") {
+      // Let's try a few
+      return converterFunctions.trySplitByDifferentSeparators(value);
+    }
+    return [value];
+  },
 
-  return date;
+  /**
+   * Tries to split a string by different separators and returns the split that has the most uniform segment lengths.
+   * This can be particularly useful for structured data like phone numbers.
+   * @param value The string to split.
+   * @return The split string array that has the most uniform segment lengths.
+   */
+  trySplitByDifferentSeparators(value: string): string[] {
+    const separators = [",", ";", "|", ":", "/", "\\"];
+    let bestSplit: string[] = [];
+    let highestUniformityScore = 0; // Higher score means more uniform lengths
+
+    for (const separator of separators) {
+      const split = value.split(separator);
+      if (split.length <= 1) continue; // Skip if no actual splitting occurred
+
+      // Calculate uniformity score for this split
+      const lengths = split.map((segment) => segment.length);
+      const averageLength = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+      const uniformityScore = lengths.reduce(
+        (total, length) => total + Math.abs(length - averageLength),
+        0
+      );
+
+      // A lower uniformityScore means lengths are more uniform
+      // If this split has a more uniform length than the previous best, or if it's the first, update bestSplit
+      if (bestSplit.length === 0 || uniformityScore < highestUniformityScore) {
+        bestSplit = split;
+        highestUniformityScore = uniformityScore;
+      }
+    }
+
+    // If no suitable split was found, return the original value as a single-element array
+    if (bestSplit.length === 0) {
+      return [value];
+    }
+
+    return bestSplit;
+  },
+
+  /**
+   * Tries to parse a date from various formats using Luxon with enhanced error reporting.
+   * @param {string | number} input The input date as a string or timestamp.
+   * @return {DateTime | null} The parsed Luxon DateTime object or null if parsing failed.
+   */
+  safeParseDate(input: string | number): DateTime | null {
+    const formats = [
+      "dd-LL-yyyy",
+      "LL-dd-yyyy",
+      "dd/LL/yyyy",
+      "LL/dd/yyyy",
+      "yyyy/LL/dd",
+      "yyyy-LL-dd",
+      "yyyy-MM-dd",
+      "dd/MM/yyyy",
+      "MM/dd/yyyy",
+      "dd.MM.yyyy",
+      "MM.dd.yyyy",
+      "yyyy.MM.dd",
+      "yyyy/MM/dd",
+      "yyyy/MM/dd HH:mm:ss",
+      "yyyy-MM-dd HH:mm:ss",
+      "yyyy-MM-dd HH:mm:ss.SSS",
+      "yyyy-MM-dd'T'HH:mm:ss.SSS",
+      "yyyy-MM-dd'T'HH:mm:ss",
+      "yyyy-MM-dd HH:mm",
+    ];
+
+    let date = DateTime.fromISO(String(input));
+    if (!date.isValid)
+      date = DateTime.fromMillis(
+        typeof input === "number" ? input : parseInt(input)
+      );
+    if (!date.isValid) date = DateTime.fromSQL(String(input));
+    formats.forEach((format) => {
+      if (!date.isValid) {
+        date = DateTime.fromFormat(String(input), format);
+      }
+    });
+
+    if (!date.isValid) {
+      console.error(`Failed to parse date from input: ${input}`);
+      return null;
+    }
+
+    return date;
+  },
 };
 
 /**
@@ -117,7 +158,7 @@ export const deepAnyToString = (data: any): any => {
       return acc;
     }, {} as Record<string, any>);
   } else {
-    return anyToString(data);
+    return converterFunctions.anyToString(data);
   }
 };
 
@@ -179,16 +220,14 @@ export const convertObjectByAttributeMappings = (
 ): Record<string, any> => {
   const result: Record<string, any> = {};
 
-  // Iterate over the original object's keys
-  for (const key of Object.keys(obj)) {
-    if (attributeMappings[key]) {
-      // If the current key is found in attributeMappings, use the targetKey from attributeMappings
-      const { targetKey } = attributeMappings[key];
-      result[targetKey] = obj[key];
-    } else {
-      // If the current key is not in attributeMappings, keep it as is
-      result[key] = obj[key];
+  // Iterate over the attributeMappings
+  for (const mapping of attributeMappings) {
+    if (mapping.oldKey in obj) {
+      // If the oldKey is found in the input object, map it to the targetKey
+      const { targetKey } = mapping;
+      result[targetKey] = obj[mapping.oldKey];
     }
+    // Removed the else clause to avoid adding keys that are not in the input object
   }
 
   return result;

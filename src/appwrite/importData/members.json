@@ -1,0 +1,14 @@
+{
+  "RECORDS": [
+    {
+      "id": 123,
+      "name": "John Doe",
+      "email": "john@doe.com"
+    },
+    {
+      "id": 456,
+      "name": "Jane Doe",
+      "email": "jane@doe.com"
+    }
+  ]
+}

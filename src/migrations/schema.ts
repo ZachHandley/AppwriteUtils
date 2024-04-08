@@ -273,6 +273,24 @@ const relationshipAttributeSchema = z.object({
     .describe("The action to take when the related document is deleted")
     .default("setNull"),
   side: z.enum(["parent", "child"]).describe("The side of the relationship"),
+  importMapping: z
+    .object({
+      originalIdField: z
+        .string()
+        .describe(
+          "The field in the import data representing the original ID to match"
+        ),
+      targetField: z
+        .string()
+        .optional()
+        .describe(
+          "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
+        ),
+    })
+    .optional()
+    .describe(
+      "Configuration for mapping and resolving relationships during data import"
+    ),
 });
 
 export type RelationshipAttribute = z.infer<typeof relationshipAttributeSchema>;
@@ -352,7 +370,7 @@ export const indexSchema = z.object({
     .enum([IndexType.Key, IndexType.Unique, IndexType.Fulltext])
     .optional()
     .default(IndexType.Key),
-  status: z.string(),
+  status: z.string().optional(),
   error: z.string().optional(),
   attributes: z.array(z.string()),
   orders: z.array(z.string()).optional(),
@@ -361,63 +379,93 @@ export const indexSchema = z.object({
 export type Index = z.infer<typeof indexSchema>;
 
 export const collectionSchema = z.object({
-  $id: z.string().optional().default(ID.unique()),
+  $id: z
+    .string()
+    .optional()
+    .default(ID.unique())
+    .describe("The ID of the collection, auto generated if not provided"),
   $createdAt: z.string(),
   $updatedAt: z.string(),
-  $permissions: z.array(z.string()).default([]),
-  databaseId: z.string().optional(),
-  name: z.string(),
-  enabled: z.boolean().default(true),
-  documentSecurity: z.boolean().default(false),
-  attributes: z.array(attributeSchema).default([]),
-  indexes: z.array(indexSchema).default([]),
-  importDefs: z.array(
-    z.object({
-      filePath: z.string().describe("The file path of the data to import"),
-      basePath: z
-        .string()
-        .describe(
-          "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS"
+  $permissions: z
+    .array(
+      z.object({
+        permission: z.string(),
+        target: z.string(),
+      })
+    )
+    .default([])
+    .describe("The permissions of the collection"),
+  databaseId: z
+    .string()
+    .optional()
+    .describe("The ID of the database the collection belongs to"),
+  name: z.string().describe("The name of the collection"),
+  enabled: z
+    .boolean()
+    .default(true)
+    .describe("Whether the collection is enabled or not"),
+  documentSecurity: z
+    .boolean()
+    .default(false)
+    .describe("Whether document security is enabled or not"),
+  attributes: z
+    .array(attributeSchema)
+    .default([])
+    .describe("The attributes of the collection"),
+  indexes: z
+    .array(indexSchema)
+    .default([])
+    .describe("The indexes of the collection"),
+  importDefs: z
+    .array(
+      z.object({
+        filePath: z.string().describe("The file path of the data to import"),
+        basePath: z
+          .string()
+          .describe(
+            "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS"
+          ),
+        attributeMappings: z.array(
+          z.object({
+            oldKey: z
+              .string()
+              .describe("The key of the attribute in the old document"),
+            targetKey: z
+              .string()
+              .describe("The key of the attribute in the new document"),
+            converters: z
+              .array(z.string())
+              .describe("The converters to use for the import")
+              .default([]),
+            validationActions: z
+              .array(
+                z.object({
+                  action: z.string(),
+                  params: z.array(z.string().startsWith("{").endsWith("}")),
+                })
+              )
+              .describe(
+                "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import"
+              )
+              .default([]),
+            postImportActions: z
+              .array(
+                z.object({
+                  action: z.string(),
+                  params: z.array(z.string()),
+                })
+              )
+              .describe(
+                "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import"
+              )
+              .default([]),
+          })
         ),
-      attributeMappings: z.record(
-        z.string(),
-        z.object({
-          oldKey: z
-            .string()
-            .describe("The key of the attribute in the old document"),
-          targetKey: z
-            .string()
-            .describe("The key of the attribute in the new document"),
-          converters: z
-            .array(z.string())
-            .describe("The converters to use for the import")
-            .default([]),
-          validationActions: z
-            .array(
-              z.object({
-                action: z.string(),
-                params: z.array(z.string().startsWith("{").endsWith("}")),
-              })
-            )
-            .describe(
-              "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import"
-            )
-            .default([]),
-          postImportActions: z
-            .array(
-              z.object({
-                action: z.string(),
-                params: z.array(z.string().startsWith("{").endsWith("}")),
-              })
-            )
-            .describe(
-              "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import"
-            )
-            .default([]),
-        })
-      ),
-    })
-  ),
+      })
+    )
+    .optional()
+    .default([])
+    .describe("The import definitions of the collection, if needed"),
 });
 
 export const CollectionCreateSchema = collectionSchema.omit({

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "setup": "tsx --no-cache ./src/setup.ts",
-    "migrate": "tsx --no-cache ./src/index.ts"
+    "migrate": "tsx --no-cache ./index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.0.8",

@@ -1,10 +1,10 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { load } from "js-yaml";
+import configSchema from "./configSchema.json";
 
 // Define our YAML files
 // Define our YAML files
-const configFile = `# appwriteConfig.yaml
+const configFile = `# yaml-language-server: $schema=./.appwrite/appwriteUtilsConfigSchema.json
 appwriteEndpoint: 'https://cloud.appwrite.io/v1' # Your Appwrite endpoint
 appwriteProject: 'YOUR_PROJECT_ID' # Your Appwrite project
 appwriteKey: 'YOUR_API_KEY' # Your Appwrite API key (needs storage and databases at minimum)
@@ -25,8 +25,7 @@ databases:
   - $id: 'dev'
     name: 'Development'
 collections:
-  - $id: 'exampleCollection'
-    name: 'Example Collection'
+  - name: 'Members'
     $permissions:
       read:
         - any
@@ -39,31 +38,87 @@ collections:
     attributes:
       - key: 'name'
         type: 'string'
-        size: 50
+        size: 255
         required: true
+      - key: 'email'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'idOrig'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'dogs'
+        type: 'relationship'
+        relatedCollection: 'Dogs'
+        relationType: 'oneToMany'
+        twoWay: true
+        twoWayKey: 'owner'
+        side: 'parent'
+        onDelete: 'cascade'
+        importMapping: { originalIdField: 'idOrig', targetField: 'ownerId' }
     indexes:
       - key: 'name_index'
         type: 'key'
         attributes: ['name']
     importDefs:
-      - filePath: 'path/to/your/data.json'
+      - filePath: 'importData/members.json'
         basePath: 'RECORDS'
         attributeMappings:
-          _id:
-            oldKey: '_id'
-            targetKey: 'oldId'
-            converters: ['anyNumToString']
-            postImportActions: ['checkAndUpdateFieldInDocument']
-          someName:
-            oldKey: 'someName'
+          idMapping:
+            oldKey: 'id'
+            targetKey: 'idOrig'
+          name:
+            oldKey: 'name'
             targetKey: 'name'
-            converters: []
-            validationActions: ['checkStringLength']
-          councilId:
-            oldKey: 'councilId'
-            targetKey: 'councilId'
-            converters: ['anyNumToString']
-            postImportActions: ['updateCreatedDocument']`;
+          email:
+            oldKey: 'email'
+            targetKey: 'email'
+  - name: 'Dogs'
+    attributes:
+      - key: 'name'
+        type: 'string'
+        size: 255
+        required: true
+      - key: 'breed'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'age'
+        type: 'integer'
+        required: false
+        min: 0
+        max: 100
+      - key: 'ownerIdOrig'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'owner'
+        type: 'relationship'
+        relatedCollection: 'Members'
+        relationType: 'manyToOne'
+        twoWay: true
+        twoWayKey: 'dogs'
+        side: 'child'
+        onDelete: 'cascade'
+    indexes:
+      - key: 'ownerIdIndex'
+        type: 'key'
+        attributes: ['ownerIdOrig']
+    importDefs:
+      - filePath: 'importData/dogs.json'
+        basePath: 'RECORDS'
+        attributeMappings:
+          - oldKey: 'id'
+          targetKey: '$id'
+          - oldKey: 'name'
+          targetKey: 'name'
+          - oldKey: 'breed'
+          targetKey: 'breed'
+          - oldKey: 'age'
+            targetKey: 'age'
+          - oldKey: 'ownerId'
+            targetKey: 'ownerIdOrig'`;
 
 const schemaFile = `import { ID, IndexType } from "node-appwrite";
 import { AppwriteConfigSchema } from "./migrations/schema";`;
@@ -83,6 +138,8 @@ export const setupDirsFiles = async () => {
 
   const appwriteConfigFolder = path.join(appwriteFolder, "migrations");
   const appwriteSchemaFolder = path.join(appwriteFolder, "schemas");
+  const appwriteDataFolder = path.join(appwriteFolder, "importData");
+  const appwriteHiddenFolder = path.join(appwriteFolder, ".appwrite");
 
   // Directory creation and file writing logic remains the same
   if (!existsSync(appwriteFolder)) {
@@ -100,6 +157,19 @@ export const setupDirsFiles = async () => {
   if (!existsSync(appwriteSchemaFolder)) {
     mkdirSync(appwriteSchemaFolder, { recursive: true });
   }
+
+  if (!existsSync(appwriteDataFolder)) {
+    mkdirSync(appwriteDataFolder, { recursive: true });
+  }
+
+  if (!existsSync(appwriteHiddenFolder)) {
+    mkdirSync(appwriteHiddenFolder, { recursive: true });
+  }
+  const schemaFilePath = path.join(
+    appwriteHiddenFolder,
+    "appwriteUtilsConfigSchema.json"
+  );
+  writeFileSync(schemaFilePath, JSON.stringify(configSchema, undefined, 4));
 
   console.log("Created config and setup files/directories successfully.");
 };

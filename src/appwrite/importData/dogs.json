@@ -1,0 +1,22 @@
+{
+  "RECORDS": [
+    {
+      "name": "Charlie",
+      "breed": "Golden Retriever",
+      "age": 2,
+      "ownerId": "123"
+    },
+    {
+      "name": "Buddy",
+      "breed": "Labrador",
+      "age": 3,
+      "ownerId": "123"
+    },
+    {
+      "name": "Max",
+      "breed": "Poodle",
+      "age": 1,
+      "ownerId": "456"
+    }
+  ]
+}

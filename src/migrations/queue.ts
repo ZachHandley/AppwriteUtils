@@ -2,6 +2,7 @@ import { Query, type Databases, type Models } from "node-appwrite";
 import type { Attribute } from "./schema";
 import { createOrUpdateAttribute } from "./attributes";
 import _ from "lodash";
+import { fetchAndCacheCollectionByName } from "./collections";
 
 export interface QueuedOperation {
   type: "attribute";
@@ -68,89 +69,79 @@ export const processQueue = async (db: Databases, dbId: string) => {
       const operation = queuedOperations[i];
       console.log(`\tOperation: ${JSON.stringify(operation)}`);
       let collectionFound: Models.Collection | undefined;
-      try {
-        if (
-          operation.attribute?.type === "relationship" &&
-          operation.dependencies
-        ) {
-          for (const dep of operation.dependencies) {
-            if (!nameToIdMapping.has(dep)) {
-              console.log(`\tChecking for collection: ${dep}`);
-              const collectionsFound = await db.listCollections(dbId, [
-                Query.equal("name", dep),
-              ]);
-              if (collectionsFound.total > 0) {
-                const collectionId = collectionsFound.collections[0].$id;
-                console.log(`\tCollection found: ${collectionId}`);
-                nameToIdMapping.set(dep, collectionId);
-              }
-            } else {
-              const collectionId = nameToIdMapping.get(dep);
-              if (collectionId) {
-                console.log(`\tCollection found: ${collectionId}`);
-                collectionFound = await db.getCollection(dbId, collectionId);
-              }
-            }
+
+      // Handle relationship attribute operations
+      if (operation.attribute?.type === "relationship") {
+        // Attempt to resolve the collection directly if collectionId is specified
+        if (operation.collectionId) {
+          console.log(`\tFetching collection by ID: ${operation.collectionId}`);
+          try {
+            collectionFound = await db.getCollection(
+              dbId,
+              operation.collectionId
+            );
+          } catch (e) {
+            console.log(
+              `\tCollection not found by ID: ${operation.collectionId}`
+            );
           }
-        } else if (
-          operation.attribute?.type === "relationship" &&
-          operation.attribute?.relatedCollection
-        ) {
-          console.log(
-            `\tChecking for collection: ${operation.attribute.relatedCollection}`
+        }
+        // Attempt to resolve related collection if specified and not already found
+        if (!collectionFound && operation.attribute?.relatedCollection) {
+          collectionFound = await fetchAndCacheCollectionByName(
+            db,
+            dbId,
+            operation.attribute.relatedCollection
           );
-          const collectionsFound = await db.listCollections(dbId, [
-            Query.equal("name", operation.attribute?.relatedCollection),
-          ]);
-          if (collectionsFound.total > 0) {
-            collectionFound = collectionsFound.collections[0];
-            console.log(`\tCollection found: ${collectionFound.$id}`);
+        }
+        // Handle dependencies if collection still not found
+        if (!collectionFound) {
+          for (const dep of operation.dependencies || []) {
+            collectionFound = await fetchAndCacheCollectionByName(
+              db,
+              dbId,
+              dep
+            );
+            if (collectionFound) break; // Break early if collection is found
           }
-        } else if (
-          operation.collectionId &&
-          operation.attribute?.type !== "relationship"
-        ) {
-          console.log(`\tChecking for collection: ${operation.collectionId}`);
+        }
+      } else if (operation.collectionId) {
+        // Handle non-relationship operations with a specified collectionId
+        console.log(`\tFetching collection by ID: ${operation.collectionId}`);
+        try {
           collectionFound = await db.getCollection(
             dbId,
             operation.collectionId
           );
-          console.log(`\tCollection found: ${collectionFound.$id}`);
-        }
-      } catch (e) {
-        console.error(
-          `Collection not found for operation: ${operation.collectionId}`,
-          e
-        );
-        collectionFound = undefined;
-      }
-      if (collectionFound && operation.attribute) {
-        const canProcess =
-          !operation.dependencies ||
-          operation.dependencies.every((depName) =>
-            nameToIdMapping.has(depName)
-          );
-        if (canProcess) {
+        } catch (e) {
           console.log(
-            `Processing attribute: ${operation.attribute.key} for collection ID: ${collectionFound.$id}`
+            `\tCollection not found by ID: ${operation.collectionId}`
           );
-
-          await createOrUpdateAttribute(
-            db,
-            dbId,
-            operation.collection!,
-            operation.attribute
-          );
-          queuedOperations.splice(i, 1);
-          i--;
-          progress = true;
         }
-      } else {
-        console.error(
-          `Collection not found for operation: ${operation.collectionId}`
+      }
+
+      // Process the operation if the collection is found
+      if (collectionFound && operation.attribute) {
+        console.log(
+          `\tProcessing attribute: ${operation.attribute.key} for collection ID: ${collectionFound.$id}`
+        );
+        await createOrUpdateAttribute(
+          db,
+          dbId,
+          collectionFound,
+          operation.attribute
         );
         queuedOperations.splice(i, 1);
-        i--;
+        i--; // Adjust index since we're modifying the array
+        progress = true;
+      } else {
+        console.error(
+          `\tCollection not found for operation, removing from queue: ${JSON.stringify(
+            operation
+          )}`
+        );
+        queuedOperations.splice(i, 1);
+        i--; // Adjust index since we're modifying the array
       }
     }
     console.log(`\tFinished processing queued operations`);

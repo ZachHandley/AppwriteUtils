@@ -1,4 +1,4 @@
-import type { Databases, Models } from "node-appwrite";
+import { Query, type Databases, type Models } from "node-appwrite";
 import type { Attribute } from "./schema";
 import { nameToIdMapping, enqueueOperation } from "./queue";
 
@@ -24,32 +24,50 @@ export const createOrUpdateAttribute = async (
   }
 
   // Relationship attribute logic with adjustments
+  let collectionFoundViaRelatedCollection: Models.Collection | undefined;
+  let relatedCollectionId: string | undefined;
   if (attribute.type === "relationship") {
-    let collectionFoundViaRelatedCollection: Models.Collection | undefined;
-    let relatedCollectionId: string | undefined;
-    try {
-      collectionFoundViaRelatedCollection = await db.getCollection(
-        dbId,
-        attribute.relatedCollection
+    if (nameToIdMapping.has(attribute.relatedCollection)) {
+      console.log(
+        `Name to ID Mapping has relationship collection with name: ${attribute.relatedCollection}`
       );
-      relatedCollectionId = collectionFoundViaRelatedCollection.$id;
-    } catch (e) {
-      console.log(`${attribute.relatedCollection} must be a name :)`);
       relatedCollectionId = nameToIdMapping.get(attribute.relatedCollection);
+      console.log(`Fetching collection by ID: ${relatedCollectionId}`);
       try {
-        if (relatedCollectionId) {
-          collectionFoundViaRelatedCollection = await db.getCollection(
-            dbId,
-            relatedCollectionId
-          );
-        }
+        collectionFoundViaRelatedCollection = await db.getCollection(
+          dbId,
+          relatedCollectionId!
+        );
+        console.log(
+          `Collection found: ${collectionFoundViaRelatedCollection.$id}`
+        );
       } catch (e) {
         console.log(
-          `Could not find collection with name: ${attribute.relatedCollection}`
+          `Collection not found: ${attribute.relatedCollection} when nameToIdMapping was set`
         );
+        collectionFoundViaRelatedCollection = undefined;
+      }
+    } else {
+      console.log(
+        `Name to ID mapping does not have collection with name: ${attribute.relatedCollection}`
+      );
+      const collectionsPulled = await db.listCollections(dbId, [
+        Query.equal("name", attribute.relatedCollection),
+      ]);
+      if (collectionsPulled.total > 0) {
+        console.log(
+          `Found ${collectionsPulled.total} collections with name: ${attribute.relatedCollection}`
+        );
+        collectionFoundViaRelatedCollection = collectionsPulled.collections[0];
+        relatedCollectionId = collectionFoundViaRelatedCollection.$id;
+        nameToIdMapping.set(attribute.relatedCollection, relatedCollectionId);
       }
     }
-    if (!relatedCollectionId || !collectionFoundViaRelatedCollection) {
+    console.log(
+      `Related collection ID: ${relatedCollectionId}, found: ${collectionFoundViaRelatedCollection}`
+    );
+    if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
+      console.log(`Enqueueing operation for attribute: ${attribute.key}`);
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
@@ -59,11 +77,8 @@ export const createOrUpdateAttribute = async (
       });
       return;
     }
-    // Adjust attribute.relatedCollection to use the ID instead of name
-    attribute.relatedCollection = relatedCollectionId;
   }
 
-  console.log(`${action.toUpperCase()} attribute: ${attribute.key}`);
   switch (attribute.type) {
     case "string":
       if (action === "create") {
@@ -262,7 +277,7 @@ export const createOrUpdateAttribute = async (
         await db.createRelationshipAttribute(
           dbId,
           collection.$id,
-          attribute.relatedCollection,
+          relatedCollectionId!,
           attribute.relationType,
           attribute.twoWay,
           attribute.key,

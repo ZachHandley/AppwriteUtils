@@ -1,21 +1,37 @@
 import { Databases, Query, type Models } from "node-appwrite";
+import { fetchAllCollections } from "./collections";
+import type {
+  AppwriteConfig,
+  Attribute,
+  RelationshipAttribute,
+} from "./schema";
 
-// You need to define or fetch this mappings somewhere in your code
-// const idMappings: Map<string, Map<string, string>> = new Map(); // Map<CollectionName, Map<OriginalID, NewID>>
-// So basically thinking that if Contacts has a relationship with ContactsCouncils, it's using idOrig and $id,
-// Then we need to find the associated ContactCouncils, and assign a list of their new ID's based on their contactsOriginalId or whatever
-// Then we can use this map to update the Contacts with the new ID's and do that for all of them
-const yourCollectionMapping = {
-  self: "idOrig", // The documents original ID in your imported data
-  collections: ["RelatedCollection"], // Assuming ContactsCouncils is a collection that has a relationship with Contacts
-  keys: ["relCollKey"], // Assuming relCollKey is a relationship field in Your Collection (Some collection)
-  tarKeys: ["yourCollectionIdOrig"], // original ID in your imported data for the related collection to link it here
-  relKeys: ["yourCollection"], // The twoWayKey in RelatedCollection that points back to YourCollection
+export const findCollectionsWithRelationships = (config: AppwriteConfig) => {
+  const toReturn = new Map<string, Attribute[]>();
+  // Map of collection name to array of attributes so we can update the relationships
+  for (const collection of config.collections) {
+    if (collection.attributes) {
+      for (const attribute of collection.attributes) {
+        if (attribute.type === "relationship") {
+          if (!toReturn.has(collection.name)) {
+            toReturn.set(collection.name, []);
+          }
+          toReturn.get(collection.name)?.push(attribute);
+          if (!toReturn.has(attribute.relatedCollection)) {
+            toReturn.set(attribute.relatedCollection, []);
+          }
+          toReturn.get(attribute.relatedCollection)?.push(attribute);
+        }
+      }
+    }
+  }
+  return toReturn;
 };
 
 export async function resolveAndUpdateRelationships(
   dbId: string,
-  database: Databases
+  database: Databases,
+  config: AppwriteConfig
 ) {
   console.log(
     `Starting relationship resolution and update for database ID: ${dbId}`
@@ -23,6 +39,10 @@ export async function resolveAndUpdateRelationships(
   const collections = await fetchAllCollections(dbId, database);
   console.log(
     `Fetched ${collections.length} collections to process for relationships.`
+  );
+  const collectionsWithRelationships = findCollectionsWithRelationships(config);
+  console.log(
+    `Found ${collectionsWithRelationships.size} collections with relationships.`
   );
 
   for (const collection of collections) {
@@ -32,13 +52,12 @@ export async function resolveAndUpdateRelationships(
     let moreDocuments = true;
     let lastDocumentId: string | undefined;
     let processedDocumentsCount = 0;
-    const mapping =
-      collection.name.toLowerCase().replace(" ", "") === "yourCollection"
-        ? yourCollectionMapping
-        : undefined;
+    const relAttributeMap = collectionsWithRelationships.get(
+      collection.name
+    ) as RelationshipAttribute[]; // Get the relationship attributes for the collections
 
     // Prepare relationship updates for documents
-    if (!mapping) {
+    if (!relAttributeMap) {
       console.log(
         `No mapping found for collection: ${collection.name}, skipping...`
       );
@@ -61,7 +80,7 @@ export async function resolveAndUpdateRelationships(
         dbId,
         collection.name,
         documents,
-        mapping
+        relAttributeMap
       );
       console.log(
         `Prepared ${updates.length} updates for collection: ${collection.name}`
@@ -84,33 +103,6 @@ export async function resolveAndUpdateRelationships(
   console.log(
     `Completed relationship resolution and update for database ID: ${dbId}`
   );
-}
-
-async function fetchAllCollections(
-  dbId: string,
-  database: Databases
-): Promise<Models.Collection[]> {
-  console.log(`Fetching all collections for database ID: ${dbId}`);
-  let collections: Models.Collection[] = [];
-  let moreCollections = true;
-  let lastCollectionId: string | undefined;
-
-  while (moreCollections) {
-    const queries = [Query.limit(500)];
-    if (lastCollectionId) {
-      queries.push(Query.cursorAfter(lastCollectionId));
-    }
-    const response = await database.listCollections(dbId, queries);
-    collections = collections.concat(response.collections);
-    moreCollections = response.collections.length === 500;
-    if (moreCollections) {
-      lastCollectionId =
-        response.collections[response.collections.length - 1].$id;
-    }
-  }
-
-  console.log(`Fetched a total of ${collections.length} collections.`);
-  return collections;
 }
 
 async function fetchDocuments(
@@ -169,7 +161,7 @@ async function prepareDocumentUpdates(
   dbId: string,
   collectionName: string,
   documents: Models.Document[],
-  mappings: typeof yourCollectionMapping
+  relationships: RelationshipAttribute[]
 ): Promise<{ collectionId: string; documentId: string; updatePayload: any }[]> {
   console.log(`Preparing updates for collection: ${collectionName}`);
   const updates: {
@@ -187,53 +179,59 @@ async function prepareDocumentUpdates(
     return [];
   }
 
-  // New function to process a batch of documents
+  // Function to process a batch of documents
   const processDocumentBatch = async (docBatch: Models.Document[]) => {
     for (const doc of docBatch) {
       let updatePayload: { [key: string]: any } = {};
 
-      for (const key of mappings.tarKeys) {
-        const originalId = doc[mappings.self as keyof typeof doc];
-        if (!originalId) continue;
+      for (const rel of relationships) {
+        // Check if the relationship has importMapping defined
+        if (!rel.importMapping) continue;
+        const originalIdField = rel.importMapping.originalIdField;
+        const targetField = rel.importMapping.targetField || originalIdField; // Use originalIdField if targetField is not specified
+        const originalId = doc[originalIdField as keyof typeof doc];
+        if (!originalId) continue; // Skip if the document doesn't have the original ID field
+        const collection = await database.listCollections(dbId, [
+          Query.equal("name", rel.relatedCollection),
+        ]);
+        console.log(
+          `Found ${collection.total} collections with name: ${rel.relatedCollection}`
+        );
+        if (collection.total === 0) continue; // Skip if the related collection doesn't exist
+        const relatedCollectionId = collection.collections[0].$id;
+        console.log(`Related collection ID: ${relatedCollectionId}`);
 
-        const targetKeyIndex = mappings.tarKeys.indexOf(key);
-        const targetKey = mappings.tarKeys[targetKeyIndex];
-        const relatedCollectionName = mappings.collections[targetKeyIndex];
-        const relKey = mappings.keys[targetKeyIndex];
-
-        const relatedCollectionId = (
-          await database.listCollections(dbId, [
-            Query.equal("name", relatedCollectionName),
-          ])
-        ).collections[0]?.$id;
-
-        if (!relatedCollectionId) {
-          console.log(
-            `No collection found with name: ${relatedCollectionName}`
-          );
-          continue;
-        }
-
+        // Find documents in the related collection that match the original ID
         const foundDocuments = await findDocumentsByOriginalId(
           database,
           dbId,
           relatedCollectionId,
-          targetKey,
+          targetField,
           originalId
         );
 
-        if (foundDocuments) {
-          const existingRefs = doc[relKey as keyof typeof doc] || [];
+        if (foundDocuments && foundDocuments.length > 0) {
+          // Use the relationship attribute's key as the field to update in the current document
+          const relationshipKey = rel.key; // The key of the relationship attribute to update
+          const existingRefs = doc[relationshipKey as keyof typeof doc] || [];
+          // Filter out existing references to avoid duplicates
           const newRefs = foundDocuments.filter(
             // @ts-ignore
-            (fd) => !existingRefs.some((er) => er.$id === fd.$id)
+            (fd) => !existingRefs.find((er) => er.$id === fd.$id)
           );
           if (newRefs.length > 0) {
-            updatePayload[relKey] = [
-              ...existingRefs,
-              ...newRefs.map((fd) => fd.$id),
-            ]; // Assuming you're storing IDs
+            // Update with the full documents
+            updatePayload[relationshipKey] = [...existingRefs, ...newRefs];
+            console.log(
+              `Update payload[${relationshipKey}]: ${JSON.stringify(
+                updatePayload[relationshipKey],
+                undefined,
+                4
+              )}`
+            );
           }
+        } else {
+          // No matching documents found
         }
       }
 
@@ -241,14 +239,14 @@ async function prepareDocumentUpdates(
         updates.push({
           collectionId: thisCollectionId,
           documentId: doc.$id,
-          updatePayload,
+          updatePayload: updatePayload,
         });
       }
     }
   };
 
-  // Use the processInBatches function to process documents in batches
-  await processInBatches(documents, 25, processDocumentBatch); // Adjust batch size as needed
+  // Process documents in batches
+  await processInBatches(documents, 25, processDocumentBatch);
 
   return updates;
 }
@@ -274,12 +272,20 @@ async function executeUpdatesInBatches(
     const batch = updates.slice(i, i + batchSize);
     await Promise.all(
       batch.map((update) =>
-        database.updateDocument(
-          dbId,
-          update.collectionId,
-          update.documentId,
-          update.updatePayload
-        )
+        database
+          .updateDocument(
+            dbId,
+            update.collectionId,
+            update.documentId,
+            update.updatePayload
+          )
+          .catch((error) => {
+            console.error("Error updating document: ", error);
+            console.error(
+              "Document update payload: ",
+              JSON.stringify(update.updatePayload, undefined, 4)
+            );
+          })
       )
     );
   }
