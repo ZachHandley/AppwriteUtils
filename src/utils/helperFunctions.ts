@@ -62,3 +62,10 @@ export const safeParseDate = (dateStr: string | undefined): string | null => {
   const date = new Date(dateStr);
   return isNaN(date.getTime()) ? null : date.toISOString();
 };
+
+export const areCollectionNamesSame = (a: string, b: string) => {
+  return (
+    a.toLowerCase().trim().replace(" ", "") ===
+    b.toLowerCase().trim().replace(" ", "")
+  );
+};

@@ -16,11 +16,22 @@ import path from "path";
 import fs from "fs";
 import { load } from "js-yaml";
 import { ImportDataActions } from "./migrations/importDataActions";
-import { convertObjectByAttributeMappings } from "./migrations/converters";
-import { readFileSync } from "./utils/helperFunctions";
+import {
+  converterFunctions,
+  convertObjectByAttributeMappings,
+  type ConverterFunctions,
+} from "./migrations/converters";
+import { areCollectionNamesSame, readFileSync } from "./utils/helperFunctions";
 import { checkForCollection } from "./migrations/collections";
 import { resolveAndUpdateRelationships } from "./migrations/relationships";
 import { documentExists } from "./migrations/queue";
+import {
+  afterImportActions,
+  type AfterImportActions,
+} from "./migrations/afterImportActions";
+import validationRules, {
+  type ValidationRules,
+} from "./migrations/validationRules";
 
 async function loadConfig(configPath: string) {
   if (!fs.existsSync(configPath)) {
@@ -29,12 +40,14 @@ async function loadConfig(configPath: string) {
   const configModule = await load(readFileSync(configPath), {
     json: true,
   });
-  console.log("Loaded config:", configModule);
   return AppwriteConfigSchema.parse(configModule);
 }
 
 export interface SetupOptions {
   runProd: boolean;
+  runStaging: boolean;
+  runDev: boolean;
+  doBackup: boolean;
   wipeDatabases: boolean;
   generateSchemas: boolean;
   generateMockData: boolean;
@@ -55,7 +68,9 @@ export class UtilsController {
   private appwriteServer?: Client;
   private database?: Databases;
   private storage?: Storage;
-  private documentsWithRelationships = new Map<string, Models.Document[]>();
+  public converterDefinitions: ConverterFunctions = converterFunctions;
+  public validityRuleDefinitions: ValidationRules = validationRules;
+  public afterImportActionsDefinitions: AfterImportActions = afterImportActions;
 
   constructor() {
     const basePath = process.cwd(); // Gets the current working directory
@@ -64,9 +79,39 @@ export class UtilsController {
       appwriteFolderPath,
       "appwriteConfig.yaml"
     );
-    console.log(appwriteConfigPath);
     this.appwriteFolderPath = appwriteFolderPath;
     this.appwriteConfigPath = appwriteConfigPath;
+  }
+
+  async loadCustomDefinitions(): Promise<void> {
+    try {
+      const customDefinitionsPath = path.join(
+        this.appwriteFolderPath,
+        "customDefinitions.ts"
+      );
+      if (fs.existsSync(customDefinitionsPath)) {
+        // Dynamically import custom definitions
+        const customDefinitions: {
+          converterDefinitions: ConverterFunctions;
+          validityRuleDefinitions: ValidationRules;
+          afterImportActionsDefinitions: AfterImportActions;
+        } = await import(customDefinitionsPath);
+        this.converterDefinitions = {
+          ...this.converterDefinitions,
+          ...customDefinitions.converterDefinitions,
+        };
+        this.validityRuleDefinitions = {
+          ...this.validityRuleDefinitions,
+          ...customDefinitions.validityRuleDefinitions,
+        };
+        this.afterImportActionsDefinitions = {
+          ...this.afterImportActionsDefinitions,
+          ...customDefinitions.afterImportActionsDefinitions,
+        };
+      }
+    } catch (error) {
+      console.error("Failed to load custom definitions:", error);
+    }
   }
 
   async init() {
@@ -80,6 +125,7 @@ export class UtilsController {
       this.database = new Databases(this.appwriteServer);
       this.storage = new Storage(this.appwriteServer);
       this.config.appwriteClient = this.appwriteServer;
+      await this.loadCustomDefinitions();
     }
   }
 
@@ -109,7 +155,7 @@ export class UtilsController {
 
     console.log("Starting import data...");
     if (options.importData) {
-      await this.importData();
+      await this.importData(options);
     }
     console.log("Import data complete.");
 
@@ -118,7 +164,7 @@ export class UtilsController {
     // }
   }
 
-  async importData(): Promise<void> {
+  async importData(setupOptions: SetupOptions): Promise<void> {
     await this.init(); // Ensure initialization is done
     if (!this.database || !this.storage || !this.config) {
       throw new Error("Database or storage not initialized");
@@ -126,11 +172,29 @@ export class UtilsController {
     const importDataActions = new ImportDataActions(
       this.database,
       this.storage,
-      this.config
+      this.config,
+      this.converterDefinitions,
+      this.validityRuleDefinitions,
+      this.afterImportActionsDefinitions
     );
 
+    const databasesToRun = this.config.databases
+      .filter(
+        (db) =>
+          (areCollectionNamesSame(db.name, this.config!.databases[0].name) &&
+            setupOptions.runProd) ||
+          (areCollectionNamesSame(db.name, this.config!.databases[1].name) &&
+            setupOptions.runStaging) ||
+          (areCollectionNamesSame(db.name, this.config!.databases[2].name) &&
+            setupOptions.runDev)
+      )
+      .map((db) => db.name);
+
     for (let db of this.config.databases) {
-      if (db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
+      if (
+        db.name.toLowerCase().trim().replace(" ", "") === "migrations" ||
+        !databasesToRun.includes(db.name)
+      ) {
         continue;
       }
       if (!db.$id) {
@@ -153,6 +217,8 @@ export class UtilsController {
     db: AppwriteConfig["databases"][number],
     importDataActions: ImportDataActions
   ) {
+    let afterImportActionsContexts = []; // Store contexts for later use
+
     for (const collectionConfig of this.config!.collections) {
       if (
         !collectionConfig.importDefs ||
@@ -190,6 +256,38 @@ export class UtilsController {
           : data;
 
         for (const item of dataToImport) {
+          // Dynamically add after-import actions for fileData attributes
+          const attributeMappingsWithActions = importDef.attributeMappings.map(
+            (mapping) => {
+              if (mapping.fileData) {
+                console.log(
+                  "Adding after-import action for fileData attribute"
+                );
+                const filePath = path.resolve(
+                  this.appwriteFolderPath,
+                  mapping.fileData.path
+                );
+                const afterImportAction = {
+                  action: "createFileAndUpdateField",
+                  params: [
+                    "{dbId}",
+                    "{collId}",
+                    "{docId}",
+                    mapping.targetKey,
+                    this.config!.documentBucketId, // Assuming 'images' is your bucket ID
+                    filePath,
+                    mapping.fileData.name,
+                  ],
+                };
+                // Ensure postImportActions array exists and add the new action
+                const postImportActions = mapping.postImportActions
+                  ? [...mapping.postImportActions, afterImportAction]
+                  : [afterImportAction];
+                return { ...mapping, postImportActions }; // Correctly assign postImportActions
+              }
+              return mapping;
+            }
+          );
           let context = {
             dbId: db.$id,
             collId: collection.$id,
@@ -199,13 +297,10 @@ export class UtilsController {
             ...item,
           };
 
-          // Convert item using attributeMappings
           const convertedItem = convertObjectByAttributeMappings(
             item,
             importDef.attributeMappings
           );
-
-          // Execute any converters defined in attributeMappings
           const finalItem = await importDataActions.runConverterFunctions(
             convertedItem,
             importDef.attributeMappings
@@ -222,11 +317,8 @@ export class UtilsController {
             continue;
           }
 
-          console.log("Converted item:", finalItem);
-
           context = { ...context, ...finalItem };
 
-          // Validate the converted item, also handled by ImportDataActions
           const isValid = await importDataActions.validateItem(
             finalItem,
             importDef.attributeMappings,
@@ -234,34 +326,45 @@ export class UtilsController {
           );
           if (!isValid) {
             console.error("Validation failed for item:", finalItem);
-            continue; // Skip importing this item due to validation failure
+            continue;
           }
 
-          // Import the validated item to the database
           const createdDocument = await this.database!.createDocument(
             context.dbId,
             context.collId,
             ID.unique(),
             finalItem
           );
-
-          // Update the context with the newly created document's ID for after-import actions
           context.docId = createdDocument.$id;
           context.createdDoc = createdDocument;
           context = { ...context, ...createdDocument };
 
-          // Execute any after-import actions defined in attributeMappings
-          console.log(
-            `Executing after-import actions for document: ${createdDocument.$id}`
-          );
-          await importDataActions.executeAfterImportActions(
+          // Store the context for executing after-import actions later
+          afterImportActionsContexts.push({
             finalItem,
-            importDef.attributeMappings,
-            context
-          );
+            attributeMappings: attributeMappingsWithActions,
+            context,
+          });
         }
       }
     }
+
     await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
+
+    // Now execute after-import actions for all documents
+    for (const {
+      finalItem,
+      attributeMappings,
+      context,
+    } of afterImportActionsContexts) {
+      console.log(
+        `Executing after-import actions for document: ${context.docId}`
+      );
+      await importDataActions.executeAfterImportActions(
+        finalItem,
+        attributeMappings,
+        context
+      );
+    }
   }
 }

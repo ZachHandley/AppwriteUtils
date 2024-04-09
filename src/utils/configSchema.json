@@ -41,11 +41,6 @@
       "default": true,
       "description": "Enable backup cleanup"
     },
-    "enableLocalImport": {
-      "type": "boolean",
-      "default": false,
-      "description": "Enable local import"
-    },
     "enableMockData": {
       "type": "boolean",
       "default": false,
@@ -55,6 +50,11 @@
       "type": "boolean",
       "default": true,
       "description": "Enable wiping other databases"
+    },
+    "documentBucketId": {
+      "type": "string",
+      "default": "documents",
+      "description": "Documents bucket id for imported documents"
     },
     "databases": {
       "type": "array",
@@ -358,6 +358,20 @@
                 "targetKey": {
                   "type": "string",
                   "description": "The key of the attribute in the new document"
+                },
+                "fileData": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The name of the file, you can use template strings e.g. if id is the ID in your old documents, you can use {id} in the name"
+                    },
+                    "path": {
+                      "type": "string",
+                      "description": "The path of the file, you can use template strings e.g. if id is the ID in your old documents, you can use {id} in the path"
+                    }
+                  },
+                  "required": ["name", "path"]
                 },
                 "converters": {
                   "type": "array",

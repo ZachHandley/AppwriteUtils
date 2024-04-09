@@ -4,6 +4,10 @@ import type { AppwriteConfig } from "./schema";
 
 const { cloneDeep, isObject } = _;
 
+export interface ConverterFunctions {
+  [key: string]: (value: any) => any;
+}
+
 export const converterFunctions = {
   /**
    * Converts any value to a string. Handles null and undefined explicitly.

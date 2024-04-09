@@ -1,4 +1,8 @@
-import { UtilsController, type SetupOptions } from "./src/utilsController";
+import { UtilsController } from "./utilsController";
+export type { AppwriteConfig } from "@/migrations/schema";
+export type { ConverterFunctions } from "@/migrations/converters";
+export type { ValidationRules } from "@/migrations/validationRules";
+export type { AfterImportActions } from "@/migrations/afterImportActions";
 
 const args = process.argv.slice(2);
 
@@ -7,11 +11,20 @@ async function main() {
   await controller.init();
 
   let runProd = false;
+  let runStaging = false;
+  let runDev = false;
+  let doBackup = false;
   let wipeDatabases = false;
   let generateSchemas = false;
   let importData = false;
   if (args.includes("--prod")) {
     runProd = true;
+  }
+  if (args.includes("--staging")) {
+    runStaging = true;
+  }
+  if (args.includes("--dev")) {
+    runDev = true;
   }
   if (args.includes("--wipe")) {
     wipeDatabases = true;
@@ -22,9 +35,15 @@ async function main() {
   if (args.includes("--import")) {
     importData = true;
   }
+  if (args.includes("--backup")) {
+    doBackup = true;
+  }
   if (args.includes("--init")) {
     await controller.run({
       runProd: runProd,
+      runStaging: runStaging,
+      runDev: runDev,
+      doBackup: doBackup,
       wipeDatabases: wipeDatabases,
       generateSchemas: true,
       generateMockData: false,
@@ -34,6 +53,9 @@ async function main() {
   } else {
     await controller.run({
       runProd: runProd,
+      runStaging: runStaging,
+      runDev: runDev,
+      doBackup: doBackup,
       wipeDatabases: wipeDatabases,
       generateSchemas: generateSchemas,
       generateMockData: false,

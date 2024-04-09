@@ -1,18 +1,21 @@
 {
   "compilerOptions": {
     // Enable latest features
-    "lib": ["ESNext"],
-    "target": "ESNext",
-    "module": "ESNext",
+    "target": "ES2020",
+    "module": "ES2020",
+    "lib": ["ES2020"],
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
+    "allowArbitraryExtensions": true,
+    "allowSyntheticDefaultImports": true,
 
     // Bundler mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
 
     // Best practices
     "strict": true,
@@ -24,6 +27,9 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
     "baseUrl": ".",
+    "esModuleInterop": true,
+    "outDir": "./dist",
+    "declaration": true,
     "paths": {
       "@/*": ["src/*"],
       "@utils/*": ["src/utils/*"],
@@ -31,5 +37,7 @@
       "@migrations/*": ["src/migrations/*"],
       "@migrations": ["src/migrations"]
     }
-  }
+  },
+  "include": ["main.ts", "src/**/*"],
+  "exclude": ["node_modules", "dist", "src/appwrite"]
 }

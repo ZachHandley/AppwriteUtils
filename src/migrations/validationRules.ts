@@ -1,10 +1,10 @@
 import _ from "lodash";
 
-interface ValidationRule {
-  (value: any, ...args: any[]): boolean;
+export interface ValidationRules {
+  [key: string]: (value: any, ...args: any[]) => boolean;
 }
 
-const validationRules: { [key: string]: ValidationRule } = {
+const validationRules: ValidationRules = {
   isNumber: (value: any): boolean => _.isNumber(value),
   isString: (value: any): boolean => _.isString(value),
   isBoolean: (value: any): boolean => _.isBoolean(value),

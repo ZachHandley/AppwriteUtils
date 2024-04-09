@@ -6,8 +6,12 @@ import {
   wipeDatabase,
 } from "./collections";
 import { getMigrationCollectionSchemas } from "./backup";
-import { toCamelCase } from "@/utils";
-import { backupDatabase, initOrGetBackupStorage } from "./storage";
+import { areCollectionNamesSame, toCamelCase } from "@/utils";
+import {
+  backupDatabase,
+  initOrGetBackupStorage,
+  initOrGetDocumentStorage,
+} from "./storage";
 import { type AppwriteConfig } from "./schema";
 import type { SetupOptions } from "@/utilsController";
 import { nameToIdMapping } from "./queue";
@@ -119,6 +123,7 @@ export const startSetup = async (
   appwriteFolderPath: string
 ) => {
   await setupMigrationDatabase(config);
+  await initOrGetDocumentStorage(storage, config);
 
   if (config.enableBackups) {
     await initOrGetBackupStorage(storage);
@@ -128,8 +133,18 @@ export const startSetup = async (
   }
   await ensureDatabasesExist(config);
 
+  const databaseNames = config.databases.map((db) => db.name);
+
   for (const db of config.databases) {
-    if (db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
+    // Determine if the current database should be processed based on the setup options
+    const processDatabase =
+      (setupOptions.runProd &&
+        areCollectionNamesSame(db.name, databaseNames[0])) ||
+      (setupOptions.runStaging &&
+        areCollectionNamesSame(db.name, databaseNames[1])) ||
+      (setupOptions.runDev &&
+        areCollectionNamesSame(db.name, databaseNames[2]));
+    if (!processDatabase) {
       continue;
     }
     console.log(`---------------------------------`);
@@ -138,38 +153,27 @@ export const startSetup = async (
     let deletedCollections:
       | { collectionId: string; collectionName: string }[]
       | undefined;
-    if (setupOptions.wipeDatabases) {
-      if (config.enableBackups) {
+
+    if (setupOptions.wipeDatabases && processDatabase) {
+      if (config.enableBackups && setupOptions.doBackup) {
         await backupDatabase(database, db.$id, storage);
       }
-      if (setupOptions.runProd) {
-        deletedCollections = await wipeDatabase(database, db.$id);
-      } else {
-        if (db.name !== config.databases[0].name) {
-          deletedCollections = await wipeDatabase(database, db.$id);
-        }
-      }
+      deletedCollections = await wipeDatabase(database, db.$id);
     }
-    if (setupOptions.generateSchemas) {
+
+    if (setupOptions.generateSchemas && processDatabase) {
       await generateSchemas(config, appwriteFolderPath);
     }
-    if (setupOptions.runProd) {
+
+    if (processDatabase) {
       await createOrUpdateCollections(
         database,
         db.$id,
         config,
         deletedCollections
       );
-    } else {
-      if (db.name !== config.databases[0].name) {
-        await createOrUpdateCollections(
-          database,
-          db.$id,
-          config,
-          deletedCollections
-        );
-      }
     }
+
     deletedCollections = undefined;
     nameToIdMapping.clear();
     console.log(`---------------------------------`);

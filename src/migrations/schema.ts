@@ -433,6 +433,21 @@ export const collectionSchema = z.object({
             targetKey: z
               .string()
               .describe("The key of the attribute in the new document"),
+            fileData: z
+              .object({
+                name: z
+                  .string()
+                  .describe("The name of the file, can use template strings"),
+                path: z
+                  .string()
+                  .describe(
+                    "The path of the file, relative to the appwrite folder"
+                  ),
+              })
+              .optional()
+              .describe(
+                "The file data to use for the import, if defined it will upload and replace with ID"
+              ),
             converters: z
               .array(z.string())
               .describe("The converters to use for the import")
@@ -452,7 +467,7 @@ export const collectionSchema = z.object({
               .array(
                 z.object({
                   action: z.string(),
-                  params: z.array(z.string()),
+                  params: z.array(z.string().or(z.record(z.string(), z.any()))),
                 })
               )
               .describe(
@@ -495,12 +510,15 @@ export const AppwriteConfigSchema = z.object({
     .boolean()
     .default(true)
     .describe("Enable backup cleanup"),
-  enableLocalImport: z.boolean().default(false).describe("Enable local import"),
   enableMockData: z.boolean().default(false).describe("Enable mock data"),
   enableWipeOtherDatabases: z
     .boolean()
     .default(true)
     .describe("Enable wiping other databases"),
+  documentBucketId: z
+    .string()
+    .default("documents")
+    .describe("Documents bucket id for imported documents"),
   databases: z
     .array(
       z.object({

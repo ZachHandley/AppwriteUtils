@@ -8,6 +8,7 @@ import {
 } from "node-appwrite";
 import { type OperationCreate, type BackupCreate } from "./backup";
 import { splitIntoBatches } from "./migrationHelper";
+import type { AppwriteConfig } from "./schema";
 
 export const logOperation = async (
   db: Databases,
@@ -57,10 +58,28 @@ export const initOrGetBackupStorage = async (storage: Storage) => {
   }
 };
 
+export const initOrGetDocumentStorage = async (
+  storage: Storage,
+  config: AppwriteConfig
+) => {
+  try {
+    const documentStorage = await storage.getBucket(config.documentBucketId);
+    return documentStorage;
+  } catch (e) {
+    // ID documentStorage
+    // Name Document Storage
+    const documentStorage = await storage.createBucket(
+      config.documentBucketId,
+      "Document Storage"
+    );
+    return documentStorage;
+  }
+};
+
 async function retryFailedPromises(
   batch: Promise<Models.Document>[],
   maxRetries = 3
-) {
+): Promise<PromiseSettledResult<Models.Document>[]> {
   const results = await Promise.allSettled(batch);
   const toRetry: Promise<any>[] = [];
 

@@ -6,9 +6,16 @@ import {
   type Storage,
 } from "node-appwrite";
 import type { AppwriteConfig } from "./schema";
-import validationRules from "./validationRules";
-import { converterFunctions, convertObjectBySchema } from "./converters";
-import { afterImportActions } from "./afterImportActions";
+import validationRules, { type ValidationRules } from "./validationRules";
+import {
+  converterFunctions,
+  convertObjectBySchema,
+  type ConverterFunctions,
+} from "./converters";
+import {
+  afterImportActions,
+  type AfterImportActions,
+} from "./afterImportActions";
 
 type AttributeMappings =
   AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];
@@ -17,11 +24,24 @@ export class ImportDataActions {
   private db: Databases;
   private storage: Storage;
   private config: AppwriteConfig;
+  private converterDefinitions: ConverterFunctions;
+  private validityRuleDefinitions: ValidationRules;
+  private afterImportActionsDefinitions: AfterImportActions;
 
-  constructor(db: Databases, storage: Storage, config: AppwriteConfig) {
+  constructor(
+    db: Databases,
+    storage: Storage,
+    config: AppwriteConfig,
+    converterDefinitions: ConverterFunctions,
+    validityRuleDefinitions: ValidationRules,
+    afterImportActionsDefinitions: AfterImportActions
+  ) {
     this.db = db;
     this.storage = storage;
     this.config = config;
+    this.converterDefinitions = converterDefinitions;
+    this.validityRuleDefinitions = validityRuleDefinitions;
+    this.afterImportActionsDefinitions = afterImportActionsDefinitions;
   }
 
   async runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
@@ -144,32 +164,27 @@ export class ImportDataActions {
 
   async executeAction(
     actionName: string,
-    params: string[],
+    params: any[], // Accepts any type, including objects
     context: { [key: string]: any },
     item: any
   ): Promise<void> {
     const actionMethod =
       afterImportActions[actionName as keyof typeof afterImportActions];
-    console.log(
-      `Executing after-import action '${actionName}' with params ${params.join(
-        ", "
-      )}...`
-    );
     if (typeof actionMethod === "function") {
       try {
-        // Resolve string templates in params
-        const resolvedParams = params.map((param) =>
-          this.resolveTemplate(param, context, item)
-        );
-        console.log(
-          `Resolved parameters for action '${actionName}': ${resolvedParams.join(
-            ", "
-          )}`
-        );
+        // Resolve parameters, handling both strings and objects
+        const resolvedParams = params.map((param) => {
+          // Directly resolve each param, whether it's an object or a string
+          return this.resolveTemplate(param, context, item);
+        });
+
         // Execute the action with resolved parameters
-        // Use 'any' type assertion to bypass TypeScript's strict type checking
+        // Parameters are passed as-is, with objects treated as single parameters
+        console.log(
+          `Executing action '${actionName}' with params:`,
+          resolvedParams
+        );
         await (actionMethod as any)(this.config, ...resolvedParams);
-        console.log(`Action '${actionName}' executed successfully.`);
       } catch (error: any) {
         console.error(`Error executing action '${actionName}':`, error);
         throw new Error(
@@ -183,20 +198,47 @@ export class ImportDataActions {
   }
 
   /**
-   * Resolves a templated string using the provided context and current data item.
-   * @param template The templated string.
+   * Resolves a templated string or object using the provided context and current data item.
+   * If the template is a string that starts and ends with "{}", it replaces it with the corresponding value from item or context.
+   * If the template is an object, it recursively resolves its properties.
+   * @param template The templated string or object.
    * @param context The context for resolving the template.
    * @param item The current data item being processed.
    */
   private resolveTemplate(
-    template: string,
+    template: any,
     context: { [key: string]: any },
     item: any
   ): any {
-    if (template.startsWith("{") && template.endsWith("}")) {
-      const key = template.slice(1, -1);
-      return item[key] ?? context[key] ?? template; // Fallback to template if neither item nor context has the key
+    if (typeof template === "string") {
+      // Check if the template string contains placeholders
+      const regex = /\{([^}]+)\}/g; // Matches anything like {something}
+      let match;
+      let resolvedString = template;
+      while ((match = regex.exec(template)) !== null) {
+        // Extract the key from the matched placeholder
+        const key = match[1];
+        // Replace the placeholder with the value from item or context
+        const value = item[key] ?? context[key] ?? match[0]; // Use the original placeholder if no value is found
+        resolvedString = resolvedString.replace(match[0], value);
+      }
+      return resolvedString;
+    } else if (typeof template === "object" && template !== null) {
+      // Enhanced logic for handling object templates
+      const resolvedObject: any = Array.isArray(template) ? [] : {};
+      for (const key in template) {
+        // Resolve placeholders in object keys
+        const resolvedKey = this.resolveTemplate(key, context, item);
+        // Resolve placeholders in object values
+        resolvedObject[resolvedKey] = this.resolveTemplate(
+          template[key],
+          context,
+          item
+        );
+      }
+      return resolvedObject;
     }
+    // Return the template as is if it's not a string or object
     return template;
   }
 }

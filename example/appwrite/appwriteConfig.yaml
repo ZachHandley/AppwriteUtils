@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=./.appwrite/appwriteUtilsConfigSchema.json
-appwriteEndpoint: 'https://cloud.appwrite.io/v1' # Your Appwrite endpoint
+appwriteEndpoint: 'https://cloud.appwite.io/v1' # Your Appwrite endpoint
 appwriteProject: 'YOUR_PROJECT_ID' # Your Appwrite project
 appwriteKey: 'YOUR_API_KEY' # Your Appwrite API key (needs storage and databases at minimum)
 appwriteClient: null # Your Appwrite client -- don't worry about this
@@ -8,9 +8,9 @@ enableBackups: true # Enable backups
 backupInterval: 3600 # Backup interval in seconds
 backupRetention: 30 # Backup retention in days
 enableBackupCleanup: true # Enable backup cleanup
-enableLocalImport: false # Enable local import
 enableMockData: false # Enable mock data generation
 enableWipeOtherDatabases: true # Enable wiping other databases
+documentBucketId: 'documents' # Your Appwrite bucket ID for documents
 databases:
   - $id: 'main'
     name: 'Main'
@@ -55,6 +55,10 @@ collections:
         type: 'string'
         size: 255
         array: true
+      - key: 'profilePhoto'
+        type: 'string'
+        size: 255
+        required: false
     indexes:
       - key: 'name_index'
         type: 'key'
@@ -67,16 +71,23 @@ collections:
             targetKey: 'idOrig'
             converters: ['anyToString']
             postImportActions:
-              - action: 'updateCreatedDoc'
+              - action: 'checkAndUpdateFieldInDocument'
                 params:
                   - "{dbId}"
-                  - "{collectionId}"
-                  - "{createdDocId}"
-                  - { key: "ownerIdOrig", value: "{createdDocId}"}
+                  - "{collId}"
+                  - "{docId}"
+                  - "idOrig"
+                  - "{id}"
+                  - "{$id}"
           - oldKey: 'name'
             targetKey: 'name'
           - oldKey: 'email'
             targetKey: 'email'
+          - oldKey: 'doesntMatter'
+            targetKey: 'profilePhoto'
+            fileData:
+              - name: "profilePhoto_{id}"
+                path: "importData/profilePhotos"
   - name: 'Dogs'
     $permissions:
       - permission: read
@@ -105,14 +116,6 @@ collections:
         type: 'string'
         size: 255
         required: false
-      # - key: 'owner'
-      #   type: 'relationship'
-      #   relatedCollection: 'Members'
-      #   relationType: 'manyToOne'
-      #   twoWay: true
-      #   twoWayKey: 'dogs'
-      #   side: 'child'
-      #   onDelete: 'cascade'
     indexes:
       - key: 'ownerIdIndex'
         type: 'key'

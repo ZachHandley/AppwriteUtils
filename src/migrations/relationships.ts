@@ -199,7 +199,6 @@ async function prepareDocumentUpdates(
         );
         if (collection.total === 0) continue; // Skip if the related collection doesn't exist
         const relatedCollectionId = collection.collections[0].$id;
-        console.log(`Related collection ID: ${relatedCollectionId}`);
 
         // Find documents in the related collection that match the original ID
         const foundDocuments = await findDocumentsByOriginalId(
@@ -222,13 +221,6 @@ async function prepareDocumentUpdates(
           if (newRefs.length > 0) {
             // Update with the full documents
             updatePayload[relationshipKey] = [...existingRefs, ...newRefs];
-            console.log(
-              `Update payload[${relationshipKey}]: ${JSON.stringify(
-                updatePayload[relationshipKey],
-                undefined,
-                4
-              )}`
-            );
           }
         } else {
           // No matching documents found
