@@ -39,6 +39,7 @@ npx appwrite-utils migrate --dev
 - **Data Conversion and Import**: Convert data from various formats and seamlessly import it into your Appwrite project, adhering to new schema definitions.
 - **Schema Generation**: Automatically generate TypeScript types from your Appwrite schemas, ensuring type safety and consistency across your application.
 - **Comprehensive Utility Functions**: Access a wide range of utility functions for file operations, string manipulation, and more, designed to streamline the migration process.
+- **String Templating System**: Need to update a field with a File ID? There's a post-import function for that (including uploading it). Need to reference an item in your import data's JSON fields to update later? Go for it. `"{$id}"` for instance gets replaced with the created documents ID. If it has one, `"{id}"` would be replaced by the JSON items `id` field, `"{dbId}"` the current dataase, `"{createdDoc}"` the created document in this import iteration, and more!
 - **Enhanced Data Management**: Handle complex migrations with ease, including managing relationships between collections and converting data for various entities.
 
 This package leverages TypeScript for type safety and is configured to work seamlessly with Appwrite. It's built to support complex migration scenarios, making it an essential tool for developers working with Appwrite projects.
@@ -103,6 +104,15 @@ npx appwrite-utils migrate --dev --import
 
 By simplifying the migration process, AppwriteUtils enables developers to focus on building their applications, knowing that their data management and schema updates are handled efficiently.
 
+### Roadmap
+
+- Automatic function creation for backups
+- Import database schema from Appwrite Server to `appwriteConfig.yaml` (this week)
+- Promise batching to improve speed
+- Deduplication checking
+- File based migrations
+
 ### Changelog
 
+- 0.9.1: Added roadmap 😍
 - 0.9.0: Initial refactor into AppwriteUtils package for ease of use
