@@ -1,11 +1,24 @@
 {
   "name": "appwrite-utils",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
   "repository": {
     "type": "git",
     "url": "https://github.com/zachhandley/AppwriteUtils"
   },
+  "keywords": [
+    "appwrite",
+    "utils",
+    "utility",
+    "functions",
+    "database",
+    "management",
+    "data",
+    "conversion",
+    "import",
+    "migrations",
+    "management"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
