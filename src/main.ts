@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { UtilsController } from "./utilsController";
 export type { AppwriteConfig } from "@/migrations/schema";
 export type { ConverterFunctions } from "@/migrations/converters";

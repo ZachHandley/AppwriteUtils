@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { setupDirsFiles } from "./utils/setupFiles";
 
 const args = process.argv.slice(2);
