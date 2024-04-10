@@ -262,7 +262,7 @@ export const setupDirsFiles = async (example: boolean = false) => {
     appwriteHiddenFolder,
     "appwriteUtilsConfigSchema.json"
   );
-  writeFileSync(schemaFilePath, JSON.stringify(configSchema, undefined, 4));
+  writeFileSync(schemaFilePath, JSON.stringify(configSchema, undefined, 2));
 
   console.log("Created config and setup files/directories successfully.");
 };
