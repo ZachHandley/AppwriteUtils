@@ -13,23 +13,23 @@ npm install appwrite-utils
 Once installed, you should first run the setup command to generate the config, then you can run migration commands directly using `npx` (or `bunx`, whatever):
 
 ```bash
-npx appwrite-utils setup
+npx appwrite-utils-setup
 ```
 
 You may generate an example config using (or look in the examples folder)
 
 ```bash
-npx appwrite-utils setup --example
+npx appwrite-utils-setup --example
 ```
 
 ```bash
-npx appwrite-utils migrate --args
+npx appwrite-utils-migrate --args
 ```
 
 Replace `--args` with specific arguments for your migration task. For example, to run migrations in a development environment, you might use:
 
 ```bash
-npx appwrite-utils migrate --dev
+npx appwrite-utils-migrate --dev
 ```
 
 ## Key Features
@@ -51,55 +51,55 @@ After installing the package, you can run various migration-related tasks using 
 - **Initialize a New Migration**: Set up your database and prepare it for new migrations. This will also generate schemas but will not import data.
 
   ```bash
-  npx appwrite-utils migrate --init
+  npx appwrite-utils-migrate --init
   ```
 
 - **Run Migrations in Production**: Apply migrations to your production database.
 
   ```bash
-  npx appwrite-utils migrate --prod
+  npx appwrite-utils-migrate --prod
   ```
 
 - **Run Migrations in Staging**: Apply migrations to your staging database.
 
   ```bash
-  npx appwrite-utils migrate --staging
+  npx appwrite-utils-migrate --staging
   ```
 
 - **Run Migrations in Development**: Apply migrations to your development database.
 
   ```bash
-  npx appwrite-utils migrate --dev
+  npx appwrite-utils-migrate --dev
   ```
 
 - **Wipe Databases**: Wipe your databases. Use with caution.
 
   ```bash
-  npx appwrite-utils migrate --wipe
+  npx appwrite-utils-migrate --wipe
   ```
 
 - **Generate Schemas**: Generate TypeScript schemas from your Appwrite database collections.
 
   ```bash
-  npx appwrite-utils migrate --generate
+  npx appwrite-utils-migrate --generate
   ```
 
 - **Import Data**: Import data into your Appwrite project from external sources.
 
   ```bash
-  npx appwrite-utils migrate --import
+  npx appwrite-utils-migrate --import
   ```
 
 - **Backup Data**: Backup your database data.
 
   ```bash
-  npx appwrite-utils migrate --backup
+  npx appwrite-utils-migrate --backup
   ```
 
 Each command can be combined with others as needed, except for `--init` which runs a specific initialization routine including schema generation but not data import. For example, to run migrations in a development environment and import data, you might use:
 
 ```bash
-npx appwrite-utils migrate --dev --import
+npx appwrite-utils-migrate --dev --import
 ```
 
 By simplifying the migration process, AppwriteUtils enables developers to focus on building their applications, knowing that their data management and schema updates are handled efficiently.
@@ -114,6 +114,7 @@ By simplifying the migration process, AppwriteUtils enables developers to focus 
 
 ### Changelog
 
+- 0.9.5: oops I named it `setup` and `migrate` lmao, now it's `appwrite-utils-setup` & `appwrite-utils-migrate`
 - 0.9.4: Turns out you gotta import js files in modules, whoops
 - 0.9.3: Added `bin` section to package.json and "shebang" to top of `main.ts` and `setup.ts` to enable `npx`
 - 0.9.2: I forget what I did here
