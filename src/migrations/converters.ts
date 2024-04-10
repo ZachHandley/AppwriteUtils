@@ -85,25 +85,30 @@ export const converterFunctions = {
   trySplitByDifferentSeparators(value: string): string[] {
     const separators = [",", ";", "|", ":", "/", "\\"];
     let bestSplit: string[] = [];
-    let highestUniformityScore = 0; // Higher score means more uniform lengths
+    let bestScore = -Infinity; // Initialize with a very low score, aiming to maximize it
 
     for (const separator of separators) {
       const split = value.split(separator);
       if (split.length <= 1) continue; // Skip if no actual splitting occurred
 
-      // Calculate uniformity score for this split
+      // Calculate uniformity in segment length
       const lengths = split.map((segment) => segment.length);
       const averageLength = lengths.reduce((a, b) => a + b, 0) / lengths.length;
-      const uniformityScore = lengths.reduce(
-        (total, length) => total + Math.abs(length - averageLength),
-        0
-      );
+      const lengthVariance =
+        lengths.reduce(
+          (total, length) => total + Math.pow(length - averageLength, 2),
+          0
+        ) / lengths.length;
 
-      // A lower uniformityScore means lengths are more uniform
-      // If this split has a more uniform length than the previous best, or if it's the first, update bestSplit
-      if (bestSplit.length === 0 || uniformityScore < highestUniformityScore) {
+      // Score based on a combination of the number of segments and how uniform their lengths are
+      // The assumption is that more segments and lower variance in their lengths are better
+      // Adjust the scoring formula as needed based on observed data characteristics
+      const score = split.length - lengthVariance; // Example scoring formula
+
+      // Update bestSplit if this split has a better score
+      if (score > bestScore) {
         bestSplit = split;
-        highestUniformityScore = uniformityScore;
+        bestScore = score;
       }
     }
 
