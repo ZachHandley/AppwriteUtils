@@ -268,10 +268,13 @@ export class UtilsController {
                 console.log(
                   "Adding after-import action for fileData attribute"
                 );
-                const filePath = path.resolve(
-                  this.appwriteFolderPath,
-                  mapping.fileData.path
-                );
+                let filePath = mapping.fileData.path;
+                if (!mapping.fileData.path.startsWith("http")) {
+                  filePath = path.resolve(
+                    this.appwriteFolderPath,
+                    mapping.fileData.path
+                  );
+                }
                 const afterImportAction = {
                   action: "createFileAndUpdateField",
                   params: [

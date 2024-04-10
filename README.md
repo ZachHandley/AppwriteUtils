@@ -186,6 +186,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.8: Resolved an issue that would have arisen from not checking for the url in the `fileData` before y'all used it (if y'all is anyone) -- also made sure to fix the type defs in CustomDefinitions
 - 0.9.7: Added the ability for the `path` field in the `fileData` of the `importDefs` to be a URL, for laziness!
 - 0.9.69422: Added `type` and `updateMapping` optionally to `importDefs` so you can run a second file to update the first one, if needed
 - 0.9.6942: Added `removeInvalidElements` converter
