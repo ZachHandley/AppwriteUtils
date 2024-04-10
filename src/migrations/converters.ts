@@ -52,12 +52,28 @@ export const converterFunctions = {
    */
   anyToAnyArray(value: any): any[] {
     if (Array.isArray(value)) {
-      return value.map((element) => converterFunctions.anyToString(element));
+      return value;
     } else if (typeof value === "string") {
       // Let's try a few
       return converterFunctions.trySplitByDifferentSeparators(value);
     }
     return [value];
+  },
+
+  /**
+   * Converts any value to an array of strings. If the input is already an array, returns it as is.
+   * Otherwise, if the input is a string, returns an array with the string as the only element.
+   * Otherwise, returns an empty array.
+   * @param {any} value The value to convert.
+   * @return {string[]} The resulting array after conversion.
+   */
+  anyToStringArray(value: any): string[] {
+    if (Array.isArray(value)) {
+      return value;
+    } else if (typeof value === "string") {
+      return [value];
+    }
+    return [];
   },
 
   /**
@@ -97,6 +113,42 @@ export const converterFunctions = {
     }
 
     return bestSplit;
+  },
+
+  /**
+   * Takes the first element of an array and returns it.
+   * @param {any[]} value The array to take the first element from.
+   * @return {any} The first element of the array.
+   */
+  pickFirstElement(value: any[]): any {
+    return value[0];
+  },
+
+  /**
+   * Takes the last element of an array and returns it.
+   * @param {any[]} value The array to take the last element from.
+   * @return {any} The last element of the array.
+   */
+  pickLastElement(value: any[]): any {
+    return value[value.length - 1];
+  },
+
+  /**
+   * Converts an object to a JSON string.
+   * @param {any} object The object to convert.
+   * @return {string} The JSON string representation of the object.
+   */
+  stringifyObject(object: any): string {
+    return JSON.stringify(object);
+  },
+
+  /**
+   * Converts a JSON string to an object.
+   * @param {string} jsonString The JSON string to convert.
+   * @return {any} The object representation of the JSON string.
+   */
+  parseObject(jsonString: string): any {
+    return JSON.parse(jsonString);
   },
 
   /**
@@ -226,10 +278,19 @@ export const convertObjectByAttributeMappings = (
 
   // Iterate over the attributeMappings
   for (const mapping of attributeMappings) {
-    if (mapping.oldKey in obj) {
-      // If the oldKey is found in the input object, map it to the targetKey
-      const { targetKey } = mapping;
-      result[targetKey] = obj[mapping.oldKey];
+    if (Array.isArray(mapping.oldKeys)) {
+      // Handle multiple oldKeys by collecting their values into an array
+      const values = mapping.oldKeys
+        .filter((oldKey) => oldKey in obj) // Ensure the oldKey exists in the object
+        .map((oldKey) => obj[oldKey]); // Collect the values
+
+      if (values.length > 0) {
+        // If there are any values collected, assign them to the targetKey
+        result[mapping.targetKey] = values;
+      }
+    } else if (mapping.oldKey in obj) {
+      // Handle a single oldKey as before
+      result[mapping.targetKey] = obj[mapping.oldKey];
     }
     // Removed the else clause to avoid adding keys that are not in the input object
   }

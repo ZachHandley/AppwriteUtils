@@ -335,6 +335,7 @@
     },
     "importDefs": {
       "type": "array",
+      "description": "The import definitions to use for the import",
       "items": {
         "type": "object",
         "properties": {
@@ -348,12 +349,20 @@
           },
           "attributeMappings": {
             "type": "array",
+            "description": "The attribute mappings to use for the import",
             "items": {
               "type": "object",
               "properties": {
                 "oldKey": {
                   "type": "string",
                   "description": "The key of the attribute in the old document"
+                },
+                "oldKeys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The keys of the attributes in the old document, if there are more than one you need to target (e.g. to concatenate two to an array)"
                 },
                 "targetKey": {
                   "type": "string",
@@ -439,7 +448,14 @@
                   "default": []
                 }
               },
-              "required": ["oldKey", "targetKey"]
+              "oneOf": [
+                {
+                  "required": ["oldKey", "targetKey"]
+                },
+                {
+                  "required": ["oldKeys", "targetKey"]
+                }
+              ]
             }
           }
         },

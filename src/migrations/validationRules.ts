@@ -13,6 +13,8 @@ const validationRules: ValidationRules = {
     _.isObject(value) && !_.isArray(value) && !_.isFunction(value),
   isNull: (value: any): boolean => _.isNull(value),
   isUndefined: (value: any): boolean => _.isUndefined(value),
+  isDefined: (value: any): boolean =>
+    !_.isUndefined(value) && !_.isNull(value) && !_.isEmpty(value),
   isDate: (value: any): boolean => _.isDate(value),
   isEmpty: (value: any): boolean => _.isEmpty(value),
   isInteger: (value: any): boolean => _.isInteger(value),

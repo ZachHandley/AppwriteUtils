@@ -104,6 +104,77 @@ npx appwrite-utils-migrate --dev --import
 
 By simplifying the migration process, AppwriteUtils enables developers to focus on building their applications, knowing that their data management and schema updates are handled efficiently.
 
+## Complete List of Converters, afterImportActions, and Validation Rules
+
+### Converters
+
+Converters take a value (in the import data) and convert it, before validating it or processing it
+
+- `anyToString(value: any): string | null`
+- `anyToNumber(value: any): number | null`
+- `anyToBoolean(value: any): boolean | null`
+- `anyToAnyArray(value: any, separator?: string): any[]`
+- `anyToStringArray(value: any): string[]`
+- `trySplitByDifferentSeparators(value: string): string[]`
+- `pickFirstElement(value: any[]): any`
+- `pickLastElement(value: any[]): any`
+- `stringifyObject(object: any): string`
+- `parseObject(jsonString: string): any`
+- `safeParseDate(input: string | number): DateTime | null`
+
+### Validation Rules
+
+Validation Rules are run after converters, and are there to make sure invalid data doesn't get added to your database
+
+- `isNumber(value: any): boolean`
+- `isString(value: any): boolean`
+- `isBoolean(value: any): boolean`
+- `isArray(value: any): boolean`
+- `isObject(value: any): boolean`
+- `isNull(value: any): boolean`
+- `isUndefined(value: any): boolean`
+- `isDefined(value: any): boolean`
+- `isDate(value: any): boolean`
+- `isEmpty(value: any): boolean`
+- `isInteger(value: any): boolean`
+- `isFloat(value: any): boolean`
+- `isArrayLike(value: any): boolean`
+- `isArrayLikeObject(value: any): boolean`
+- `isFunction(value: any): boolean`
+- `isLength(value: any): boolean`
+- `isMap(value: any): boolean`
+- `isSet(value: any): boolean`
+- `isRegExp(value: any): boolean`
+- `isSymbol(value: any): boolean`
+- `isObjectLike(value: any): boolean`
+- `isPlainObject(value: any): boolean`
+- `isSafeInteger(value: any): boolean`
+- `isTypedArray(value: any): boolean`
+- `isEqual(value: any, other: any): boolean`
+- `isMatch(object: any, source: any): boolean`
+- `has(object: any, path: string): boolean`
+- `get(object: any, path: string, defaultValue: any): any`
+
+### After Import Actions
+
+After Import Actions run after the import and do something with the old data, new data, or something else entirely
+
+- Provided Fields:
+  - `{dbId}` - Current database ID
+  - `{collId}` - Current collection ID
+  - `{docId}` - Created document ID
+  - `{createdDoc}` - Created document object
+  - `any_string` - You can use any string or thing as a value too! (like for data)
+  - `{some_template_string}` - The templating system allows you to reference anything in the context of the current
+    data you're working with. So for instance, if your imported item has `{ownerId}` and you use `{ownerId}`, it'll reference
+    that old JSON item data in the import.
+
+- `updateCreatedDocument(dbId: string, collId: string, docId: string, data: any): Promise<any>`
+- `checkAndUpdateFieldInDocument(dbId: string, collId: string, docId: string, fieldName: string, oldFieldValue: any, newFieldValue: any): Promise<any>`
+- `setFieldFromOtherCollectionDocument(dbId: string, collIdOrName: string, docId: string, fieldName: string, otherCollIdOrName: string, otherDocId: string, otherFieldName: string): Promise<any>`
+- `createOrGetBucket(bucketName: string, bucketId?: string, permissions?: string[], fileSecurity?: boolean, enabled?: boolean, maxFileSize?: number, allowedExtensions?: string[], compression?: string, encryption?: boolean, antivirus?: boolean): Promise<any>`
+- `createFileAndUpdateField(dbId: string, collId: string, docId: string, fieldName: string, bucketId: string, filePath: string, fileName: string): Promise<any>`
+
 ### Roadmap
 
 - Automatic function creation for backups
@@ -114,6 +185,7 @@ By simplifying the migration process, AppwriteUtils enables developers to focus 
 
 ### Changelog
 
+- 0.9.69: Added `oldKeys` to `importDefs` so you can concatenate multiple keys to one for an array. Also added five new converter functions, `anyToStringArray`, `pickFirstElement`, `pickLastElement`, `stringifyObject`, `parseObject`, and a new validator, `isDefined` for when you just need to know if something is, well, defined (!undefined, !null, and !empty). I also fixed the exports for the types for the custom definitions, my bad!
 - 0.9.6: Fixed schema error in enum
 - 0.9.5: oops I named it `setup` and `migrate` lmao, now it's `appwrite-utils-setup` & `appwrite-utils-migrate`
 - 0.9.4: Turns out you gotta import js files in modules, whoops

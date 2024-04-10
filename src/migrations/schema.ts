@@ -430,6 +430,12 @@ export const collectionSchema = z.object({
             oldKey: z
               .string()
               .describe("The key of the attribute in the old document"),
+            oldKeys: z
+              .array(z.string())
+              .optional()
+              .describe(
+                "The keys of the attribute in the old document, if there are more than one"
+              ),
             targetKey: z
               .string()
               .describe("The key of the attribute in the new document"),
