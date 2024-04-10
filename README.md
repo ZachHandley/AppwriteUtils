@@ -114,6 +114,7 @@ By simplifying the migration process, AppwriteUtils enables developers to focus 
 
 ### Changelog
 
+- 0.9.6: Fixed schema error in enum
 - 0.9.5: oops I named it `setup` and `migrate` lmao, now it's `appwrite-utils-setup` & `appwrite-utils-migrate`
 - 0.9.4: Turns out you gotta import js files in modules, whoops
 - 0.9.3: Added `bin` section to package.json and "shebang" to top of `main.ts` and `setup.ts` to enable `npx`

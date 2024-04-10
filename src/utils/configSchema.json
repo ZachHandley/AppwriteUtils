@@ -224,13 +224,13 @@
                     "type": { "type": "string", "enum": ["enum"] },
                     "required": { "type": "boolean", "default": false },
                     "array": { "type": "boolean", "default": false },
-                    "values": {
+                    "elements": {
                       "type": "array",
                       "items": { "type": "string" }
                     },
                     "xdefault": { "type": ["string", "null"] }
                   },
-                  "required": ["key", "type", "values"]
+                  "required": ["key", "type", "elements"]
                 },
                 {
                   "type": "object",
