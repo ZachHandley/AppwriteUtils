@@ -1,20 +1,20 @@
 import { Databases, ID, Query, Storage, type Models } from "node-appwrite";
-import { createOrUpdateAttribute } from "./attributes";
+import { createOrUpdateAttribute } from "./attributes.js";
 import {
   createOrUpdateCollections,
   generateSchemas,
   wipeDatabase,
-} from "./collections";
-import { getMigrationCollectionSchemas } from "./backup";
-import { areCollectionNamesSame, toCamelCase } from "@/utils";
+} from "./collections.js";
+import { getMigrationCollectionSchemas } from "./backup.js";
+import { areCollectionNamesSame, toCamelCase } from "../utils/index.js";
 import {
   backupDatabase,
   initOrGetBackupStorage,
   initOrGetDocumentStorage,
-} from "./storage";
-import { type AppwriteConfig } from "./schema";
-import type { SetupOptions } from "@/utilsController";
-import { nameToIdMapping } from "./queue";
+} from "./storage.js";
+import { type AppwriteConfig } from "./schema.js";
+import type { SetupOptions } from "../utilsController.js";
+import { nameToIdMapping } from "./queue.js";
 
 export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   // Create the migrations database if needed

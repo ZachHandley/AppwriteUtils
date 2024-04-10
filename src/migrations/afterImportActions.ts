@@ -1,5 +1,5 @@
 import { Databases, Storage, InputFile, Query, ID } from "node-appwrite";
-import type { AppwriteConfig } from "./schema";
+import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
 

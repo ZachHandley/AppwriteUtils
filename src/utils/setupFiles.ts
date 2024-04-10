@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import configSchema from "./configSchema.json";
+import configSchema from "./configSchema.json" assert { type: "json" };
 
 // Define our YAML files
 // Define our YAML files

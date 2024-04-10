@@ -1,21 +1,21 @@
 {
   "compilerOptions": {
     // Enable latest features
-    "target": "ES2020",
-    "module": "ES2020",
-    "lib": ["ES2020"],
+    "target": "ESNext",
+    "module": "NodeNext",
+    "lib": ["ESNext"],
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
     "allowArbitraryExtensions": true,
     "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
 
     // Bundler mode
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    "moduleResolution": "NodeNext",
     "verbatimModuleSyntax": true,
     "noEmit": false,
-    "emitDeclarationOnly": true,
+    "emitDeclarationOnly": false,
 
     // Best practices
     "strict": true,

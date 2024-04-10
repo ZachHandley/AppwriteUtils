@@ -6,32 +6,35 @@ import {
   Storage,
   type Models,
 } from "node-appwrite";
-import { startSetup } from "./migrations/setupDatabase";
+import { startSetup } from "./migrations/setupDatabase.js";
 import {
   type AppwriteConfig,
   AppwriteConfigSchema,
   type CollectionCreate,
-} from "./migrations/schema";
+} from "./migrations/schema.js";
 import path from "path";
 import fs from "fs";
 import { load } from "js-yaml";
-import { ImportDataActions } from "./migrations/importDataActions";
+import { ImportDataActions } from "./migrations/importDataActions.js";
 import {
   converterFunctions,
   convertObjectByAttributeMappings,
   type ConverterFunctions,
-} from "./migrations/converters";
-import { areCollectionNamesSame, readFileSync } from "./utils/helperFunctions";
-import { checkForCollection } from "./migrations/collections";
-import { resolveAndUpdateRelationships } from "./migrations/relationships";
-import { documentExists } from "./migrations/queue";
+} from "./migrations/converters.js";
+import {
+  areCollectionNamesSame,
+  readFileSync,
+} from "./utils/helperFunctions.js";
+import { checkForCollection } from "./migrations/collections.js";
+import { resolveAndUpdateRelationships } from "./migrations/relationships.js";
+import { documentExists } from "./migrations/queue.js";
 import {
   afterImportActions,
   type AfterImportActions,
-} from "./migrations/afterImportActions";
+} from "./migrations/afterImportActions.js";
 import validationRules, {
   type ValidationRules,
-} from "./migrations/validationRules";
+} from "./migrations/validationRules.js";
 
 async function loadConfig(configPath: string) {
   if (!fs.existsSync(configPath)) {

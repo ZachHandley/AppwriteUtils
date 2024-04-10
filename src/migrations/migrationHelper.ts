@@ -1,5 +1,5 @@
 import { ID, Query, type Databases } from "node-appwrite";
-import { OperationSchema } from "./backup";
+import { OperationSchema } from "./backup.js";
 
 export const findOrCreateOperation = async (
   database: Databases,

@@ -1,10 +1,10 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { fetchAllCollections } from "./collections";
+import { fetchAllCollections } from "./collections.js";
 import type {
   AppwriteConfig,
   Attribute,
   RelationshipAttribute,
-} from "./schema";
+} from "./schema.js";
 
 export const findCollectionsWithRelationships = (config: AppwriteConfig) => {
   const toReturn = new Map<string, Attribute[]>();

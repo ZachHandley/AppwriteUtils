@@ -2,7 +2,7 @@ import type {
   AppwriteConfig,
   Attribute,
   RelationshipAttribute,
-} from "./schema";
+} from "./schema.js";
 
 // Helper function to categorize collections based on relationship sides
 export const categorizeCollectionByRelationshipSide = (

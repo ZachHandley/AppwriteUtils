@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import _ from "lodash";
-import type { AppwriteConfig } from "./schema";
+import type { AppwriteConfig } from "./schema.js";
 
 const { cloneDeep, isObject } = _;
 

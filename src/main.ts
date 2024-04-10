@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { UtilsController } from "./utilsController";
-export type { AppwriteConfig } from "@/migrations/schema";
-export type { ConverterFunctions } from "@/migrations/converters";
-export type { ValidationRules } from "@/migrations/validationRules";
-export type { AfterImportActions } from "@/migrations/afterImportActions";
+import { UtilsController } from "./utilsController.js";
+export type { AppwriteConfig } from "@/migrations/schema.js";
+export type { ConverterFunctions } from "@/migrations/converters.js";
+export type { ValidationRules } from "@/migrations/validationRules.js";
+export type { AfterImportActions } from "@/migrations/afterImportActions.js";
 
 const args = process.argv.slice(2);
 

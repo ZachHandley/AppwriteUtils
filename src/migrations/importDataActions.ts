@@ -5,17 +5,17 @@ import {
   type Databases,
   type Storage,
 } from "node-appwrite";
-import type { AppwriteConfig } from "./schema";
-import validationRules, { type ValidationRules } from "./validationRules";
+import type { AppwriteConfig } from "./schema.js";
+import validationRules, { type ValidationRules } from "./validationRules.js";
 import {
   converterFunctions,
   convertObjectBySchema,
   type ConverterFunctions,
-} from "./converters";
+} from "./converters.js";
 import {
   afterImportActions,
   type AfterImportActions,
-} from "./afterImportActions";
+} from "./afterImportActions.js";
 
 type AttributeMappings =
   AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];

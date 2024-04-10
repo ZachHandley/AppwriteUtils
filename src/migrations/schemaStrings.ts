@@ -1,5 +1,5 @@
-import { toCamelCase, toPascalCase } from "@/utils";
-import type { Attribute, RelationshipAttribute } from "./schema";
+import { toCamelCase, toPascalCase } from "../utils/index.js";
+import type { Attribute, RelationshipAttribute } from "./schema.js";
 
 export const createSchemaString = (
   name: string,

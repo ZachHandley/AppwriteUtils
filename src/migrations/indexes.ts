@@ -1,4 +1,4 @@
-import { indexSchema, type Index } from "./schema";
+import { indexSchema, type Index } from "./schema.js";
 import { Databases, Query, type Models } from "node-appwrite";
 // import {}
 

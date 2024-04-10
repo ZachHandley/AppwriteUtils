@@ -6,9 +6,9 @@ import {
   type Models,
   ID,
 } from "node-appwrite";
-import { type OperationCreate, type BackupCreate } from "./backup";
-import { splitIntoBatches } from "./migrationHelper";
-import type { AppwriteConfig } from "./schema";
+import { type OperationCreate, type BackupCreate } from "./backup.js";
+import { splitIntoBatches } from "./migrationHelper.js";
+import type { AppwriteConfig } from "./schema.js";
 
 export const logOperation = async (
   db: Databases,

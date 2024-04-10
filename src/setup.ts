@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { setupDirsFiles } from "./utils/setupFiles";
+import { setupDirsFiles } from "./utils/setupFiles.js";
 
 const args = process.argv.slice(2);
 

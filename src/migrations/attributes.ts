@@ -1,6 +1,6 @@
 import { Query, type Databases, type Models } from "node-appwrite";
-import type { Attribute } from "./schema";
-import { nameToIdMapping, enqueueOperation } from "./queue";
+import type { Attribute } from "./schema.js";
+import { nameToIdMapping, enqueueOperation } from "./queue.js";
 
 export const createOrUpdateAttribute = async (
   db: Databases,

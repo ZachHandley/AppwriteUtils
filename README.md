@@ -114,7 +114,9 @@ By simplifying the migration process, AppwriteUtils enables developers to focus 
 
 ### Changelog
 
-- 0.9.2: Added `bin` section to package.json and "shebang" to top of `main.ts` and `setup.ts` to enable `npx`
+- 0.9.4: Turns out you gotta import js files in modules, whoops
+- 0.9.3: Added `bin` section to package.json and "shebang" to top of `main.ts` and `setup.ts` to enable `npx`
+- 0.9.2: I forget what I did here
 - 0.9.1: Ignore this one
 - 0.9.1: Added roadmap 😍
 - 0.9.0: Initial refactor into AppwriteUtils package for ease of use

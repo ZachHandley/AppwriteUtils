@@ -1,2 +1,2 @@
-export * from "./helperFunctions";
-export * from "./setupFiles";
+export * from "./helperFunctions.js";
+export * from "./setupFiles.js";

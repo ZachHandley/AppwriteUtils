@@ -1,16 +1,16 @@
 import { Databases, ID, Permission, Query, type Models } from "node-appwrite";
-import type { AppwriteConfig, CollectionCreate } from "./schema";
-import { nameToIdMapping, processQueue } from "./queue";
-import { createUpdateCollectionAttributes } from "./attributes";
-import { createOrUpdateIndexes } from "./indexes";
+import type { AppwriteConfig, CollectionCreate } from "./schema.js";
+import { nameToIdMapping, processQueue } from "./queue.js";
+import { createUpdateCollectionAttributes } from "./attributes.js";
+import { createOrUpdateIndexes } from "./indexes.js";
 import {
   ensureDirectoryExistence,
   toCamelCase,
   toPascalCase,
   writeFileSync,
-} from "@/utils";
+} from "../utils/index.js";
 import _ from "lodash";
-import { createSchemaString } from "./schemaStrings";
+import { createSchemaString } from "./schemaStrings.js";
 import path from "path";
 
 const { join } = _;
