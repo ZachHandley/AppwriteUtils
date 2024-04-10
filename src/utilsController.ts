@@ -259,6 +259,8 @@ export class UtilsController {
           : data;
 
         for (const item of dataToImport) {
+          let shouldCreate = true;
+          let foundDocument: Models.Document | undefined;
           // Dynamically add after-import actions for fileData attributes
           const attributeMappingsWithActions = importDef.attributeMappings.map(
             (mapping) => {
@@ -309,13 +311,45 @@ export class UtilsController {
             importDef.attributeMappings
           );
 
+          if (importDef.type === "update" && importDef.updateMapping) {
+            // Construct the query to find the existing document
+            const query = Query.equal(
+              importDef.updateMapping.targetField ||
+                importDef.updateMapping.originalIdField,
+              finalItem[importDef.updateMapping.originalIdField]
+            );
+
+            // Use the query to find the existing document
+            const existingDocuments = await this.database!.listDocuments(
+              db.$id,
+              collection.$id,
+              [query]
+            );
+
+            if (existingDocuments.documents.length > 0) {
+              // Document exists, so we update it
+              foundDocument = existingDocuments.documents[0];
+              console.log(
+                `Found document to update in importData type update with ID: ${foundDocument.$id}`
+              );
+              shouldCreate = false;
+            } else {
+              // Document does not exist, handle according to your needs
+              // For example, you might still want to create it, or log that it's missing
+              console.log(
+                "No existing document found for update. Considering creation or skipping."
+              );
+              shouldCreate = true; // or false, depending on your logic
+            }
+          }
+
           const existenceCheck = await documentExists(
             this.database!,
             db.$id,
             collection.$id,
             finalItem
           );
-          if (existenceCheck) {
+          if (existenceCheck && shouldCreate) {
             console.log("Item already exists, skipping");
             continue;
           }
@@ -332,13 +366,28 @@ export class UtilsController {
             continue;
           }
 
-          const createdDocument = await this.database!.createDocument(
-            context.dbId,
-            context.collId,
-            ID.unique(),
-            finalItem
-          );
-          context.docId = createdDocument.$id;
+          let createdDocument: Models.Document | undefined;
+          if (shouldCreate) {
+            createdDocument = await this.database!.createDocument(
+              context.dbId,
+              context.collId,
+              ID.unique(),
+              finalItem
+            );
+          } else if (foundDocument && !shouldCreate) {
+            createdDocument = await this.database!.updateDocument(
+              context.dbId,
+              context.collId,
+              foundDocument.$id,
+              finalItem
+            );
+          } else if (!shouldCreate && !foundDocument) {
+            console.error(
+              "No existing document found for update. Skipping update."
+            );
+            continue;
+          }
+          context.docId = createdDocument!.$id;
           context.createdDoc = createdDocument;
           context = { ...context, ...createdDocument };
 

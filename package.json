@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils",
-  "version": "0.9.69421",
+  "version": "0.9.69422",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
   "bin": {
     "appwrite-utils-setup": "./dist/setup.js",

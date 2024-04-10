@@ -419,11 +419,36 @@ export const collectionSchema = z.object({
   importDefs: z
     .array(
       z.object({
+        type: z
+          .enum(["create", "update"])
+          .default("create")
+          .optional()
+          .describe(
+            "The type of import action, if update you should set an object for the originalIdField and targetField"
+          ),
         filePath: z.string().describe("The file path of the data to import"),
         basePath: z
           .string()
           .describe(
             "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS"
+          ),
+        updateMapping: z
+          .object({
+            originalIdField: z
+              .string()
+              .describe(
+                "The field in the import data representing the original ID to match"
+              ),
+            targetField: z
+              .string()
+              .optional()
+              .describe(
+                "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
+              ),
+          })
+          .optional()
+          .describe(
+            "Configuration for mapping and resolving the update during data import"
           ),
         attributeMappings: z.array(
           z.object({
