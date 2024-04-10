@@ -339,6 +339,28 @@
       "items": {
         "type": "object",
         "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["create", "update"],
+            "default": "create",
+            "description": "Specifies whether the import should create new documents or update existing ones."
+          },
+          "updateMapping": {
+            "type": "object",
+            "properties": {
+              "originalIdField": {
+                "type": "string",
+                "description": "The field in the import data representing the original ID to match for updates."
+              },
+              "targetField": {
+                "type": "string",
+                "description": "The field in the target collection that matches the original ID for updates. Optional, defaults to the same as originalIdField if not provided."
+              }
+            },
+            "required": ["originalIdField"],
+            "description": "Configuration for mapping and resolving the update during data import. Required if type is 'update'.",
+            "nullable": true
+          },
           "filePath": {
             "type": "string",
             "description": "The file path of the data to import"
@@ -385,14 +407,7 @@
                 "converters": {
                   "type": "array",
                   "items": {
-                    "type": "string",
-                    "enum": [
-                      "anyToString",
-                      "anyToNumber",
-                      "anyToBoolean",
-                      "anyToAnyArray",
-                      "safeParseDate"
-                    ]
+                    "type": "string"
                   },
                   "description": "The converters to use for the import",
                   "default": []

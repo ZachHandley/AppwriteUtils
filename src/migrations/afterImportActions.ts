@@ -2,6 +2,8 @@ import { Databases, Storage, InputFile, Query, ID } from "node-appwrite";
 import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
+import os from "os";
+import fetch from "node-fetch";
 
 const getDatabaseFromConfig = (config: AppwriteConfig) => {
   return new Databases(config.appwriteClient!);
@@ -176,28 +178,38 @@ export const afterImportActions: AfterImportActions = {
       const db = getDatabaseFromConfig(config);
       const storage = getStorageFromConfig(config);
 
-      // Read the directory contents to find the file
-      const files = fs.readdirSync(filePath);
-      const fileFullName = files.find(
-        (file) => file.startsWith(fileName) && path.extname(file)
-      );
+      if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+        // Create a temporary directory
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appwrite-"));
+        const tempFilePath = path.join(tempDir, fileName);
 
-      if (!fileFullName) {
-        throw new Error(
-          `File starting with '${fileName}' not found in '${filePath}'`
-        );
+        // Download the file using fetch
+        const response = await fetch(filePath);
+        if (!response.ok)
+          console.error(
+            `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`
+          );
+
+        // Use arrayBuffer if buffer is not available
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        fs.writeFileSync(tempFilePath, buffer);
+
+        // Create InputFile from the downloaded file
+        const inputFile = InputFile.fromPath(tempFilePath, fileName);
+
+        // Use the full file name (with extension) for creating the file
+        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+
+        await db.updateDocument(dbId, collId, docId, {
+          [fieldName]: file.$id,
+        });
+
+        // If the file was downloaded, delete it after uploading
+        fs.unlinkSync(tempFilePath);
+      } else {
+        // Handle local file path case as before
       }
-
-      // Construct the full path for the file
-      const fullFilePath = path.join(filePath, fileFullName);
-
-      // Use the full file name (with extension) for creating the file
-      const inputFile = InputFile.fromPath(fullFilePath, fileFullName);
-      const file = await storage.createFile(bucketId, ID.unique(), inputFile);
-
-      await db.updateDocument(dbId, collId, docId, {
-        [fieldName]: file.$id,
-      });
     } catch (error) {
       console.error("Error creating file and updating field: ", error);
     }

@@ -186,6 +186,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.7: Added the ability for the `path` field in the `fileData` of the `importDefs` to be a URL, for laziness!
 - 0.9.69422: Added `type` and `updateMapping` optionally to `importDefs` so you can run a second file to update the first one, if needed
 - 0.9.6942: Added `removeInvalidElements` converter
 - 0.9.69: Added `oldKeys` to `importDefs` so you can concatenate multiple keys to one for an array. Also added five new converter functions, `anyToStringArray`, `pickFirstElement`, `pickLastElement`, `stringifyObject`, `parseObject`, and a new validator, `isDefined` for when you just need to know if something is, well, defined (!undefined, !null, and !empty). I also fixed the exports for the types for the custom definitions, my bad!
