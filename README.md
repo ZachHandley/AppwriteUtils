@@ -121,6 +121,7 @@ Converters take a value (in the import data) and convert it, before validating i
 - `stringifyObject(object: any): string`
 - `parseObject(jsonString: string): any`
 - `safeParseDate(input: string | number): DateTime | null`
+- `removeInvalidElements(input: any[]): any[]`
 
 ### Validation Rules
 
@@ -185,6 +186,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.6942: Added `removeInvalidElements` converter
 - 0.9.69: Added `oldKeys` to `importDefs` so you can concatenate multiple keys to one for an array. Also added five new converter functions, `anyToStringArray`, `pickFirstElement`, `pickLastElement`, `stringifyObject`, `parseObject`, and a new validator, `isDefined` for when you just need to know if something is, well, defined (!undefined, !null, and !empty). I also fixed the exports for the types for the custom definitions, my bad!
 - 0.9.6: Fixed schema error in enum
 - 0.9.5: oops I named it `setup` and `migrate` lmao, now it's `appwrite-utils-setup` & `appwrite-utils-migrate`

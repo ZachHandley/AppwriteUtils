@@ -152,6 +152,18 @@ export const converterFunctions = {
   },
 
   /**
+   * A function that removes invalid elements from an array.
+   *
+   * @param {any[]} array - the input array
+   * @return {any[]} the filtered array without invalid elements
+   */
+  removeInvalidElements(array: any[]): any[] {
+    return array.filter(
+      (element) => element !== null && element !== undefined && element !== ""
+    );
+  },
+
+  /**
    * Tries to parse a date from various formats using Luxon with enhanced error reporting.
    * @param {string | number} input The input date as a string or timestamp.
    * @return {DateTime | null} The parsed Luxon DateTime object or null if parsing failed.
