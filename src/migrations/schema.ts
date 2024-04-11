@@ -464,7 +464,6 @@ export const collectionSchema = z.object({
               ),
             targetKey: z
               .string()
-              .optional()
               .describe("The key of the attribute in the new document"),
             fileData: z
               .object({
