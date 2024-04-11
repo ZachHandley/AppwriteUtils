@@ -454,6 +454,7 @@ export const collectionSchema = z.object({
           z.object({
             oldKey: z
               .string()
+              .optional()
               .describe("The key of the attribute in the old document"),
             oldKeys: z
               .array(z.string())

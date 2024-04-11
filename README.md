@@ -186,6 +186,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.82: Fixed schema to allow `oldKey` or `oldKeys`
 - 0.9.81: Added the ability to match a nested objects properties using `[any]` in your template string. So if you have a nested object
 
 ```json
