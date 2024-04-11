@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils",
-  "version": "0.9.85",
+  "version": "0.9.86",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
   "bin": {
     "appwrite-utils-setup": "./dist/setup.js",
@@ -28,11 +28,16 @@
   "exports": {
     ".": "./dist/main.js"
   },
+  "files": [
+    "README.md",
+    "dist/**/*"
+  ],
   "type": "module",
   "scripts": {
     "setup": "tsx --no-cache ./src/setup.ts",
     "migrate": "tsx --no-cache ./src/main.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "deploy": "npm run build && npm publish --access public"
   },
   "devDependencies": {
     "@types/bun": "^1.0.8",
