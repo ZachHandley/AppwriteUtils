@@ -38,6 +38,6 @@
       "@migrations": ["src/migrations"]
     }
   },
-  "include": ["main.ts", "src/**/*"],
+  "include": ["main.ts", "src/**/*", "example/appwrite/customDefinitions.ts"],
   "exclude": ["node_modules", "dist", "src/appwrite"]
 }

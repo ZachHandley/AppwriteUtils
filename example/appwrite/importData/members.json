@@ -3,12 +3,14 @@
     {
       "id": 123,
       "name": "John Doe",
-      "email": "john@doe.com"
+      "email": "john@doe.com",
+      "photoUrl": "https://picsum.photos/200/300"
     },
     {
       "id": 456,
       "name": "Jane Doe",
-      "email": "jane@doe.com"
+      "email": "jane@doe.com",
+      "photoUrl": "https://picsum.photos/200/300"
     }
   ]
 }

@@ -59,6 +59,10 @@ collections:
         type: 'string'
         size: 255
         required: false
+      - key: 'profilePhotoTest'
+        type: 'string'
+        size: 255
+        required: false
     indexes:
       - key: 'name_index'
         type: 'key'
@@ -85,9 +89,10 @@ collections:
             targetKey: 'email'
           - oldKey: 'doesntMatter'
             targetKey: 'profilePhoto'
-            fileData:
-              - name: "profilePhoto_{id}"
-                path: "importData/profilePhotos"
+            fileData: { name: "profilePhoto_{id}", path: "importData/profilePhotos" }
+          - oldKey: 'photoUrl'
+            targetKey: 'profilePhotoTest'
+            fileData: { name: "profilePhotoTest_{id}", path: "{photoUrl}" }
   - name: 'Dogs'
     $permissions:
       - permission: read
@@ -116,6 +121,15 @@ collections:
         type: 'string'
         size: 255
         required: false
+      - key: 'vetRecords'
+        type: 'string'
+        size: 255
+        required: false
+      - key: 'vetRecordIds'
+        type: 'string'
+        size: 255
+        array: true
+        required: false
     indexes:
       - key: 'ownerIdIndex'
         type: 'key'
@@ -134,3 +148,9 @@ collections:
             targetKey: 'age'
           - oldKey: 'ownerId'
             targetKey: 'ownerIdOrig'
+          - oldKey: 'vetRecords'
+            targetKey: 'vetRecords'
+            converters: ['stringifyObject']
+          - oldKey: 'vetRecords.[any].id'
+            targetKey: 'vetRecordIds'
+            converters: ['anyToStringArray']
