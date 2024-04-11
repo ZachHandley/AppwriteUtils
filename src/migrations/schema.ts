@@ -429,8 +429,9 @@ export const collectionSchema = z.object({
         filePath: z.string().describe("The file path of the data to import"),
         basePath: z
           .string()
+          .optional()
           .describe(
-            "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS"
+            "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS, if nothing then leave it gone"
           ),
         updateMapping: z
           .object({
