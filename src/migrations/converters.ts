@@ -70,7 +70,7 @@ export const converterFunctions = {
   anyToStringArray(value: any): string[] {
     if (Array.isArray(value)) {
       return value.map((item) => String(item));
-    } else if (typeof value === "string") {
+    } else if (typeof value === "string" && value.length > 0) {
       return [String(value)];
     }
     return [];
@@ -224,7 +224,6 @@ export const converterFunctions = {
     });
 
     if (!date.isValid) {
-      console.error(`Failed to parse date from input: ${input}`);
       return null;
     }
 

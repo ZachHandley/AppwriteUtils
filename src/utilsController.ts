@@ -95,11 +95,9 @@ export class UtilsController {
       );
       if (fs.existsSync(customDefinitionsPath)) {
         // Dynamically import custom definitions
-        const customDefinitions: {
-          converterDefinitions: ConverterFunctions;
-          validityRuleDefinitions: ValidationRules;
-          afterImportActionsDefinitions: AfterImportActions;
-        } = await import(customDefinitionsPath);
+        const customDefinitions = (await import(
+          customDefinitionsPath
+        )) as typeof import("customDefinitions");
         this.converterDefinitions = {
           ...this.converterDefinitions,
           ...customDefinitions.converterDefinitions,
@@ -129,7 +127,7 @@ export class UtilsController {
       this.database = new Databases(this.appwriteServer);
       this.storage = new Storage(this.appwriteServer);
       this.config.appwriteClient = this.appwriteServer;
-      await this.loadCustomDefinitions();
+      // await this.loadCustomDefinitions();
     }
   }
 

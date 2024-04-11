@@ -183,6 +183,7 @@ After Import Actions run after the import and do something with the old data, ne
 - Promise batching to improve speed
 - Deduplication checking
 - File based migrations
+- Fix custom functions, JS is unable to import TS, so need to find the best way to define those
 
 ### Changelog
 
