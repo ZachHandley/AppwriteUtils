@@ -45,7 +45,7 @@ export const documentExists = async (
         !_.isObject(value) && // Keeps excluding objects
         !_.isArray(value) && // Explicitly exclude arrays
         !(_.isString(value) && isJsonString(value)) && // Exclude JSON strings
-        (_.isString(value) ? value.length < 4096 : true) // String length check
+        (_.isString(value) ? value.length < 4096 && value.length > 0 : true) // String length check
     )
     .mapValues((value, key) =>
       _.isString(value) || _.isNumber(value) || _.isBoolean(value)
