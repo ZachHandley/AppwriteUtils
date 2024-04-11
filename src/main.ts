@@ -18,6 +18,7 @@ async function main() {
   let wipeDatabases = false;
   let generateSchemas = false;
   let importData = false;
+  let wipeDocuments = false;
   if (args.includes("--prod")) {
     runProd = true;
   }
@@ -29,6 +30,9 @@ async function main() {
   }
   if (args.includes("--wipe")) {
     wipeDatabases = true;
+  }
+  if (args.includes("--wipe-docs")) {
+    wipeDocuments = true;
   }
   if (args.includes("--generate")) {
     generateSchemas = true;
@@ -46,6 +50,7 @@ async function main() {
       runDev: runDev,
       doBackup: doBackup,
       wipeDatabases: wipeDatabases,
+      wipeDocumentStorage: wipeDocuments,
       generateSchemas: true,
       generateMockData: false,
       importData: false,
@@ -58,6 +63,7 @@ async function main() {
       runDev: runDev,
       doBackup: doBackup,
       wipeDatabases: wipeDatabases,
+      wipeDocumentStorage: wipeDocuments,
       generateSchemas: generateSchemas,
       generateMockData: false,
       importData: importData,

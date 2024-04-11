@@ -24,6 +24,16 @@ export const documentExists = async (
   targetCollectionId: string,
   toCreateObject: any
 ): Promise<boolean> => {
+  // Function to check if a string is JSON
+  const isJsonString = (str: string) => {
+    try {
+      const json = JSON.parse(str);
+      return typeof json === "object" && json !== null; // Check if parsed JSON is an object or array
+    } catch (e) {
+      return false;
+    }
+  };
+
   // Validate and prepare query parameters
   const validQueryParams = _.chain(toCreateObject)
     .pickBy(
@@ -32,7 +42,9 @@ export const documentExists = async (
         !_.isNull(value) &&
         !_.isUndefined(value) &&
         !_.isEmpty(value) &&
-        !_.isObject(value) && // Excludes arrays and objects
+        !_.isObject(value) && // Keeps excluding objects
+        !_.isArray(value) && // Explicitly exclude arrays
+        !(_.isString(value) && isJsonString(value)) && // Exclude JSON strings
         (_.isString(value) ? value.length < 4096 : true) // String length check
     )
     .mapValues((value, key) =>
@@ -59,7 +71,6 @@ export const processQueue = async (db: Databases, dbId: string) => {
   console.log("---------------------------------");
   console.log(`Starting Queue processing of ${dbId}`);
   console.log("---------------------------------");
-  console.log(`Queued operations: ${JSON.stringify(queuedOperations)}`);
   let progress = true;
 
   while (progress) {
@@ -67,7 +78,6 @@ export const processQueue = async (db: Databases, dbId: string) => {
     console.log("Processing queued operations:");
     for (let i = 0; i < queuedOperations.length; i++) {
       const operation = queuedOperations[i];
-      console.log(`\tOperation: ${JSON.stringify(operation)}`);
       let collectionFound: Models.Collection | undefined;
 
       // Handle relationship attribute operations

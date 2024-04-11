@@ -205,40 +205,65 @@ export class ImportDataActions {
    * @param context The context for resolving the template.
    * @param item The current data item being processed.
    */
-  private resolveTemplate(
+  resolveTemplate(
     template: any,
     context: { [key: string]: any },
     item: any
   ): any {
+    // Function to recursively resolve paths, including handling [any] notation
+    const resolvePath = (path: string, currentContext: any): any => {
+      const anyKeyRegex = /\[any\]/g;
+      let pathParts = path.split(".").filter(Boolean);
+
+      return pathParts.reduce((acc, part, index) => {
+        // Handle [any] part by iterating over all elements if it's an object or an array
+        if (part === "[any]") {
+          if (Array.isArray(acc)) {
+            return acc
+              .map((item) => item[pathParts[index + 1]])
+              .filter((item) => item !== undefined);
+          } else if (typeof acc === "object") {
+            return Object.values(acc).map(
+              (item: any) => item[pathParts[index + 1]]
+            );
+          }
+        } else {
+          return acc[part];
+        }
+      }, currentContext);
+    };
+
     if (typeof template === "string") {
-      // Check if the template string contains placeholders
-      const regex = /\{([^}]+)\}/g; // Matches anything like {something}
+      // Matches placeholders in the template
+      const regex = /\{([^}]+)\}/g;
       let match;
       let resolvedString = template;
       while ((match = regex.exec(template)) !== null) {
-        // Extract the key from the matched placeholder
-        const key = match[1];
-        // Replace the placeholder with the value from item or context
-        const value = item[key] ?? context[key] ?? match[0]; // Use the original placeholder if no value is found
+        const path = match[1];
+        // Resolve the path, handling [any] notation and arrays/objects
+        const resolvedValue = resolvePath(path, { ...context, ...item });
+        // If it's an array (from [any] notation), join the values; adjust as needed
+        const value = Array.isArray(resolvedValue)
+          ? resolvedValue.join(", ")
+          : resolvedValue;
         resolvedString = resolvedString.replace(match[0], value);
       }
+      console.log(`Resolved string: ${resolvedString}`);
       return resolvedString;
     } else if (typeof template === "object" && template !== null) {
-      // Enhanced logic for handling object templates
+      // Recursively resolve templates for each property in the object
       const resolvedObject: any = Array.isArray(template) ? [] : {};
       for (const key in template) {
-        // Resolve placeholders in object keys
-        const resolvedKey = this.resolveTemplate(key, context, item);
-        // Resolve placeholders in object values
-        resolvedObject[resolvedKey] = this.resolveTemplate(
+        resolvedObject[key] = this.resolveTemplate(
           template[key],
           context,
           item
         );
       }
+      console.log(`Resolved object: ${JSON.stringify(resolvedObject)}`);
       return resolvedObject;
     }
-    // Return the template as is if it's not a string or object
+    console.log(`Template is not a string or object: ${template}`);
     return template;
   }
 }

@@ -11,6 +11,7 @@ import {
   backupDatabase,
   initOrGetBackupStorage,
   initOrGetDocumentStorage,
+  wipeDocumentStorage,
 } from "./storage.js";
 import { type AppwriteConfig } from "./schema.js";
 import type { SetupOptions } from "../utilsController.js";
@@ -123,10 +124,29 @@ export const startSetup = async (
   appwriteFolderPath: string
 ) => {
   await setupMigrationDatabase(config);
-  await initOrGetDocumentStorage(storage, config);
 
   if (config.enableBackups) {
     await initOrGetBackupStorage(storage);
+    if (setupOptions.wipeDocumentStorage) {
+      if (setupOptions.runProd) {
+        await initOrGetDocumentStorage(
+          storage,
+          config,
+          config.databases[0].name
+        );
+        await wipeDocumentStorage(storage, config, config.databases[0].name);
+      }
+      if (setupOptions.runStaging) {
+        await initOrGetDocumentStorage(
+          storage,
+          config,
+          config.databases[1].name
+        );
+        await wipeDocumentStorage(storage, config, config.databases[1].name);
+      }
+      await initOrGetDocumentStorage(storage, config, config.databases[2].name);
+      await wipeDocumentStorage(storage, config, config.databases[2].name);
+    }
   }
   if (config.enableWipeOtherDatabases) {
     await wipeOtherDatabases(database, config);
@@ -146,6 +166,8 @@ export const startSetup = async (
         areCollectionNamesSame(db.name, databaseNames[2]));
     if (!processDatabase) {
       continue;
+    } else {
+      await initOrGetDocumentStorage(storage, config, db.name);
     }
     console.log(`---------------------------------`);
     console.log(`Starting setup for database: ${db.name}`);

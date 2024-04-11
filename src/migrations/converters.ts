@@ -69,9 +69,24 @@ export const converterFunctions = {
    */
   anyToStringArray(value: any): string[] {
     if (Array.isArray(value)) {
-      return value;
+      return value.map((item) => String(item));
     } else if (typeof value === "string") {
-      return [value];
+      return [String(value)];
+    }
+    return [];
+  },
+
+  /**
+   * A function that converts any type of value to an array of numbers.
+   *
+   * @param {any} value - the value to be converted
+   * @return {number[]} an array of numbers
+   */
+  anyToNumberArray(value: any): number[] {
+    if (Array.isArray(value)) {
+      return value.map((item) => Number(item));
+    } else if (typeof value === "string") {
+      return [Number(value)];
     }
     return [];
   },
@@ -293,25 +308,50 @@ export const convertObjectByAttributeMappings = (
 ): Record<string, any> => {
   const result: Record<string, any> = {};
 
-  // Iterate over the attributeMappings
+  // Correctly handle [any] notation by mapping or aggregating over all elements or keys
+  const resolveValue = (obj: Record<string, any>, path: string): any => {
+    const parts = path.split(".");
+    let current = obj;
+
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "[any]") {
+        if (Array.isArray(current)) {
+          // If current is an array, apply resolution to each item
+          return current.map((item) =>
+            resolveValue(item, parts.slice(i + 1).join("."))
+          );
+        } else if (typeof current === "object" && current !== null) {
+          // If current is an object, aggregate values from all keys
+          return Object.values(current).map((value) =>
+            resolveValue(value, parts.slice(i + 1).join("."))
+          );
+        }
+      } else {
+        current = current[parts[i]];
+        if (current === undefined) return undefined;
+      }
+    }
+    return current;
+  };
+
   for (const mapping of attributeMappings) {
     if (Array.isArray(mapping.oldKeys)) {
-      // Handle multiple oldKeys by collecting their values into an array
+      // Collect and flatten values from multiple oldKeys
       const values = mapping.oldKeys
-        .filter((oldKey) => oldKey in obj) // Ensure the oldKey exists in the object
-        .map((oldKey) => obj[oldKey]); // Collect the values
-
-      if (values.length > 0) {
-        // If there are any values collected, assign them to the targetKey
-        result[mapping.targetKey] = values;
+        .map((oldKey) => resolveValue(obj, oldKey))
+        .flat(Infinity);
+      result[mapping.targetKey] = values.filter((value) => value !== undefined);
+    } else if (mapping.oldKey) {
+      // Resolve single oldKey
+      const value = resolveValue(obj, mapping.oldKey);
+      if (value !== undefined) {
+        result[mapping.targetKey] = Array.isArray(value)
+          ? value.flat(Infinity)
+          : value;
       }
-    } else if (mapping.oldKey in obj) {
-      // Handle a single oldKey as before
-      result[mapping.targetKey] = obj[mapping.oldKey];
     }
-    // Removed the else clause to avoid adding keys that are not in the input object
   }
-
+  console.log("Resolved object:", result);
   return result;
 };
 

@@ -208,7 +208,20 @@ export const afterImportActions: AfterImportActions = {
         // If the file was downloaded, delete it after uploading
         fs.unlinkSync(tempFilePath);
       } else {
-        // Handle local file path case as before
+        const files = fs.readdirSync(filePath);
+        const fileFullName = files.find((file) => file.includes(fileName));
+        if (!fileFullName) {
+          console.error(
+            `File starting with '${fileName}' not found in '${filePath}'`
+          );
+          return;
+        }
+        const pathToFile = path.join(filePath, fileFullName);
+        const inputFile = InputFile.fromPath(pathToFile, fileName);
+        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+        await db.updateDocument(dbId, collId, docId, {
+          [fieldName]: file.$id,
+        });
       }
     } catch (error) {
       console.error("Error creating file and updating field: ", error);

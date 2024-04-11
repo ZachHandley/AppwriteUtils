@@ -52,6 +52,7 @@ export interface SetupOptions {
   runDev: boolean;
   doBackup: boolean;
   wipeDatabases: boolean;
+  wipeDocumentStorage: boolean;
   generateSchemas: boolean;
   generateMockData: boolean;
   importData: boolean;
@@ -261,43 +262,10 @@ export class UtilsController {
         for (const item of dataToImport) {
           let shouldCreate = true;
           let foundDocument: Models.Document | undefined;
-          // Dynamically add after-import actions for fileData attributes
-          const attributeMappingsWithActions = importDef.attributeMappings.map(
-            (mapping) => {
-              if (mapping.fileData) {
-                console.log(
-                  "Adding after-import action for fileData attribute"
-                );
-                let filePath = mapping.fileData.path;
-                if (!mapping.fileData.path.startsWith("http")) {
-                  filePath = path.resolve(
-                    this.appwriteFolderPath,
-                    mapping.fileData.path
-                  );
-                }
-                const afterImportAction = {
-                  action: "createFileAndUpdateField",
-                  params: [
-                    "{dbId}",
-                    "{collId}",
-                    "{docId}",
-                    mapping.targetKey,
-                    this.config!.documentBucketId, // Assuming 'images' is your bucket ID
-                    filePath,
-                    mapping.fileData.name,
-                  ],
-                };
-                // Ensure postImportActions array exists and add the new action
-                const postImportActions = mapping.postImportActions
-                  ? [...mapping.postImportActions, afterImportAction]
-                  : [afterImportAction];
-                return { ...mapping, postImportActions }; // Correctly assign postImportActions
-              }
-              return mapping;
-            }
-          );
+
           let context = {
             dbId: db.$id,
+            dbName: db.name,
             collId: collection.$id,
             docId: "",
             createdDoc: {},
@@ -312,6 +280,52 @@ export class UtilsController {
           const finalItem = await importDataActions.runConverterFunctions(
             convertedItem,
             importDef.attributeMappings
+          );
+          // Dynamically add after-import actions for fileData attributes
+          const attributeMappingsWithActions = importDef.attributeMappings.map(
+            (mapping) => {
+              if (mapping.fileData) {
+                console.log(
+                  "Adding after-import action for fileData attribute"
+                );
+                let mappingFilePath = importDataActions.resolveTemplate(
+                  mapping.fileData.path,
+                  context,
+                  finalItem
+                );
+                // Check if the path starts with "http" or "https" to avoid resolving it with the base path
+                if (!mappingFilePath.toLowerCase().startsWith("http")) {
+                  console.log(
+                    `Resolving file path: ${mappingFilePath} mapping DOES NOT START WITH HTTP`
+                  );
+                  mappingFilePath = path.resolve(
+                    this.appwriteFolderPath,
+                    mappingFilePath
+                  );
+                }
+                console.log(`Resolved file path: ${mappingFilePath}`);
+                const afterImportAction = {
+                  action: "createFileAndUpdateField",
+                  params: [
+                    "{dbId}",
+                    "{collId}",
+                    "{docId}",
+                    mapping.targetKey,
+                    `${this.config!.documentBucketId}_${db.name
+                      .toLowerCase()
+                      .replace(" ", "")}`, // Assuming 'images' is your bucket ID
+                    mappingFilePath,
+                    mapping.fileData.name,
+                  ],
+                };
+                // Ensure postImportActions array exists and add the new action
+                const postImportActions = mapping.postImportActions
+                  ? [...mapping.postImportActions, afterImportAction]
+                  : [afterImportAction];
+                return { ...mapping, postImportActions }; // Correctly assign postImportActions
+              }
+              return mapping;
+            }
           );
 
           if (importDef.type === "update" && importDef.updateMapping) {
