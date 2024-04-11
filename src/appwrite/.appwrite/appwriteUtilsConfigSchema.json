@@ -1,0 +1,667 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "appwriteEndpoint": {
+            "type": "string",
+            "default": "https://cloud.appwrite.io/v1"
+        },
+        "appwriteProject": {
+            "type": "string"
+        },
+        "appwriteKey": {
+            "type": "string"
+        },
+        "appwriteClient": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "default": null
+        },
+        "enableDevDatabase": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable development database alongside production database"
+        },
+        "enableBackups": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable backups"
+        },
+        "backupInterval": {
+            "type": "number",
+            "default": 3600,
+            "description": "Backup interval in seconds"
+        },
+        "backupRetention": {
+            "type": "number",
+            "default": 30,
+            "description": "Backup retention in days"
+        },
+        "enableBackupCleanup": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable backup cleanup"
+        },
+        "enableLocalImport": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable local import"
+        },
+        "enableMockData": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable mock data"
+        },
+        "enableWipeOtherDatabases": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable wiping other databases"
+        },
+        "databases": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "$id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "$id",
+                    "name"
+                ]
+            },
+            "default": [
+                {
+                    "$id": "dev",
+                    "name": "Development"
+                },
+                {
+                    "$id": "main",
+                    "name": "Main"
+                },
+                {
+                    "$id": "migrations",
+                    "name": "Migrations"
+                }
+            ],
+            "description": "Databases to create, $id is the id of the database"
+        },
+        "collections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "attributes": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "string"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "size": {
+                                            "type": "number",
+                                            "default": 50
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        },
+                                        "encrypted": {
+                                            "type": "boolean",
+                                            "default": false
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "integer"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "min": {
+                                            "type": "number"
+                                        },
+                                        "max": {
+                                            "type": "number"
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "number",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "float"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "min": {
+                                            "type": "number"
+                                        },
+                                        "max": {
+                                            "type": "number"
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "number",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "boolean"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "boolean",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "datetime"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "email"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "ip"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "url"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "enum"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "values": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "xdefault": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type",
+                                        "values"
+                                    ]
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "relationship"
+                                            ]
+                                        },
+                                        "required": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "array": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "relatedCollection": {
+                                            "type": "string"
+                                        },
+                                        "relationType": {
+                                            "type": "string",
+                                            "enum": [
+                                                "oneToOne",
+                                                "oneToMany",
+                                                "manyToOne",
+                                                "manyToMany"
+                                            ]
+                                        },
+                                        "twoWay": {
+                                            "type": "boolean",
+                                            "default": false
+                                        },
+                                        "twoWayKey": {
+                                            "type": "string",
+                                            "nullable": true
+                                        },
+                                        "onDelete": {
+                                            "type": "string",
+                                            "enum": [
+                                                "cascade",
+                                                "setNull",
+                                                "restrict"
+                                            ],
+                                            "default": "restrict"
+                                        },
+                                        "side": {
+                                            "type": "string",
+                                            "enum": [
+                                                "parent",
+                                                "child"
+                                            ],
+                                            "nullable": true
+                                        },
+                                        "importMapping": {
+                                            "type": "object",
+                                            "nullable": true,
+                                            "properties": {
+                                                "originalIdField": {
+                                                    "type": "string",
+                                                    "description": "The field in the import data representing the original ID to match"
+                                                },
+                                                "targetField": {
+                                                    "type": "string",
+                                                    "description": "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided",
+                                                    "default": ""
+                                                }
+                                            },
+                                            "required": [
+                                                "originalIdField"
+                                            ],
+                                            "description": "Configuration for mapping and resolving relationships during data import"
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "type",
+                                        "relatedCollection",
+                                        "relationType"
+                                    ]
+                                }
+                            ]
+                        },
+                        "default": []
+                    },
+                    "indexes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {
+                                    "type": "string"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "key",
+                                        "unique",
+                                        "fulltext"
+                                    ],
+                                    "default": "key"
+                                },
+                                "status": {
+                                    "type": "string"
+                                },
+                                "error": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "attributes": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "orders": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "nullable": true
+                                }
+                            },
+                            "required": [
+                                "key",
+                                "type",
+                                "attributes"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "name",
+                    "attributes"
+                ]
+            },
+            "default": [],
+            "description": "Collections to create, $id is the id of the collection, it'll always check by collection name and $id for existing before creating another"
+        },
+        "importDefs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "filePath": {
+                        "type": "string",
+                        "description": "The file path of the data to import"
+                    },
+                    "basePath": {
+                        "type": "string",
+                        "description": "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS"
+                    },
+                    "attributeMappings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "oldKey": {
+                                    "type": "string",
+                                    "description": "The key of the attribute in the old document"
+                                },
+                                "targetKey": {
+                                    "type": "string",
+                                    "description": "The key of the attribute in the new document"
+                                },
+                                "converters": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "description": "The converters to use for the import",
+                                    "default": []
+                                },
+                                "validationActions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "action": {
+                                                "type": "string"
+                                            },
+                                            "params": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "pattern": "^\\{.*\\}$"
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "action",
+                                            "params"
+                                        ]
+                                    },
+                                    "description": "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import",
+                                    "default": []
+                                },
+                                "postImportActions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "action": {
+                                                "type": "string"
+                                            },
+                                            "params": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "pattern": "^\\{.*\\}$"
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "action",
+                                            "params"
+                                        ]
+                                    },
+                                    "description": "The after import actions and parameter placeholders (they'll be replaced with the actual data) to use for the import",
+                                    "default": []
+                                }
+                            },
+                            "required": [
+                                "oldKey",
+                                "targetKey"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "filePath",
+                    "basePath",
+                    "attributeMappings"
+                ]
+            }
+        }
+    },
+    "required": [
+        "appwriteEndpoint",
+        "appwriteProject",
+        "appwriteKey"
+    ]
+}

@@ -35,6 +35,7 @@ import {
 import validationRules, {
   type ValidationRules,
 } from "./migrations/validationRules.js";
+import _ from "lodash";
 
 async function loadConfig(configPath: string) {
   if (!fs.existsSync(configPath)) {
@@ -275,10 +276,15 @@ export class UtilsController {
             item,
             importDef.attributeMappings
           );
-          const finalItem = await importDataActions.runConverterFunctions(
+          const finalItemDone = await importDataActions.runConverterFunctions(
             convertedItem,
             importDef.attributeMappings
           );
+          const finalItem = _.cloneDeep(finalItemDone);
+
+          context = { ...context, ...finalItem };
+
+          console.log(`Importing document: ${JSON.stringify(finalItem)}`);
           // Dynamically add after-import actions for fileData attributes
           const attributeMappingsWithActions = importDef.attributeMappings.map(
             (mapping) => {
@@ -301,7 +307,6 @@ export class UtilsController {
                     mappingFilePath
                   );
                 }
-                console.log(`Resolved file path: ${mappingFilePath}`);
                 const afterImportAction = {
                   action: "createFileAndUpdateField",
                   params: [
@@ -326,19 +331,41 @@ export class UtilsController {
             }
           );
 
-          if (importDef.type === "update" && importDef.updateMapping) {
+          if (
+            importDef.type === "update" &&
+            importDef.updateMapping &&
+            finalItem
+          ) {
             // Construct the query to find the existing document
-            const query = Query.equal(
-              importDef.updateMapping.targetField ||
-                importDef.updateMapping.originalIdField,
-              finalItem[importDef.updateMapping.originalIdField]
+            console.log("Target Field:", importDef.updateMapping.targetField);
+            console.log(
+              "Original ID Field:",
+              importDef.updateMapping.originalIdField
             );
+            console.log(
+              "Value to match:",
+              finalItem[importDef.updateMapping.targetField!],
+              "finalItem: ",
+              finalItem
+            );
+            const queries = [];
+            const fieldToEqual = importDef.updateMapping.targetField;
+            const targetFieldValue = finalItem[fieldToEqual];
+            if (!targetFieldValue) {
+              console.log(
+                `No value found for field: ${fieldToEqual} in item: ${JSON.stringify(
+                  finalItem
+                )}`
+              );
+              continue;
+            }
+            queries.push(Query.equal(fieldToEqual, targetFieldValue));
 
             // Use the query to find the existing document
             const existingDocuments = await this.database!.listDocuments(
               db.$id,
               collection.$id,
-              [query]
+              queries
             );
 
             if (existingDocuments.documents.length > 0) {
@@ -407,6 +434,7 @@ export class UtilsController {
           context = { ...context, ...createdDocument };
 
           // Store the context for executing after-import actions later
+          console.log("Final Item before push: ", finalItem);
           afterImportActionsContexts.push({
             finalItem,
             attributeMappings: attributeMappingsWithActions,

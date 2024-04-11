@@ -442,7 +442,6 @@ export const collectionSchema = z.object({
               ),
             targetField: z
               .string()
-              .optional()
               .describe(
                 "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
               ),
@@ -575,3 +574,11 @@ export const AppwriteConfigSchema = z.object({
 });
 
 export type AppwriteConfig = z.infer<typeof AppwriteConfigSchema>;
+export type ConfigCollections = AppwriteConfig["collections"];
+export type ConfigCollection = ConfigCollections[number];
+export type ConfigDatabases = AppwriteConfig["databases"];
+export type ConfigDatabase = ConfigDatabases[number];
+export type ImportDefs = ConfigCollections[number]["importDefs"];
+export type ImportDef = ImportDefs[number];
+export type AttributeMappings = ImportDefs[number]["attributeMappings"];
+export type AttributeMapping = AttributeMappings[number];
