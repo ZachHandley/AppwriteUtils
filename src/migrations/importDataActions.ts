@@ -248,7 +248,7 @@ export class ImportDataActions {
           : resolvedValue;
         resolvedString = resolvedString.replace(match[0], value);
       }
-      console.log(`Resolved string: ${resolvedString}`);
+      // console.log(`Resolved string: ${resolvedString}`);
       return resolvedString;
     } else if (typeof template === "object" && template !== null) {
       // Recursively resolve templates for each property in the object
@@ -260,10 +260,9 @@ export class ImportDataActions {
           item
         );
       }
-      console.log(`Resolved object: ${JSON.stringify(resolvedObject)}`);
       return resolvedObject;
     }
-    console.log(`Template is not a string or object: ${template}`);
+    // console.log(`Template is not a string or object: ${template}`);
     return template;
   }
 }

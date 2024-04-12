@@ -15,6 +15,55 @@ import path from "path";
 
 const { join } = _;
 
+export const documentExists = async (
+  db: Databases,
+  dbId: string,
+  targetCollectionId: string,
+  toCreateObject: any
+): Promise<boolean> => {
+  // Function to check if a string is JSON
+  const isJsonString = (str: string) => {
+    try {
+      const json = JSON.parse(str);
+      return typeof json === "object" && json !== null; // Check if parsed JSON is an object or array
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Validate and prepare query parameters
+  const validQueryParams = _.chain(toCreateObject)
+    .pickBy(
+      (value, key) =>
+        !key.startsWith("$") &&
+        !_.isNull(value) &&
+        !_.isUndefined(value) &&
+        !_.isEmpty(value) &&
+        !_.isObject(value) && // Keeps excluding objects
+        !_.isArray(value) && // Explicitly exclude arrays
+        !(_.isString(value) && isJsonString(value)) && // Exclude JSON strings
+        (_.isString(value) ? value.length < 4096 && value.length > 0 : true) // String length check
+    )
+    .mapValues((value, key) =>
+      _.isString(value) || _.isNumber(value) || _.isBoolean(value)
+        ? value
+        : null
+    )
+    .omitBy(_.isNull) // Remove any null values that might have been added in mapValues
+    .toPairs()
+    .slice(0, 25) // Limit to 25 to adhere to query limit
+    .map(([key, value]) => Query.equal(key, value as any))
+    .value();
+
+  // Execute the query with the validated and prepared parameters
+  const result = await db.listDocuments(
+    dbId,
+    targetCollectionId,
+    validQueryParams
+  );
+  return result.documents.length > 0 && result.total > 0;
+};
+
 export const checkForCollection = async (
   db: Databases,
   dbId: string,
@@ -27,7 +76,7 @@ export const checkForCollection = async (
     ]);
     if (response.collections.length > 0) {
       console.log(`Collection found: ${response.collections[0].$id}`);
-      return response.collections[0];
+      return { ...collection, ...response.collections[0] };
     } else {
       console.log(`No collection found with name: ${collection.name}`);
       return null;

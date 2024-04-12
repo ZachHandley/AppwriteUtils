@@ -188,6 +188,8 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.90: Rewrote the import process entirely to make it more modular and batched
+- 0.9.87 - 0.9.89: Ignore these I was messing up the deployment whooooops
 - 0.9.86: I was accidentally including all the code in the NPM package, package size reduced from 2.5 MB -> 53 kB lmao
 - 0.9.85: Forgot to make `basePath` optional in `importDefs`, if it's just an array of objects or somethin you don't need it!
 - 0.9.84: jk I use `targetKey` a lot, so set it you lazy nerds! (myself included)

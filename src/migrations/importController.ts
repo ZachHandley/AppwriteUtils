@@ -1,13 +1,10 @@
-import { ID, type Databases, type Storage } from "node-appwrite";
+import { ID, Query, type Databases, type Storage } from "node-appwrite";
 import type {
   AppwriteConfig,
   ConfigCollection,
   ConfigDatabase,
-  ConfigDatabases,
-  ImportDefs,
   ImportDef,
   AttributeMappings,
-  ConfigCollections,
 } from "./schema.js";
 import type { ImportDataActions } from "./importDataActions.js";
 import { checkForCollection } from "./collections.js";
@@ -16,13 +13,9 @@ import fs from "fs";
 import { convertObjectByAttributeMappings } from "./converters.js";
 import _ from "lodash";
 import { documentExists } from "./queue.js";
-
-type CurrentImportDef = {
-  importDefs: ImportDefs;
-  context: any;
-  items: any[];
-  attributeMappings: AttributeMappings;
-};
+import { areCollectionNamesSame } from "@/utils/index.js";
+import type { SetupOptions } from "@/utilsController.js";
+import { resolveAndUpdateRelationships } from "./relationships.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -30,201 +23,277 @@ export class ImportController {
   private storage: Storage;
   private appwriteFolderPath: string;
   private importDataActions: ImportDataActions;
-  private curImportDef: CurrentImportDef | undefined;
-  private afterImportActionsContexts: any[] = [];
+  private setupOptions: SetupOptions;
+  private documentCache: Map<string, any>;
+  private batchLimit: number = 25; // Define batch size limit
+  private postImportActionsQueue: {
+    context: any;
+    finalItem: any;
+    attributeMappings: AttributeMappings;
+  }[] = [];
 
   constructor(
     config: AppwriteConfig,
     database: Databases,
     storage: Storage,
     appwriteFolderPath: string,
-    importDataActions: ImportDataActions
+    importDataActions: ImportDataActions,
+    setupOptions: SetupOptions
   ) {
     this.config = config;
     this.database = database;
     this.storage = storage;
     this.appwriteFolderPath = appwriteFolderPath;
     this.importDataActions = importDataActions;
+    this.setupOptions = setupOptions;
+    this.documentCache = new Map();
   }
 
   async run() {
-    if (!this.database || !this.storage || !this.config) {
-      throw new Error("Database or storage not initialized");
+    const databasesToRun = this.config.databases
+      .filter(
+        (db) =>
+          (areCollectionNamesSame(db.name, this.config!.databases[0].name) &&
+            this.setupOptions.runProd) ||
+          (areCollectionNamesSame(db.name, this.config!.databases[1].name) &&
+            this.setupOptions.runStaging) ||
+          (areCollectionNamesSame(db.name, this.config!.databases[2].name) &&
+            this.setupOptions.runDev)
+      )
+      .map((db) => db.name);
+
+    for (let db of this.config.databases) {
+      if (
+        db.name.toLowerCase().trim().replace(" ", "") === "migrations" ||
+        !databasesToRun.includes(db.name)
+      ) {
+        continue;
+      }
+      if (!db.$id) {
+        const databases = await this.database!.list([
+          Query.equal("name", db.name),
+        ]);
+        if (databases.databases.length > 0) {
+          db.$id = databases.databases[0].$id;
+        }
+      }
+      console.log(`---------------------------------`);
+      console.log(`Starting import data for database: ${db.name}`);
+      console.log(`---------------------------------`);
+      await this.importCollections(db);
     }
   }
 
-  sortCollections = (configCollections: ConfigCollections) => {
-    // Sort based on name for right now
-    return configCollections.sort((a, b) => {
-      if (a.name < b.name) {
-        return -1;
-      }
-      if (a.name > b.name) {
-        return 1;
-      }
-      return 0;
-    });
-  };
-
   async importCollections(db: ConfigDatabase) {
-    const configCollections = this.sortCollections(this.config.collections);
-    for (const collection of configCollections) {
-      if (!collection.importDefs || collection.importDefs.length === 0) {
-        console.warn(
-          `No import definitions found for collection: ${collection.name}`
-        );
-        continue;
-      }
-      const collectionFound = await checkForCollection(
-        this.database!,
+    for (const collection of this.config.collections) {
+      const collectionExists = await checkForCollection(
+        this.database,
         db.$id,
         collection
       );
-      if (!collectionFound) {
-        console.error(`Collection not found: ${collection.name}`);
+      if (!collectionExists) {
+        console.warn(`No collection found for ${collection.name}`);
         continue;
       }
-      await this.importCollection(collection, db);
+
+      const updatedCollection = { ...collection, $id: collectionExists.$id };
+      await this.processImportDefinitions(db, updatedCollection);
+      await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
+      await this.executePostImportActions();
     }
   }
 
-  async importCollection(collection: ConfigCollection, db: ConfigDatabase) {
-    // Separate import definitions by type
-    const creates = collection.importDefs.filter(
-      (def) => !def.type || def.type === "create"
-    );
-    const updates = collection.importDefs.filter(
+  async processImportDefinitions(
+    db: ConfigDatabase,
+    collection: ConfigCollection
+  ) {
+    this.documentCache.clear();
+    const updateDefs = collection.importDefs.filter(
       (def) => def.type === "update"
     );
+    const createDefs = collection.importDefs.filter(
+      (def) => def.type === "create" || !def.type
+    );
 
-    // Initialize context sharing structure
-    const sharedContext = {
+    // Process create import definitions first
+    for (const importDef of createDefs) {
+      const dataToImport = await this.loadData(importDef);
+      if (!dataToImport) continue;
+
+      console.log(
+        `Processing create definitions for collection ID: ${collection.$id}`
+      );
+      await this.processBatch(
+        db,
+        collection,
+        importDef,
+        dataToImport,
+        updateDefs
+      );
+    }
+
+    // Process update import definitions
+    for (const importDef of updateDefs) {
+      const dataToImport = await this.loadData(importDef);
+      if (!dataToImport) continue;
+
+      console.log(
+        `Processing update definitions for collection ID: ${collection.$id}`
+      );
+      await this.processBatch(db, collection, importDef, dataToImport);
+    }
+  }
+
+  async loadData(importDef: ImportDef): Promise<any[]> {
+    const filePath = path.resolve(this.appwriteFolderPath, importDef.filePath);
+    if (!fs.existsSync(filePath)) {
+      console.error(`File not found: ${filePath}`);
+      return [];
+    }
+
+    const rawData = fs.readFileSync(filePath, "utf8");
+    return importDef.basePath
+      ? JSON.parse(rawData)[importDef.basePath]
+      : JSON.parse(rawData);
+  }
+
+  createContext(db: ConfigDatabase, collection: ConfigCollection, item: any) {
+    return {
+      ...item, // Spread the item data for easy access to its properties
       dbId: db.$id,
       dbName: db.name,
       collId: collection.$id,
       collName: collection.name,
-      docId: "",
-      createdDoc: {},
+      docId: "", // Initially empty, will be filled once the document is created or identified
+      createdDoc: {}, // Initially null, to be updated when the document is created
     };
-
-    // Process creates
-    for (const importDef of creates) {
-      await this.runImportDef(importDef, sharedContext);
-    }
-
-    // Process updates with shared context
-    for (const importDef of updates) {
-      await this.runImportDef(importDef, sharedContext);
-    }
   }
 
-  async runImportDef(importDef: ImportDef, sharedContext: any) {
-    const filePath = path.resolve(this.appwriteFolderPath, importDef.filePath);
-    if (!fs.existsSync(filePath)) {
-      console.error(`File not found: ${filePath}`);
-      return;
-    }
-    const file = fs.readFileSync(filePath, "utf8");
-    const data = JSON.parse(file);
-    const dataToImport = importDef.basePath ? data[importDef.basePath] : data;
-    if (!dataToImport) {
-      console.error(`Base path not found: ${importDef.basePath}`);
-      return;
-    }
-    if (importDef.type === "create") {
-      await this.importDataForDatabase(dataToImport, sharedContext, importDef);
-    } else if (importDef.type === "update") {
-      await this.updateDataForDatabase(dataToImport, sharedContext, importDef);
-    }
+  async transformData(
+    item: any,
+    attributeMappings: AttributeMappings
+  ): Promise<any> {
+    const convertedItem = convertObjectByAttributeMappings(
+      item,
+      attributeMappings
+    );
+    return this.importDataActions.runConverterFunctions(
+      convertedItem,
+      attributeMappings
+    );
   }
 
-  /**
-   * This function creates new records from an importDef of
-   * type create. It will also handle fileData attributes by
-   * uploading files (scheduling) to Appwrite Storage.
-   * @param data Data to import from file or placeholder
-   * @param sharedContext Shared context for the import
-   * @param importDef Import definition
-   */
-  async importDataForDatabase(
-    data: any[],
-    sharedContext: any,
-    importDef: ImportDef
+  async processBatch(
+    db: ConfigDatabase,
+    collection: ConfigCollection,
+    importDef: ImportDef,
+    dataToImport: any[],
+    updateDefs: ImportDef[] = []
   ) {
-    for (const item of data) {
-      let context = { ...sharedContext, ...item };
-      const convertedItem = convertObjectByAttributeMappings(
-        item,
-        sharedContext.attributeMappings
-      );
-      const finalItemDone = await this.importDataActions.runConverterFunctions(
-        convertedItem,
-        importDef.attributeMappings
-      );
-      const finalItem = _.cloneDeep(finalItemDone);
-      const attributeMappings = this.getAttributeMappingsWithActions(
-        importDef.attributeMappings,
-        sharedContext,
-        finalItem
-      );
+    for (let i = 0; i < dataToImport.length; i += this.batchLimit) {
+      const batch = dataToImport.slice(i, i + this.batchLimit);
+      for (const item of batch) {
+        let context = this.createContext(db, collection, item);
+        const finalItem = await this.transformData(
+          item,
+          importDef.attributeMappings
+        );
 
-      const existenceCheck = await documentExists(
-        this.database,
-        sharedContext.dbId,
-        sharedContext.collId,
-        finalItem
-      );
-      if (existenceCheck) {
-        console.log(`Document already exists in create, skipping...`);
-        continue;
+        context = { ...context, ...finalItem };
+
+        const attributeMappingsWithActions =
+          this.getAttributeMappingsWithActions(
+            importDef.attributeMappings,
+            context,
+            finalItem
+          );
+
+        if (
+          !(await this.importDataActions.validateItem(
+            finalItem,
+            importDef.attributeMappings,
+            context
+          ))
+        ) {
+          console.error("Validation failed for item:", finalItem);
+          continue;
+        }
+
+        if (importDef.type === "create" || !importDef.type) {
+          await this.handleCreate(context, finalItem, updateDefs);
+        } else {
+          await this.handleUpdate(context, finalItem, importDef);
+        }
+        if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
+          this.postImportActionsQueue.push({
+            context: context,
+            finalItem: finalItem,
+            attributeMappings: attributeMappingsWithActions,
+          });
+        }
       }
-      context = { ...context, ...finalItem };
-      const isValid = await this.importDataActions.validateItem(
-        finalItem,
-        importDef.attributeMappings,
-        sharedContext
-      );
-      if (!isValid) {
-        console.log(`Document not valid: ${JSON.stringify(finalItem)}`);
-        continue;
-      }
-      const createdDocument = await this.database.createDocument(
+    }
+  }
+
+  async handleCreate(context: any, finalItem: any, updateDefs?: ImportDef[]) {
+    const existing = await documentExists(
+      this.database,
+      context.dbId,
+      context.collId,
+      finalItem
+    );
+    if (!existing) {
+      const createdDoc = await this.database.createDocument(
         context.dbId,
         context.collId,
         ID.unique(),
         finalItem
       );
-      context.docId = createdDocument.$id;
-      context.createdDoc = createdDocument;
-      context = { ...context, ...createdDocument };
-      this.afterImportActionsContexts.push(context);
+      context.docId = createdDoc.$id;
+      context.createdDoc = createdDoc;
+      context = { ...context, ...createdDoc };
+
+      // Populate document cache for updates
+      if (updateDefs) {
+        updateDefs.forEach((def) => {
+          if (def.updateMapping) {
+            this.documentCache.set(
+              `${finalItem[def.updateMapping.targetField]}`,
+              context
+            );
+          }
+        });
+      }
+
+      console.log(`Created document ID: ${createdDoc.$id}`);
+    } else {
+      console.log("Document already exists, skipping creation.");
     }
   }
 
-  async updateDataForDatabase(
-    data: any[],
-    sharedContext: any,
-    importDef: ImportDef
-  ) {
-    for (const item of data) {
-      const context = { ...sharedContext, ...item };
-    }
-  }
+  async handleUpdate(context: any, finalItem: any, importDef: ImportDef) {
+    const updateMapping = importDef.updateMapping;
+    if (updateMapping) {
+      const keyToMatch = updateMapping.originalIdField;
+      const origId = context[keyToMatch];
+      const targetId = finalItem[updateMapping.targetField];
+      const cachedContext = this.documentCache.get(`${origId}`);
+      context = { ...context, ...cachedContext };
 
-  createImportContext(
-    db: ConfigDatabase,
-    collection: ConfigCollection,
-    item: any
-  ) {
-    return {
-      dbId: db.$id,
-      dbName: db.name,
-      collId: collection.$id,
-      collName: collection.name,
-      docId: "",
-      createdDoc: {},
-      ...item,
-    };
+      if (cachedContext) {
+        const updatedDoc = await this.database.updateDocument(
+          context.dbId,
+          context.collId,
+          context.docId,
+          finalItem
+        );
+        console.log(`Updated document ID: ${updatedDoc.$id}`);
+      } else {
+        console.error(
+          `Document to update not found in cache targeting ${keyToMatch}:${origId}`
+        );
+      }
+    }
   }
 
   getAttributeMappingsWithActions(
@@ -240,11 +309,8 @@ export class ImportController {
           context,
           item
         );
-        // Check if the path starts with "http" or "https" to avoid resolving it with the base path
         if (!mappingFilePath.toLowerCase().startsWith("http")) {
-          console.log(
-            `Resolving file path: ${mappingFilePath} mapping DOES NOT START WITH HTTP`
-          );
+          console.log(`Resolving file path: ${mappingFilePath}`);
           mappingFilePath = path.resolve(
             this.appwriteFolderPath,
             mappingFilePath
@@ -264,13 +330,27 @@ export class ImportController {
             mapping.fileData.name,
           ],
         };
-        // Ensure postImportActions array exists and add the new action
         const postImportActions = mapping.postImportActions
           ? [...mapping.postImportActions, afterImportAction]
           : [afterImportAction];
-        return { ...mapping, postImportActions }; // Correctly assign postImportActions
+        return { ...mapping, postImportActions };
       }
       return mapping;
     });
+  }
+
+  async executePostImportActions() {
+    for (const action of this.postImportActionsQueue) {
+      const { context, finalItem, attributeMappings } = action;
+      console.log(
+        `Executing post-import actions for document: ${context.docId}`
+      );
+      await this.importDataActions.executeAfterImportActions(
+        finalItem,
+        attributeMappings,
+        context
+      );
+    }
+    this.postImportActionsQueue = [];
   }
 }
