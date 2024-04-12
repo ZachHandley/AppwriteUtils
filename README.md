@@ -188,6 +188,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.91: Added examples to the example setup with `update` importDef type and photos from URL's
 - 0.9.90: Rewrote the import process entirely to make it more modular and batched
 - 0.9.87 - 0.9.89: Ignore these I was messing up the deployment whooooops
 - 0.9.86: I was accidentally including all the code in the NPM package, package size reduced from 2.5 MB -> 53 kB lmao

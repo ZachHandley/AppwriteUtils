@@ -357,7 +357,7 @@
                 "description": "The field in the target collection that matches the original ID for updates. Optional, defaults to the same as originalIdField if not provided."
               }
             },
-            "required": ["originalIdField"],
+            "required": ["originalIdField", "targetField"],
             "description": "Configuration for mapping and resolving the update during data import. Required if type is 'update'.",
             "nullable": true
           },

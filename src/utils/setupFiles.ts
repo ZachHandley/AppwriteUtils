@@ -124,6 +124,10 @@ collections:
         required: false
         min: 0
         max: 100
+      - key: 'idOrig'
+        type: 'string'
+        size: 20
+        required: false
       - key: 'ownerIdOrig'
         type: 'string'
         size: 255
@@ -146,7 +150,7 @@ collections:
         basePath: 'RECORDS'
         attributeMappings:
           - oldKey: 'id'
-            targetKey: '$id'
+            targetKey: 'idOrig'
           - oldKey: 'name'
             targetKey: 'name'
           - oldKey: 'breed'
@@ -160,7 +164,18 @@ collections:
             converters: ['stringifyObject']
           - oldKey: 'vetRecords.[any].id'
             targetKey: 'vetRecordIds'
-            converters: ['anyToStringArray']`;
+            converters: ['anyToStringArray']
+      - filePath: 'importData/dogs.json'
+        basePath: 'RECORDS'
+        type: 'update'
+        updateMapping: { originalIdField: 'id', targetField: 'idOrig' }
+        attributeMappings:
+          - oldKey: 'name'
+            targetKey: 'name'
+          - oldKey: 'breed'
+            targetKey: 'breed'
+          - oldKey: 'age'
+            targetKey: 'age'`;
 
 const configFile = `# yaml-language-server: $schema=./.appwrite/appwriteUtilsConfigSchema.json
 # Basic Appwrite configuration settings
