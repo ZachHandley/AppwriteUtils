@@ -188,6 +188,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.92: forgot I can't use stupid `import something from '@/utils'` in `esbuild`, stupid, I miss Vite :(
 - 0.9.91: Added examples to the example setup with `update` importDef type and photos from URL's
 - 0.9.90: Rewrote the import process entirely to make it more modular and batched
 - 0.9.87 - 0.9.89: Ignore these I was messing up the deployment whooooops

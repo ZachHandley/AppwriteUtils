@@ -13,8 +13,8 @@ import fs from "fs";
 import { convertObjectByAttributeMappings } from "./converters.js";
 import _ from "lodash";
 import { documentExists } from "./queue.js";
-import { areCollectionNamesSame } from "@/utils/index.js";
-import type { SetupOptions } from "@/utilsController.js";
+import { areCollectionNamesSame } from "../utils/index.js";
+import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
 
 export class ImportController {
