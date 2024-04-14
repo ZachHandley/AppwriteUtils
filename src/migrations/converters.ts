@@ -230,7 +230,12 @@ export const converterFunctions = {
     if (!Array.isArray(array)) return array;
     return _.filter(
       array,
-      (element) => element !== null && element !== undefined && element !== ""
+      (element) =>
+        element !== null &&
+        element !== undefined &&
+        element !== "" &&
+        element !== "undefined" &&
+        element !== "null"
     );
   },
 
