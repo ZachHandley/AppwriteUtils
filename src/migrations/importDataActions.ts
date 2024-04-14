@@ -73,6 +73,7 @@ export class ImportDataActions {
     const convertedItem = convertObjectBySchema(item, conversionSchema);
     // Merge the converted item back into the original item object
     Object.assign(item, convertedItem);
+    console.log("Converted item:", item);
     return item;
   }
 

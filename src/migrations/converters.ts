@@ -237,9 +237,9 @@ export const converterFunctions = {
   /**
    * Tries to parse a date from various formats using Luxon with enhanced error reporting.
    * @param {string | number} input The input date as a string or timestamp.
-   * @return {DateTime | null} The parsed Luxon DateTime object or null if parsing failed.
+   * @return {string | null} The parsed date in ISO 8601 format or null if parsing failed.
    */
-  safeParseDate(input: string | number): DateTime | null {
+  safeParseDate(input: string | number): string | null {
     const formats = [
       "M/d/yyyy HH:mm:ss", // U.S. style with time
       "d/M/yyyy HH:mm:ss", // Rest of the world style with time
@@ -279,7 +279,7 @@ export const converterFunctions = {
     if (typeof input === "number") {
       const dateFromMillis = DateTime.fromMillis(input);
       if (dateFromMillis.isValid) {
-        return dateFromMillis;
+        return dateFromMillis.toISO();
       }
     }
 
@@ -299,7 +299,7 @@ export const converterFunctions = {
       return null;
     }
 
-    return date;
+    return date.toISO();
   },
 };
 
