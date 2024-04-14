@@ -266,16 +266,14 @@ export const converterFunctions = {
 
     // If the cleaned number starts with 1 and is 11 digits, assume it's a US number with country code
     if (digits.startsWith("1") && digits.length === 11) {
-      return `+${digits.slice(0, 1)} (${digits.slice(1, 4)}) ${digits.slice(
+      return `+${digits.slice(0, 1)}${digits.slice(1, 4)}${digits.slice(
         4,
         7
-      )}-${digits.slice(7)}`;
+      )}${digits.slice(7)}`;
     }
     // If it's exactly 10 digits, assume it's a US number without country code
     else if (digits.length === 10) {
-      return `+1 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(
-        6
-      )}`;
+      return `+1 ${digits.slice(0, 3)}${digits.slice(3, 6)}${digits.slice(6)}`;
     }
     // Otherwise, return the original value as it doesn't conform to expected US formats
     return value;
