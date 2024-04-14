@@ -144,35 +144,35 @@ export const converterFunctions = {
     return bestSplit;
   },
 
-  joinStrings(values: any[]): string {
+  joinValues(values: any[]): string {
     return values.join("");
   },
 
-  joinStringsBySpace(values: any[]): string {
+  joinBySpace(values: any[]): string {
     return values.join(" ");
   },
 
-  joinStringsByComma(values: any[]): string {
+  joinByComma(values: any[]): string {
     return values.join(",");
   },
 
-  joinStringsByPipe(values: any[]): string {
+  joinByPipe(values: any[]): string {
     return values.join("|");
   },
 
-  joinStringsBySemicolon(values: any[]): string {
+  joinBySemicolon(values: any[]): string {
     return values.join(";");
   },
 
-  joinStringsByColon(values: any[]): string {
+  joinByColon(values: any[]): string {
     return values.join(":");
   },
 
-  joinStringsBySlash(values: any[]): string {
+  joinBySlash(values: any[]): string {
     return values.join("/");
   },
 
-  joinStringsByHyphen(values: any[]): string {
+  joinByHyphen(values: any[]): string {
     return values.join("-");
   },
 

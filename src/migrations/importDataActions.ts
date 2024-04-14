@@ -58,6 +58,13 @@ export class ImportDataActions {
             converterName = converterName
               .replace("[Arr]", "")
               .replace("[arr]", "");
+          } else if (
+            (!Array.isArray(value) && converterName.includes("[Arr]")) ||
+            converterName.includes("[arr]")
+          ) {
+            converterName = converterName
+              .replace("[Arr]", "")
+              .replace("[arr]", "");
           }
           const converterFunction =
             converterFunctions[
