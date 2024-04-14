@@ -155,6 +155,7 @@ If the converter name has `[arr]` or `[Arr]` anywhere in it, the converter will 
 - `joinByColon(values: any[]): string`
 - `joinBySlash(values: any[]): string`
 - `joinByHyphen(values: any[]): string`
+- `convertPhoneStringToUSInternational(value: string): +1 formatted string`
 
 ### Validation Rules
 
