@@ -199,6 +199,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.95: Fixed a context issue with updating documents in their afterActions using their created data
 - 0.9.94: Added a bunch of different splitting functions for more fine-grained control and updated how the `trySplitByDifferentSeparators` works to fix the logic. Added converters are above. Also made it so converters and validation actions can take arrays for the item, because why not.
 - 0.9.93: Moved relationship resolution to the end
 - 0.9.92: forgot I can't use stupid `import something from '@/utils'` in `esbuild`, stupid, I miss Vite :(

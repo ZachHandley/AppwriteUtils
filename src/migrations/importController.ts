@@ -223,11 +223,17 @@ export class ImportController {
           continue;
         }
 
+        let afterContext;
         if (importDef.type === "create" || !importDef.type) {
-          await this.handleCreate(context, finalItem, updateDefs);
+          afterContext = await this.handleCreate(
+            context,
+            finalItem,
+            updateDefs
+          );
         } else {
-          await this.handleUpdate(context, finalItem, importDef);
+          afterContext = await this.handleUpdate(context, finalItem, importDef);
         }
+        context = { ...context, ...afterContext };
         if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
           this.postImportActionsQueue.push({
             context: context,
@@ -273,6 +279,7 @@ export class ImportController {
     } else {
       console.log("Document already exists, skipping creation.");
     }
+    return context;
   }
 
   async handleUpdate(context: any, finalItem: any, importDef: ImportDef) {
@@ -298,6 +305,7 @@ export class ImportController {
         );
       }
     }
+    return context;
   }
 
   getAttributeMappingsWithActions(
