@@ -246,12 +246,12 @@ export class ImportDataActions {
               .map((item) => item[pathParts[index + 1]])
               .filter((item) => item !== undefined);
           } else if (typeof acc === "object") {
-            return Object.values(acc).map(
-              (item: any) => item[pathParts[index + 1]]
-            );
+            return Object.values(acc)
+              .map((item: any) => item[pathParts[index + 1]])
+              .filter((item) => item !== undefined);
           }
         } else {
-          return acc[part];
+          return acc?.[part];
         }
       }, currentContext);
     };
@@ -265,11 +265,15 @@ export class ImportDataActions {
         const path = match[1];
         // Resolve the path, handling [any] notation and arrays/objects
         const resolvedValue = resolvePath(path, { ...context, ...item });
-        // If it's an array (from [any] notation), join the values; adjust as needed
-        const value = Array.isArray(resolvedValue)
-          ? resolvedValue.join(", ")
-          : resolvedValue;
-        resolvedString = resolvedString.replace(match[0], value);
+        if (resolvedValue !== undefined) {
+          // If it's an array (from [any] notation), join the values; adjust as needed
+          const value = Array.isArray(resolvedValue)
+            ? resolvedValue.join(", ")
+            : resolvedValue;
+          resolvedString = resolvedString.replace(match[0], value);
+        } else {
+          console.log(`Failed to resolve ${template} in context: `, context);
+        }
       }
       // console.log(`Resolved string: ${resolvedString}`);
       return resolvedString;
@@ -277,11 +281,15 @@ export class ImportDataActions {
       // Recursively resolve templates for each property in the object
       const resolvedObject: any = Array.isArray(template) ? [] : {};
       for (const key in template) {
-        resolvedObject[key] = this.resolveTemplate(
+        const resolvedValue = this.resolveTemplate(
           template[key],
           context,
           item
         );
+        if (resolvedValue !== undefined) {
+          // Only assign if resolvedValue is not undefined
+          resolvedObject[key] = resolvedValue;
+        }
       }
       return resolvedObject;
     }

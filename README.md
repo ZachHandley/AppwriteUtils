@@ -104,6 +104,13 @@ npx appwrite-utils-migrate --dev --import
 
 By simplifying the migration process, AppwriteUtils enables developers to focus on building their applications, knowing that their data management and schema updates are handled efficiently.
 
+## Helper Functions
+
+Part of this package's goal is utility, to make using Appwrite a bit easier (though it is already quite easy). As such, I've added utility functions, and I'll put them here as I make them
+
+- `getFileViewUrl` - Takes an `endpoint`, `projectId`, `bucketId`, `fileId`, and optionally the current users `jwt` to generate a URL to view a file in storage
+- `getFileDownloadUrl` - same as the above but... for downloads
+
 ## Complete List of Converters, afterImportActions, and Validation Rules
 
 ### Converters
@@ -200,6 +207,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.984: Added `getFileViewUrl` and `getFileDownloadUrl` helper functions to generate the URL's needed with an optional JWT from the current user (if the file needs their permission). Also updated `resolveTemplate` inside `importDataActions` to better *not* resolve `undefined` in some cases
 - 0.9.982: Made the file upload able to deal with arrays of file imports
 - 0.9.981: Made `documentExists` check for the attribute types in the collection due to running into too many problems with arrays
 - 0.9.98: Added `[arr]` or `[Arr]` arguments to converters. If you use this value anywhere in the converter string, it will

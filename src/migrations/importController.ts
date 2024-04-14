@@ -225,18 +225,31 @@ export class ImportController {
 
         let afterContext;
         if (importDef.type === "create" || !importDef.type) {
-          afterContext = await this.handleCreate(
+          const createdContext = await this.handleCreate(
             context,
             finalItem,
             updateDefs
           );
+          if (createdContext) {
+            afterContext = createdContext;
+          }
         } else {
-          afterContext = await this.handleUpdate(context, finalItem, importDef);
+          const updatedContext = await this.handleUpdate(
+            context,
+            finalItem,
+            importDef
+          );
+          if (updatedContext) {
+            afterContext = updatedContext;
+          }
         }
-        context = { ...context, ...afterContext };
+        if (afterContext) {
+          context = { ...context, ...afterContext };
+        }
+        const afterImportActionContext = structuredClone(context);
         if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
           this.postImportActionsQueue.push({
-            context: context,
+            context: afterImportActionContext,
             finalItem: finalItem,
             attributeMappings: attributeMappingsWithActions,
           });
@@ -276,10 +289,11 @@ export class ImportController {
       }
 
       console.log(`Created document ID: ${createdDoc.$id}`);
+      return context;
     } else {
       console.log("Document already exists, skipping creation.");
+      return;
     }
-    return context;
   }
 
   async handleUpdate(context: any, finalItem: any, importDef: ImportDef) {
@@ -298,14 +312,16 @@ export class ImportController {
           context.docId,
           finalItem
         );
+        context = { ...context, ...updatedDoc };
         console.log(`Updated document ID: ${updatedDoc.$id}`);
+        return context;
       } else {
         console.error(
           `Document to update not found in cache targeting ${keyToMatch}:${origId}`
         );
+        return;
       }
     }
-    return context;
   }
 
   getAttributeMappingsWithActions(

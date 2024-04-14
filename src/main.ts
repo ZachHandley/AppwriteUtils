@@ -4,6 +4,7 @@ export type { AppwriteConfig } from "./migrations/schema.js";
 export type { ConverterFunctions } from "./migrations/converters.js";
 export type { ValidationRules } from "./migrations/validationRules.js";
 export type { AfterImportActions } from "./migrations/afterImportActions.js";
+export { getFileViewUrl, getFileDownloadUrl } from "./utils/index.js";
 
 const args = process.argv.slice(2);
 
