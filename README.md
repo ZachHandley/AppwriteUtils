@@ -147,6 +147,13 @@ If the converter name has `[arr]` or `[Arr]` anywhere in it, the converter will 
 - `parseObject(jsonString: string): any`
 - `safeParseDate(input: string | number): DateTime | null`
 - `removeInvalidElements(input: any[]): any[]`
+- `joinStrings(values: string[]): string` (Nothing to join them, just merges em)
+- `joinStringsByComma(values: any[]): string`
+- `joinStringsByPipe(values: any[]): string`
+- `joinStringsBySemicolon(values: any[]): string`
+- `joinStringsByColon(values: any[]): string`
+- `joinStringsBySlash(values: any[]): string`
+- `joinStringsByHyphen(values: any[]): string`
 
 ### Validation Rules
 
@@ -213,6 +220,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.986: Added join operators for arrays, join those divorcees!
 - 0.9.985: Added the ability to import Users with your data, noted in the #key-features, here's the description:
 
   - **User Import**: Quickly import users and their associated data by setting a column as the `usersCollectionName`, it will then map any fields with the target key of `name`, `email`, `prefs`, `password`, `phone`, `userId`, and `labels` to create a user object. Any additional info will be mapped to the user like normal. Do not include the users attributes in the attribute map for the collection (the ones mentioned above), they will not be set. The created user and the associated document will have the same `$id`.

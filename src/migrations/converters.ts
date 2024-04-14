@@ -144,6 +144,34 @@ export const converterFunctions = {
     return bestSplit;
   },
 
+  joinStrings(values: any[]): string {
+    return values.join("");
+  },
+
+  joinStringsByComma(values: any[]): string {
+    return values.join(",");
+  },
+
+  joinStringsByPipe(values: any[]): string {
+    return values.join("|");
+  },
+
+  joinStringsBySemicolon(values: any[]): string {
+    return values.join(";");
+  },
+
+  joinStringsByColon(values: any[]): string {
+    return values.join(":");
+  },
+
+  joinStringsBySlash(values: any[]): string {
+    return values.join("/");
+  },
+
+  joinStringsByHyphen(values: any[]): string {
+    return values.join("-");
+  },
+
   splitByComma(value: string): string[] {
     return value.split(",");
   },
