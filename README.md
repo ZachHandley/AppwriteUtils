@@ -116,6 +116,17 @@ Converters take a value (in the import data) and convert it, before validating i
 - `anyToAnyArray(value: any, separator?: string): any[]`
 - `anyToStringArray(value: any): string[]`
 - `trySplitByDifferentSeparators(value: string): string[]`
+- `removeStartEndQuotes(value: string): string`
+- `splitByComma(value: string): string[]`
+- `splitByPipe(value: string): string[]`
+- `splitBySemicolon(value: string): string[]`
+- `splitByColon(value: string): string[]`
+- `splitBySlash(value: string): string[]`
+- `splitByBackslash(value: string): string[]`
+- `splitBySpace(value: string): string[]`
+- `splitByDot(value: string): string[]`
+- `splitByUnderscore(value: string): string[]`
+- `splitByHyphen(value: string): string[]`
 - `pickFirstElement(value: any[]): any`
 - `pickLastElement(value: any[]): any`
 - `stringifyObject(object: any): string`
@@ -188,6 +199,8 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.94: Added a bunch of different splitting functions for more fine-grained control and updated how the `trySplitByDifferentSeparators` works to fix the logic. Added converters are above. Also made it so converters and validation actions can take arrays for the item, because why not.
+- 0.9.93: Moved relationship resolution to the end
 - 0.9.92: forgot I can't use stupid `import something from '@/utils'` in `esbuild`, stupid, I miss Vite :(
 - 0.9.91: Added examples to the example setup with `update` importDef type and photos from URL's
 - 0.9.90: Rewrote the import process entirely to make it more modular and batched

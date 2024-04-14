@@ -92,6 +92,15 @@ export const converterFunctions = {
   },
 
   /**
+   * Removes the start and end quotes from a string.
+   * @param value The string to remove quotes from.
+   * @return The string with quotes removed.
+   **/
+  removeStartEndQuotes(value: string): string {
+    return value.replace(/^["']|["']$/g, "");
+  },
+
+  /**
    * Tries to split a string by different separators and returns the split that has the most uniform segment lengths.
    * This can be particularly useful for structured data like phone numbers.
    * @param value The string to split.
@@ -100,10 +109,10 @@ export const converterFunctions = {
   trySplitByDifferentSeparators(value: string): string[] {
     const separators = [",", ";", "|", ":", "/", "\\"];
     let bestSplit: string[] = [];
-    let bestScore = -Infinity; // Initialize with a very low score, aiming to maximize it
+    let bestScore = -Infinity;
 
     for (const separator of separators) {
-      const split = value.split(separator);
+      const split = value.split(separator).map((s) => s.trim()); // Ensure we trim spaces
       if (split.length <= 1) continue; // Skip if no actual splitting occurred
 
       // Calculate uniformity in segment length
@@ -115,10 +124,8 @@ export const converterFunctions = {
           0
         ) / lengths.length;
 
-      // Score based on a combination of the number of segments and how uniform their lengths are
-      // The assumption is that more segments and lower variance in their lengths are better
-      // Adjust the scoring formula as needed based on observed data characteristics
-      const score = split.length - lengthVariance; // Example scoring formula
+      // Adjust scoring to prioritize splits with lower variance and/or specific segment count if needed
+      const score = split.length / (1 + lengthVariance); // Adjusted to prioritize lower variance
 
       // Update bestSplit if this split has a better score
       if (score > bestScore) {
@@ -133,6 +140,46 @@ export const converterFunctions = {
     }
 
     return bestSplit;
+  },
+
+  splitByComma(value: string): string[] {
+    return value.split(",");
+  },
+
+  splitByPipe(value: string): string[] {
+    return value.split("|");
+  },
+
+  splitBySemicolon(value: string): string[] {
+    return value.split(";");
+  },
+
+  splitByColon(value: string): string[] {
+    return value.split(":");
+  },
+
+  splitBySlash(value: string): string[] {
+    return value.split("/");
+  },
+
+  splitByBackslash(value: string): string[] {
+    return value.split("\\");
+  },
+
+  splitBySpace(value: string): string[] {
+    return value.split(" ");
+  },
+
+  splitByDot(value: string): string[] {
+    return value.split(".");
+  },
+
+  splitByUnderscore(value: string): string[] {
+    return value.split("_");
+  },
+
+  splitByHyphen(value: string): string[] {
+    return value.split("-");
   },
 
   /**
@@ -380,3 +427,9 @@ export const validateString = (
 ): string | null => {
   return pattern.test(value) ? value : null;
 };
+
+const splitString = converterFunctions.trySplitByDifferentSeparators(
+  "'12/14/2023;01/11/2024;01/25/2024;02/08/2024;02/29/2024;03/14/2024;03/28/2024;04/11/2024;04/25/2024;05/09/2024;05/23/2024;06/06/2024;06/20/2024;07/11/2024;07/25/2024'"
+);
+
+console.log(splitString);

@@ -53,7 +53,11 @@ export class ImportDataActions {
               converterName as keyof typeof converterFunctions
             ];
           if (converterFunction) {
-            return converterFunction(value);
+            if (Array.isArray(value)) {
+              return value.map((item) => converterFunction(item));
+            } else {
+              return converterFunction(value);
+            }
           } else {
             console.warn(
               `Converter function '${converterName}' is not defined.`
@@ -110,7 +114,14 @@ export class ImportDataActions {
         );
 
         // Apply the validation rule
-        const isValid = validationRule(item, ...resolvedParams);
+        let isValid = false;
+        if (Array.isArray(item)) {
+          isValid = item.every((item) =>
+            validationRule(item, ...resolvedParams)
+          );
+        } else {
+          isValid = validationRule(item, ...resolvedParams);
+        }
         if (!isValid) {
           console.error(
             `Validation failed for rule '${action}' with params ${params.join(

@@ -81,6 +81,11 @@ export class ImportController {
       console.log(`Starting import data for database: ${db.name}`);
       console.log(`---------------------------------`);
       await this.importCollections(db);
+      await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
+
+      console.log(`---------------------------------`);
+      console.log(`Finished import data for database: ${db.name}`);
+      console.log(`---------------------------------`);
     }
   }
 
@@ -98,7 +103,6 @@ export class ImportController {
 
       const updatedCollection = { ...collection, $id: collectionExists.$id };
       await this.processImportDefinitions(db, updatedCollection);
-      await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
       await this.executePostImportActions();
     }
   }
