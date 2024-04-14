@@ -427,9 +427,3 @@ export const validateString = (
 ): string | null => {
   return pattern.test(value) ? value : null;
 };
-
-const splitString = converterFunctions.trySplitByDifferentSeparators(
-  "'12/14/2023;01/11/2024;01/25/2024;02/08/2024;02/29/2024;03/14/2024;03/28/2024;04/11/2024;04/25/2024;05/09/2024;05/23/2024;06/06/2024;06/20/2024;07/11/2024;07/25/2024'"
-);
-
-console.log(splitString);
