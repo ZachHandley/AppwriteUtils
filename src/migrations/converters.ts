@@ -148,6 +148,10 @@ export const converterFunctions = {
     return values.join("");
   },
 
+  joinStringsBySpace(values: any[]): string {
+    return values.join(" ");
+  },
+
   joinStringsByComma(values: any[]): string {
     return values.join(",");
   },
