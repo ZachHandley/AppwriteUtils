@@ -184,6 +184,18 @@ export const afterImportActions: AfterImportActions = {
     try {
       const db = getDatabaseFromConfig(config);
       const storage = getStorageFromConfig(config);
+      const collection = await db.getCollection(dbId, collId);
+      const attributes = collection.attributes as any[];
+      const attribute = attributes.find((a) => a.key === fieldName);
+      let isArray = false;
+      if (!attribute) {
+        console.log(
+          `Field ${fieldName} not found in collection ${collId}, weird, skipping...`
+        );
+        return;
+      } else if (attribute.array === true) {
+        isArray = true;
+      }
       if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
         // Create a temporary directory
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appwrite-"));
@@ -207,8 +219,26 @@ export const afterImportActions: AfterImportActions = {
         // Use the full file name (with extension) for creating the file
         const file = await storage.createFile(bucketId, ID.unique(), inputFile);
 
+        const doc = await db.getDocument(dbId, collId, docId);
+        const existingFieldValue = doc[fieldName as keyof typeof doc];
+
+        let updateData: string | string[];
+        if (Array.isArray(existingFieldValue)) {
+          // If the existing field value is an array, create a new array with all existing items plus the new file ID
+          updateData = [...existingFieldValue, file.$id];
+        } else if (existingFieldValue) {
+          // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
+          updateData = [existingFieldValue, file.$id];
+        } else if (isArray) {
+          // If the field is an array and there's no existing value, then that is the value of the array
+          updateData = [file.$id];
+        } else {
+          // If there's no existing value, just use the new file ID
+          updateData = file.$id;
+        }
+
         await db.updateDocument(dbId, collId, docId, {
-          [fieldName]: file.$id,
+          [fieldName]: updateData,
         });
 
         // If the file was downloaded, delete it after uploading
@@ -225,8 +255,27 @@ export const afterImportActions: AfterImportActions = {
         const pathToFile = path.join(filePath, fileFullName);
         const inputFile = InputFile.fromPath(pathToFile, fileName);
         const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+
+        const doc = await db.getDocument(dbId, collId, docId);
+        const existingFieldValue = doc[fieldName as keyof typeof doc];
+
+        let updateData: string | string[];
+        if (Array.isArray(existingFieldValue)) {
+          // If the existing field value is an array, create a new array with all existing items plus the new file ID
+          updateData = [...existingFieldValue, file.$id];
+        } else if (existingFieldValue) {
+          // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
+          updateData = [existingFieldValue, file.$id];
+        } else if (isArray) {
+          // If the field is an array and there's no existing value, then that is the value of the array
+          updateData = [file.$id];
+        } else {
+          // If there's no existing value, just use the new file ID
+          updateData = file.$id;
+        }
+
         await db.updateDocument(dbId, collId, docId, {
-          [fieldName]: file.$id,
+          [fieldName]: updateData,
         });
       }
     } catch (error) {

@@ -1,16 +1,8 @@
-import {
-  Client,
-  Databases,
-  ID,
-  Query,
-  Storage,
-  type Models,
-} from "node-appwrite";
+import { Client, Databases, Storage } from "node-appwrite";
 import { startSetup } from "./migrations/setupDatabase.js";
 import {
   type AppwriteConfig,
   AppwriteConfigSchema,
-  type CollectionCreate,
 } from "./migrations/schema.js";
 import path from "path";
 import fs from "fs";
@@ -18,16 +10,9 @@ import { load } from "js-yaml";
 import { ImportDataActions } from "./migrations/importDataActions.js";
 import {
   converterFunctions,
-  convertObjectByAttributeMappings,
   type ConverterFunctions,
 } from "./migrations/converters.js";
-import {
-  areCollectionNamesSame,
-  readFileSync,
-} from "./utils/helperFunctions.js";
-import { checkForCollection } from "./migrations/collections.js";
-import { resolveAndUpdateRelationships } from "./migrations/relationships.js";
-import { documentExists } from "./migrations/queue.js";
+import { readFileSync } from "./utils/helperFunctions.js";
 import {
   afterImportActions,
   type AfterImportActions,

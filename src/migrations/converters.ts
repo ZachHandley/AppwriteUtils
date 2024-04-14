@@ -73,7 +73,7 @@ export const converterFunctions = {
     if (Array.isArray(value)) {
       return value.map((item) => String(item));
     } else if (typeof value === "string" && value.length > 0) {
-      return [`${value}`];
+      return [value];
     }
     return [];
   },
