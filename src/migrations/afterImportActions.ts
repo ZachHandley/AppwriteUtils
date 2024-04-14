@@ -1,4 +1,11 @@
-import { Databases, Storage, InputFile, Query, ID } from "node-appwrite";
+import {
+  Databases,
+  Storage,
+  InputFile,
+  Query,
+  ID,
+  type Models,
+} from "node-appwrite";
 import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
@@ -177,7 +184,6 @@ export const afterImportActions: AfterImportActions = {
     try {
       const db = getDatabaseFromConfig(config);
       const storage = getStorageFromConfig(config);
-
       if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
         // Create a temporary directory
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appwrite-"));

@@ -71,7 +71,7 @@ export const converterFunctions = {
     if (Array.isArray(value)) {
       return value.map((item) => String(item));
     } else if (typeof value === "string" && value.length > 0) {
-      return [String(value)];
+      return [`${value}`];
     }
     return [];
   },
@@ -237,6 +237,7 @@ export const converterFunctions = {
    */
   safeParseDate(input: string | number): DateTime | null {
     const formats = [
+      "M/d/yyyy", // Adjusted format for "5/11/2020"
       "dd-LL-yyyy",
       "LL-dd-yyyy",
       "dd/LL/yyyy",
@@ -258,18 +259,26 @@ export const converterFunctions = {
       "yyyy-MM-dd HH:mm",
     ];
 
+    // Attempt to parse as a timestamp first if input is a number
+    if (typeof input === "number") {
+      const dateFromMillis = DateTime.fromMillis(input);
+      if (dateFromMillis.isValid) {
+        return dateFromMillis;
+      }
+    }
+
+    // Attempt to parse as an ISO string or SQL string
     let date = DateTime.fromISO(String(input));
-    if (!date.isValid)
-      date = DateTime.fromMillis(
-        typeof input === "number" ? input : parseInt(input)
-      );
     if (!date.isValid) date = DateTime.fromSQL(String(input));
-    formats.forEach((format) => {
+
+    // Try each custom format if still not valid
+    for (const format of formats) {
       if (!date.isValid) {
         date = DateTime.fromFormat(String(input), format);
       }
-    });
+    }
 
+    // Return null if no valid date could be parsed
     if (!date.isValid) {
       return null;
     }
