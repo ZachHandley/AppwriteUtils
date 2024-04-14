@@ -109,7 +109,7 @@ By simplifying the migration process, AppwriteUtils enables developers to focus 
 ### Converters
 
 Converters take a value (in the import data) and convert it, before validating it or processing it
-If the input is an array, the converter will be run on each value
+If the converter name has `[arr]` or `[Arr]` anywhere in it, the converter will be run on the array as a whole (assuming it is one), otherwise if it's an array it will run the converter on each item in the array (or string lol)
 
 - `anyToString(value: any): string | null`
 - `anyToNumber(value: any): number | null`

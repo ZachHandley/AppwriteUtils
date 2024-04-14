@@ -48,12 +48,23 @@ export class ImportDataActions {
     const conversionSchema = attributeMappings.reduce((schema, mapping) => {
       schema[mapping.targetKey] = (originalValue: any) => {
         return mapping.converters.reduce((value, converterName) => {
+          let shouldProcessAsArray = false;
+          if (
+            (converterName.includes("[Arr]") ||
+              converterName.includes("[arr]")) &&
+            Array.isArray(value)
+          ) {
+            shouldProcessAsArray = true;
+            converterName = converterName
+              .replace("[Arr]", "")
+              .replace("[arr]", "");
+          }
           const converterFunction =
             converterFunctions[
               converterName as keyof typeof converterFunctions
             ];
           if (converterFunction) {
-            if (Array.isArray(value)) {
+            if (Array.isArray(value) && !shouldProcessAsArray) {
               return value.map((item) => converterFunction(item));
             } else {
               return converterFunction(value);
