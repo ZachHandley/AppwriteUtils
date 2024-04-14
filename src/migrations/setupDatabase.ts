@@ -145,8 +145,14 @@ export const startSetup = async (
         );
         await wipeDocumentStorage(storage, config, config.databases[1].name);
       }
-      await initOrGetDocumentStorage(storage, config, config.databases[2].name);
-      await wipeDocumentStorage(storage, config, config.databases[2].name);
+      if (setupOptions.runDev) {
+        await initOrGetDocumentStorage(
+          storage,
+          config,
+          config.databases[2].name
+        );
+        await wipeDocumentStorage(storage, config, config.databases[2].name);
+      }
     }
   }
   if (config.enableWipeOtherDatabases) {
