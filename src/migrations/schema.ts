@@ -551,6 +551,12 @@ export const AppwriteConfigSchema = z.object({
     .string()
     .default("documents")
     .describe("Documents bucket id for imported documents"),
+  usersCollectionName: z
+    .string()
+    .default("Members")
+    .describe(
+      "Users collection name for any overflowing data associated with users, will try to match one of the collections by name"
+    ),
   databases: z
     .array(
       z.object({

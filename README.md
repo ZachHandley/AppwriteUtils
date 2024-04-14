@@ -32,8 +32,14 @@ Replace `--args` with specific arguments for your migration task. For example, t
 npx appwrite-utils-migrate --dev
 ```
 
+Full Args:
+`--dev --staging --prod --wipe --wipeDocs --wipeUsers --backup --generate --import`
+
 ## Key Features
 
+For an example, go to the `examples` folder here in the repo
+
+- **User Import**: Quickly import users and their associated data by setting a column as the `usersCollectionName`, it will then map any fields with the target key of `name`, `email`, `prefs`, `password`, `phone`, `userId`, and `labels` to create a user object. Any additional info will be mapped to the user like normal. Do not include the users attributes in the attribute map for the collection (the ones mentioned above), they will not be set. The created user and the associated document will have the same `$id`.
 - **Simplified Setup**: Quickly set up and configure your Appwrite project for migrations with minimal manual intervention.
 - **Automated Database Migrations**: Effortlessly create, update, and manage collections and attributes in your Appwrite database.
 - **Data Conversion and Import**: Convert data from various formats and seamlessly import it into your Appwrite project, adhering to new schema definitions.
@@ -206,6 +212,10 @@ After Import Actions run after the import and do something with the old data, ne
 - Add the ability to import between two appwrite projects
 
 ### Changelog
+
+- 0.9.985: Added the ability to import Users with your data, noted in the #key-features, here's the description:
+
+  - **User Import**: Quickly import users and their associated data by setting a column as the `usersCollectionName`, it will then map any fields with the target key of `name`, `email`, `prefs`, `password`, `phone`, `userId`, and `labels` to create a user object. Any additional info will be mapped to the user like normal. Do not include the users attributes in the attribute map for the collection (the ones mentioned above), they will not be set. The created user and the associated document will have the same `$id`.
 
 - 0.9.984: Added `getFileViewUrl` and `getFileDownloadUrl` helper functions to generate the URL's needed with an optional JWT from the current user (if the file needs their permission). Also updated `resolveTemplate` inside `importDataActions` to better *not* resolve `undefined` in some cases
 - 0.9.982: Made the file upload able to deal with arrays of file imports

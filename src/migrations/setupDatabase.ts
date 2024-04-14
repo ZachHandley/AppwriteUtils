@@ -16,6 +16,7 @@ import {
 import { type AppwriteConfig } from "./schema.js";
 import type { SetupOptions } from "../utilsController.js";
 import { nameToIdMapping } from "./queue.js";
+import { UsersController } from "./users.js";
 
 export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   // Create the migrations database if needed
@@ -150,6 +151,12 @@ export const startSetup = async (
   }
   if (config.enableWipeOtherDatabases) {
     await wipeOtherDatabases(database, config);
+  }
+  if (setupOptions.wipeUsers) {
+    const usersController = new UsersController(config, database);
+    console.log("Wiping users");
+    await usersController.wipeUsers();
+    console.log("Users wiped");
   }
   await ensureDatabasesExist(config);
 

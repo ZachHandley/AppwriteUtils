@@ -18,6 +18,11 @@ enableBackupCleanup: true # Enable backup cleanup
 enableMockData: false # Enable mock data generation
 enableWipeOtherDatabases: true # Enable wiping other databases
 documentBucketId: 'documents' # Your Appwrite bucket ID for documents
+usersCollectionName: 'Members' # Your Appwrite collection for any extra info while importing members (if any)
+                               # This allows you to use any targetKey in the users field to create your user
+                               # these are: name, email, phone, labels, prefs, password, userId and (not yet added)
+                               # $createdAt, $updatedAt -- Add them to your attributeMappings (NOT attributes) to define them and set the
+                               # targetKey to the same as the Appwrite targetKey
 databases:
   - $id: 'main'
     name: 'Main'
@@ -37,14 +42,6 @@ collections:
       - permission: delete
         target: users
     attributes:
-      - key: 'name'
-        type: 'string'
-        size: 255
-        required: true
-      - key: 'email'
-        type: 'string'
-        size: 255
-        required: false
       - key: 'idOrig'
         type: 'string'
         size: 255
@@ -71,9 +68,9 @@ collections:
         size: 255
         required: false
     indexes:
-      - key: 'name_index'
+      - key: 'idOrig_index'
         type: 'key'
-        attributes: ['name']
+        attributes: ['idOrig']
     importDefs:
       - filePath: 'importData/members.json'
         basePath: 'RECORDS'
@@ -164,7 +161,7 @@ collections:
             converters: ['stringifyObject']
           - oldKey: 'vetRecords.[any].id'
             targetKey: 'vetRecordIds'
-            converters: ['anyToStringArray']
+            converters: ['anyToString']
       - filePath: 'importData/dogs.json'
         basePath: 'RECORDS'
         type: 'update'
@@ -189,6 +186,8 @@ backupRetention: 30 # Backup retention in days. Default: 30 - DOES NOTHING RIGHT
 enableBackupCleanup: true # Enable backup cleanup. Default: true - DOES NOTHING RIGHT NOW
 enableMockData: false # Enable mock data generation. Default: false - DOES NOTHING RIGHT NOW
 enableWipeOtherDatabases: true # Enable wiping other databases. Default: true
+documentBucketId: 'documents' # Your Appwrite bucket ID for documents. Default: 'documents'
+usersCollectionName: 'Members' # Your Appwrite collection for any extra info while importing members (if any). Default: 'Members'
 # Databases configuration
 # The first one is *always* Production
 # The second is *always* Staging

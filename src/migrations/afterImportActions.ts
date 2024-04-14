@@ -223,12 +223,12 @@ export const afterImportActions: AfterImportActions = {
         const existingFieldValue = doc[fieldName as keyof typeof doc];
 
         let updateData: string | string[];
-        if (Array.isArray(existingFieldValue)) {
+        if (Array.isArray(existingFieldValue) && isArray) {
           // If the existing field value is an array, create a new array with all existing items plus the new file ID
           updateData = [...existingFieldValue, file.$id];
-        } else if (existingFieldValue) {
+        } else if (existingFieldValue && !isArray) {
           // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
-          updateData = [existingFieldValue, file.$id];
+          updateData = file.$id;
         } else if (isArray) {
           // If the field is an array and there's no existing value, then that is the value of the array
           updateData = [file.$id];

@@ -16,6 +16,8 @@ import { documentExists } from "./collections.js";
 import { areCollectionNamesSame } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
+import { AuthUserCreateSchema } from "@/main.js";
+import { UsersController } from "./users.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -91,6 +93,13 @@ export class ImportController {
 
   async importCollections(db: ConfigDatabase) {
     for (const collection of this.config.collections) {
+      let isMembersCollection = false;
+      if (
+        this.config.usersCollectionName.toLowerCase().replace(" ", "") ===
+        collection.name.toLowerCase().replace(" ", "")
+      ) {
+        isMembersCollection = true;
+      }
       const collectionExists = await checkForCollection(
         this.database,
         db.$id,
@@ -102,14 +111,19 @@ export class ImportController {
       }
 
       const updatedCollection = { ...collection, $id: collectionExists.$id };
-      await this.processImportDefinitions(db, updatedCollection);
+      await this.processImportDefinitions(
+        db,
+        updatedCollection,
+        isMembersCollection
+      );
       await this.executePostImportActions();
     }
   }
 
   async processImportDefinitions(
     db: ConfigDatabase,
-    collection: ConfigCollection
+    collection: ConfigCollection,
+    isMembersCollection: boolean = false
   ) {
     this.documentCache.clear();
     const updateDefs = collection.importDefs.filter(
@@ -132,7 +146,8 @@ export class ImportController {
         collection,
         importDef,
         dataToImport,
-        updateDefs
+        updateDefs,
+        isMembersCollection
       );
     }
 
@@ -192,16 +207,47 @@ export class ImportController {
     collection: ConfigCollection,
     importDef: ImportDef,
     dataToImport: any[],
-    updateDefs: ImportDef[] = []
+    updateDefs: ImportDef[] = [],
+    isMembersCollection: boolean = false
   ) {
     for (let i = 0; i < dataToImport.length; i += this.batchLimit) {
       const batch = dataToImport.slice(i, i + this.batchLimit);
       for (const item of batch) {
         let context = this.createContext(db, collection, item);
-        const finalItem = await this.transformData(
+        let finalItem = await this.transformData(
           item,
           importDef.attributeMappings
         );
+        let createIdToUse: string | undefined = undefined;
+        if (isMembersCollection) {
+          console.log("Found members collection, creating user...");
+          const usersController = new UsersController(
+            this.config,
+            this.database
+          );
+          const userToCreate = AuthUserCreateSchema.parse({
+            ...finalItem,
+          });
+          const user = await usersController.createUserAndReturn(userToCreate);
+          createIdToUse = user.$id;
+          context = { ...context, ...user };
+          console.log(
+            "Created user, deleting keys in finalItem that exist in user..."
+          );
+          // Delete keys in finalItem that also exist in user
+          let deletedKeys: string[] = [];
+          Object.keys(finalItem).forEach((key) => {
+            if (user.hasOwnProperty(key)) {
+              delete finalItem[key];
+              deletedKeys.push(key);
+            }
+          });
+          console.log(
+            `Set createIdToUse to ${createIdToUse}. Deleted keys: ${deletedKeys.join(
+              ", "
+            )}.`
+          );
+        }
 
         context = { ...context, ...finalItem };
 
@@ -228,7 +274,8 @@ export class ImportController {
           const createdContext = await this.handleCreate(
             context,
             finalItem,
-            updateDefs
+            updateDefs,
+            createIdToUse
           );
           if (createdContext) {
             afterContext = createdContext;
@@ -258,7 +305,12 @@ export class ImportController {
     }
   }
 
-  async handleCreate(context: any, finalItem: any, updateDefs?: ImportDef[]) {
+  async handleCreate(
+    context: any,
+    finalItem: any,
+    updateDefs?: ImportDef[],
+    id?: string
+  ) {
     const existing = await documentExists(
       this.database,
       context.dbId,
@@ -266,10 +318,13 @@ export class ImportController {
       finalItem
     );
     if (!existing) {
+      if (id) {
+        console.log(`Creating document with provided ID (member): ${id}`);
+      }
       const createdDoc = await this.database.createDocument(
         context.dbId,
         context.collId,
-        ID.unique(),
+        id || ID.unique(),
         finalItem
       );
       context.docId = createdDoc.$id;

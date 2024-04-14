@@ -4,6 +4,12 @@ export type { AppwriteConfig } from "./migrations/schema.js";
 export type { ConverterFunctions } from "./migrations/converters.js";
 export type { ValidationRules } from "./migrations/validationRules.js";
 export type { AfterImportActions } from "./migrations/afterImportActions.js";
+export {
+  type AuthUserCreate,
+  AuthUserCreateSchema,
+  type AuthUser,
+  AuthUserSchema,
+} from "./schemas/authUser.js";
 export { getFileViewUrl, getFileDownloadUrl } from "./utils/index.js";
 
 const args = process.argv.slice(2);
@@ -17,6 +23,7 @@ async function main() {
   let runDev = false;
   let doBackup = false;
   let wipeDatabases = false;
+  let wipeUsers = false;
   let generateSchemas = false;
   let importData = false;
   let wipeDocuments = false;
@@ -32,7 +39,7 @@ async function main() {
   if (args.includes("--wipe")) {
     wipeDatabases = true;
   }
-  if (args.includes("--wipe-docs")) {
+  if (args.includes("--wipe-docs") || args.includes("--wipeDocs")) {
     wipeDocuments = true;
   }
   if (args.includes("--generate")) {
@@ -44,6 +51,9 @@ async function main() {
   if (args.includes("--backup")) {
     doBackup = true;
   }
+  if (args.includes("--wipe-users") || args.includes("--wipeUsers")) {
+    wipeUsers = true;
+  }
   if (args.includes("--init")) {
     await controller.run({
       runProd: runProd,
@@ -51,6 +61,7 @@ async function main() {
       runDev: runDev,
       doBackup: doBackup,
       wipeDatabases: wipeDatabases,
+      wipeUsers: wipeUsers,
       wipeDocumentStorage: wipeDocuments,
       generateSchemas: true,
       generateMockData: false,
@@ -67,6 +78,7 @@ async function main() {
       wipeDocumentStorage: wipeDocuments,
       generateSchemas: generateSchemas,
       generateMockData: false,
+      wipeUsers: wipeUsers,
       importData: importData,
       checkDuplicates: false,
     });

@@ -157,7 +157,7 @@ collections:
             converters: ['stringifyObject']
           - oldKey: 'vetRecords.[any].id'
             targetKey: 'vetRecordIds'
-            converters: ['anyToStringArray']
+            converters: ['anyToStringArray[arr]']
       - filePath: 'importData/dogs.json'
         basePath: 'RECORDS'
         type: 'update'

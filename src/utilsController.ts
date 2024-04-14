@@ -40,6 +40,7 @@ export interface SetupOptions {
   doBackup: boolean;
   wipeDatabases: boolean;
   wipeDocumentStorage: boolean;
+  wipeUsers: boolean;
   generateSchemas: boolean;
   generateMockData: boolean;
   importData: boolean;

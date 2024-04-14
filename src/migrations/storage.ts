@@ -89,23 +89,31 @@ export const wipeDocumentStorage = async (
   console.log(`Wiping storage for bucket ID: ${bucketId}`);
   let moreFiles = true;
   let lastFileId: string | undefined;
-
+  const allFiles: string[] = [];
   while (moreFiles) {
     const queries = [Query.limit(100)]; // Adjust the limit as needed
     if (lastFileId) {
       queries.push(Query.cursorAfter(lastFileId));
     }
-    const { files } = await storage.listFiles(bucketId, queries);
-    for (const file of files) {
-      console.log(`Deleting file: ${file.$id}`);
-      await storage.deleteFile(bucketId, file.$id);
+    const filesPulled = await storage.listFiles(bucketId, queries);
+    if (filesPulled.files.length === 0) {
+      console.log("No files found, done!");
+      moreFiles = false;
+      break;
+    } else if (filesPulled.files.length > 0) {
+      const fileIds = filesPulled.files.map((file) => file.$id);
+      allFiles.push(...fileIds);
     }
-    moreFiles = files.length === 100; // Adjust based on the limit
+    moreFiles = filesPulled.files.length > 100; // Adjust based on the limit
     if (moreFiles) {
-      lastFileId = files[files.length - 1].$id;
+      lastFileId = filesPulled.files[filesPulled.files.length - 1].$id;
     }
   }
 
+  for (const fileId of allFiles) {
+    console.log(`Deleting file: ${fileId}`);
+    await storage.deleteFile(bucketId, fileId);
+  }
   console.log(`All files in bucket ${bucketId} have been deleted.`);
 };
 
