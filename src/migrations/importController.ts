@@ -16,7 +16,7 @@ import { documentExists } from "./collections.js";
 import { areCollectionNamesSame } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
-import { AuthUserCreateSchema } from "@/main.js";
+import { AuthUserCreateSchema } from "../main.js";
 import { UsersController } from "./users.js";
 
 export class ImportController {
