@@ -38,8 +38,10 @@ export const converterFunctions = {
   anyToBoolean(value: any): boolean | null {
     if (value == null) return null;
     if (typeof value === "string") {
-      value = value.trim().toLowerCase();
-      return value === "true" ? true : value === "false" ? false : null;
+      const trimmedValue = value.trim().toLowerCase();
+      if (["true", "yes", "1"].includes(trimmedValue)) return true;
+      if (["false", "no", "0"].includes(trimmedValue)) return false;
+      return null; // Return null for strings that don't explicitly match
     }
     return Boolean(value);
   },
@@ -239,26 +241,38 @@ export const converterFunctions = {
    */
   safeParseDate(input: string | number): DateTime | null {
     const formats = [
-      "M/d/yyyy", // Adjusted format for "5/11/2020"
-      "dd-LL-yyyy",
-      "LL-dd-yyyy",
-      "dd/LL/yyyy",
-      "LL/dd/yyyy",
-      "yyyy/LL/dd",
-      "yyyy-LL-dd",
-      "yyyy-MM-dd",
+      "M/d/yyyy HH:mm:ss", // U.S. style with time
+      "d/M/yyyy HH:mm:ss", // Rest of the world style with time
+      "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", // ISO 8601 format
+      "yyyy-MM-dd'T'HH:mm:ss", // ISO 8601 without milliseconds
+      "yyyy-MM-dd HH:mm:ss", // SQL datetime format (common log format)
+      "M/d/yyyy", // U.S. style without time
+      "d/M/yyyy", // Rest of the world style without time
+      "yyyy-MM-dd", // ISO date format
+      "dd-MM-yyyy",
+      "MM-dd-yyyy",
       "dd/MM/yyyy",
       "MM/dd/yyyy",
       "dd.MM.yyyy",
       "MM.dd.yyyy",
       "yyyy.MM.dd",
       "yyyy/MM/dd",
-      "yyyy/MM/dd HH:mm:ss",
-      "yyyy-MM-dd HH:mm:ss",
-      "yyyy-MM-dd HH:mm:ss.SSS",
-      "yyyy-MM-dd'T'HH:mm:ss.SSS",
-      "yyyy-MM-dd'T'HH:mm:ss",
+      "yyyy/MM/dd HH:mm",
       "yyyy-MM-dd HH:mm",
+      "M/d/yyyy h:mm:ss tt", // U.S. style with 12-hour clock
+      "d/M/yyyy h:mm:ss tt", // Rest of the world style with 12-hour clock
+      "h:mm tt", // Time only with 12-hour clock
+      "HH:mm:ss", // Time only with 24-hour clock
+      "HH:mm", // Time only without seconds, 24-hour clock
+      "h:mm tt M/d/yyyy", // 12-hour clock time followed by U.S. style date
+      "h:mm tt d/M/yyyy", // 12-hour clock time followed by Rest of the world style date
+      "yyyy-MM-dd'T'HH:mm:ss.SSSZ", // ISO 8601 with timezone offset
+      "yyyy-MM-dd'T'HH:mm:ssZ", // ISO 8601 without milliseconds but with timezone offset
+      "E, dd MMM yyyy HH:mm:ss z", // RFC 2822 format
+      "EEEE, MMMM d, yyyy", // Full textual date
+      "yyyy-MM-dd'T'HH:mm:ss.SSSXXX", // ISO 8601 with extended timezone offset
+      "yyyy-MM-dd'T'HH:mm:ssXXX", // ISO 8601 without milliseconds but with extended timezone offset
+      "dd-MMM-yyyy", // Textual month with day and year
     ];
 
     // Attempt to parse as a timestamp first if input is a number
