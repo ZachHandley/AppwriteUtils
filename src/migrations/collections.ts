@@ -21,6 +21,12 @@ export const documentExists = async (
   targetCollectionId: string,
   toCreateObject: any
 ): Promise<boolean> => {
+  // Had to do this because kept running into issues with type checking arrays so, sorry 40ms
+  const collection = await db.getCollection(dbId, targetCollectionId);
+  const attributes = collection.attributes as any[];
+  let arrayTypeAttributes = attributes
+    .filter((attribute: any) => attribute.array === true)
+    .map((attribute: any) => attribute.key);
   // Function to check if a string is JSON
   const isJsonString = (str: string) => {
     try {
@@ -35,6 +41,7 @@ export const documentExists = async (
   const validQueryParams = _.chain(toCreateObject)
     .pickBy(
       (value, key) =>
+        !arrayTypeAttributes.includes(key) &&
         !key.startsWith("$") &&
         !_.isNull(value) &&
         !_.isUndefined(value) &&

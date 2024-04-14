@@ -200,6 +200,9 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.981: Made `documentExists` check for the attribute types in the collection due to running into too many problems with arrays
+- 0.9.98: Added `[arr]` or `[Arr]` arguments to converters. If you use this value anywhere in the converter string, it will
+process the value as the array it is (if it is one), otherwise it will run the converter over the mapped array (if it is one)
 - 0.9.96: Update to `safeParseDate`, it wasn't parsing dates very safely...
 - 0.9.95: Fixed a context issue with updating documents in their afterActions using their created data
 - 0.9.94: Added a bunch of different splitting functions for more fine-grained control and updated how the `trySplitByDifferentSeparators` works to fix the logic. Added converters are above. Also made it so converters and validation actions can take arrays for the item, because why not.
