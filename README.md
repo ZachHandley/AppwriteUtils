@@ -200,6 +200,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.9.982: Made the file upload able to deal with arrays of file imports
 - 0.9.981: Made `documentExists` check for the attribute types in the collection due to running into too many problems with arrays
 - 0.9.98: Added `[arr]` or `[Arr]` arguments to converters. If you use this value anywhere in the converter string, it will
 process the value as the array it is (if it is one), otherwise it will run the converter over the mapped array (if it is one)
