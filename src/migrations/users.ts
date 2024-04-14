@@ -59,7 +59,7 @@ export class UsersController {
         item.userId || ID.unique(),
         item.email,
         item.phone,
-        item.password || `changeMe${item.email}`,
+        item.password?.toLowerCase() || `changeMe${item.email}`.toLowerCase(),
         item.name
       );
     } else {
@@ -73,7 +73,7 @@ export class UsersController {
       if (item.password) {
         userToReturn = await this.users.updatePassword(
           userToReturn.$id,
-          item.password
+          item.password.toLowerCase()
         );
       }
       if (item.name && item.name !== userToReturn.name) {
