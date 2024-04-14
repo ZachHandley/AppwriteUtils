@@ -225,7 +225,9 @@ export const converterFunctions = {
    * @return {any[]} the filtered array without invalid elements
    */
   removeInvalidElements(array: any[]): any[] {
-    return array.filter(
+    if (!Array.isArray(array)) return array;
+    return _.filter(
+      array,
       (element) => element !== null && element !== undefined && element !== ""
     );
   },
