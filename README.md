@@ -147,7 +147,8 @@ If the converter name has `[arr]` or `[Arr]` anywhere in it, the converter will 
 - `parseObject(jsonString: string): any`
 - `safeParseDate(input: string | number): DateTime | null`
 - `removeInvalidElements(input: any[]): any[]`
-- `joinStrings(values: string[]): string` (Nothing to join them, just merges em)
+- `joinStrings(values: any[]): string` (Nothing to join them, just merges em, ignore the name, I am lazy)
+- `joinBySpace(values: any[]): string`
 - `joinStringsByComma(values: any[]): string`
 - `joinStringsByPipe(values: any[]): string`
 - `joinStringsBySemicolon(values: any[]): string`
