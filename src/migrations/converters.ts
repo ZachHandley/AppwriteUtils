@@ -144,76 +144,148 @@ export const converterFunctions = {
     return bestSplit;
   },
 
-  joinValues(values: any[]): string {
-    return values.join("");
+  joinValues(values: any[]): any {
+    try {
+      return values.join("");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinBySpace(values: any[]): string {
-    return values.join(" ");
+  joinBySpace(values: any[]): any {
+    try {
+      return values.join(" ");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinByComma(values: any[]): string {
-    return values.join(",");
+  joinByComma(values: any[]): any {
+    try {
+      return values.join(",");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinByPipe(values: any[]): string {
-    return values.join("|");
+  joinByPipe(values: any[]): any {
+    try {
+      return values.join("|");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinBySemicolon(values: any[]): string {
-    return values.join(";");
+  joinBySemicolon(values: any[]): any {
+    try {
+      return values.join(";");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinByColon(values: any[]): string {
-    return values.join(":");
+  joinByColon(values: any[]): any {
+    try {
+      return values.join(":");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinBySlash(values: any[]): string {
-    return values.join("/");
+  joinBySlash(values: any[]): any {
+    try {
+      return values.join("/");
+    } catch (error) {
+      return values;
+    }
   },
 
-  joinByHyphen(values: any[]): string {
-    return values.join("-");
+  joinByHyphen(values: any[]): any {
+    try {
+      return values.join("-");
+    } catch (error) {
+      return values;
+    }
   },
 
-  splitByComma(value: string): string[] {
-    return value.split(",");
+  splitByComma(value: string): any {
+    try {
+      return value.split(",");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByPipe(value: string): string[] {
-    return value.split("|");
+  splitByPipe(value: string): any {
+    try {
+      return value.split("|");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitBySemicolon(value: string): string[] {
-    return value.split(";");
+  splitBySemicolon(value: string): any {
+    try {
+      return value.split(";");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByColon(value: string): string[] {
-    return value.split(":");
+  splitByColon(value: string): any {
+    try {
+      return value.split(":");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitBySlash(value: string): string[] {
-    return value.split("/");
+  splitBySlash(value: string): any {
+    try {
+      return value.split("/");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByBackslash(value: string): string[] {
-    return value.split("\\");
+  splitByBackslash(value: string): any {
+    try {
+      return value.split("\\");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitBySpace(value: string): string[] {
-    return value.split(" ");
+  splitBySpace(value: string): any {
+    try {
+      return value.split(" ");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByDot(value: string): string[] {
-    return value.split(".");
+  splitByDot(value: string): any {
+    try {
+      return value.split(".");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByUnderscore(value: string): string[] {
-    return value.split("_");
+  splitByUnderscore(value: string): any {
+    try {
+      return value.split("_");
+    } catch (error) {
+      return value;
+    }
   },
 
-  splitByHyphen(value: string): string[] {
-    return value.split("-");
+  splitByHyphen(value: string): any {
+    try {
+      return value.split("-");
+    } catch (error) {
+      return value;
+    }
   },
 
   /**
@@ -222,7 +294,11 @@ export const converterFunctions = {
    * @return {any} The first element of the array.
    */
   pickFirstElement(value: any[]): any {
-    return value[0];
+    try {
+      return value[0];
+    } catch (error) {
+      return value;
+    }
   },
 
   /**
@@ -231,7 +307,11 @@ export const converterFunctions = {
    * @return {any} The last element of the array.
    */
   pickLastElement(value: any[]): any {
-    return value[value.length - 1];
+    try {
+      return value[value.length - 1];
+    } catch (error) {
+      return value;
+    }
   },
 
   /**
@@ -289,7 +369,8 @@ export const converterFunctions = {
         element !== undefined &&
         element !== "" &&
         element !== "undefined" &&
-        element !== "null"
+        element !== "null" &&
+        !_.isEmpty(element)
     );
   },
 
