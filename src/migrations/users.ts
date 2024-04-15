@@ -5,6 +5,7 @@ import {
   type AuthUser,
   type AuthUserCreate,
 } from "../schemas/authUser.js";
+import _ from "lodash";
 
 export class UsersController {
   private config: AppwriteConfig;
@@ -71,7 +72,11 @@ export class UsersController {
       );
     } else {
       console.log("Updating user cause found");
-      if (item.email && item.email !== userToReturn.email) {
+      if (
+        item.email &&
+        item.email !== userToReturn.email &&
+        _.isUndefined(userToReturn.email)
+      ) {
         userToReturn = await this.users.updateEmail(
           userToReturn.$id,
           item.email
@@ -89,7 +94,8 @@ export class UsersController {
       if (
         item.phone &&
         item.phone !== userToReturn.phone &&
-        item.phone.length < 15
+        item.phone.length < 15 &&
+        (_.isUndefined(userToReturn.phone) || _.isEmpty(userToReturn.phone))
       ) {
         userToReturn = await this.users.updatePhone(
           userToReturn.$id,

@@ -362,6 +362,14 @@ export const converterFunctions = {
     return value;
   },
 
+  convertEmptyToNull(value: any): any {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.convertEmptyToNull(item));
+    }
+    if (_.isEmpty(value)) return null;
+    return value;
+  },
+
   /**
    * A function that removes invalid elements from an array.
    *
