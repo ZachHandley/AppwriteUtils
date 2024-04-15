@@ -249,8 +249,8 @@ export class ImportController {
           );
           const associatedDocFound = await this.database.listDocuments(
             db.$id,
-            collection.$id,
-            [Query.equal("email", finalItem.email)]
+            context.collId,
+            [Query.equal("$id", createIdToUse)]
           );
           if (associatedDocFound.documents.length > 0) {
             associatedDoc = associatedDocFound.documents[0];
