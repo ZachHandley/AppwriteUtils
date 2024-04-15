@@ -1,4 +1,10 @@
-import { ID, Query, type Databases, type Storage } from "node-appwrite";
+import {
+  ID,
+  Query,
+  type Databases,
+  type Models,
+  type Storage,
+} from "node-appwrite";
 import type {
   AppwriteConfig,
   ConfigCollection,
@@ -219,6 +225,7 @@ export class ImportController {
           importDef.attributeMappings
         );
         let createIdToUse: string | undefined = undefined;
+        let associatedDoc: Models.Document | undefined;
         if (isMembersCollection && finalItem.hasOwnProperty("email")) {
           console.log("Found members collection, creating user...");
           const usersController = new UsersController(
@@ -253,6 +260,11 @@ export class ImportController {
               ", "
             )}.`
           );
+          const associatedDoc = await this.database.listDocuments(
+            db.$id,
+            collection.$id,
+            [Query.equal("email", finalItem.email)]
+          );
         } else if (isMembersCollection) {
           console.log(
             `Skipping user creation for ${item} due to lack of email...`
@@ -280,7 +292,10 @@ export class ImportController {
         }
 
         let afterContext;
-        if (importDef.type === "create" || !importDef.type) {
+        if (
+          (importDef.type === "create" || !importDef.type) &&
+          !associatedDoc
+        ) {
           const createdContext = await this.handleCreate(
             context,
             finalItem,
