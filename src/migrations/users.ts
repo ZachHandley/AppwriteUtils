@@ -49,10 +49,17 @@ export class UsersController {
 
   async createUserAndReturn(item: AuthUserCreate) {
     console.log("Creating user with item", item);
-    const foundUsers = await this.users.list([
+    const foundUsersEmail = await this.users.list([
       Query.equal("email", item.email),
     ]);
-    let userToReturn = foundUsers.users[0] || undefined;
+    let foundUsers = foundUsersEmail.users;
+    if (item.phone) {
+      const foundUsersPhone = await this.users.list([
+        Query.equal("phone", item.phone),
+      ]);
+      foundUsers = foundUsers.concat(foundUsersPhone.users);
+    }
+    let userToReturn = foundUsers[0] || undefined;
     if (!userToReturn) {
       console.log("Creating user cause not found");
       userToReturn = await this.users.create(
