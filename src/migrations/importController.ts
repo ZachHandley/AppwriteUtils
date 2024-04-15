@@ -225,10 +225,16 @@ export class ImportController {
             this.config,
             this.database
           );
-          const userToCreate = AuthUserCreateSchema.parse({
+          const userToCreate = AuthUserCreateSchema.safeParse({
             ...finalItem,
           });
-          const user = await usersController.createUserAndReturn(userToCreate);
+          if (!userToCreate.success) {
+            console.error(userToCreate.error);
+            continue;
+          }
+          const user = await usersController.createUserAndReturn(
+            userToCreate.data
+          );
           createIdToUse = user.$id;
           context = { ...context, ...user };
           console.log(
