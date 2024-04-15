@@ -90,7 +90,7 @@ export class ImportController {
       console.log(`---------------------------------`);
       await this.importCollections(db);
       await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
-
+      await this.executePostImportActions();
       console.log(`---------------------------------`);
       console.log(`Finished import data for database: ${db.name}`);
       console.log(`---------------------------------`);
@@ -122,7 +122,6 @@ export class ImportController {
         updatedCollection,
         isMembersCollection
       );
-      await this.executePostImportActions();
     }
   }
 

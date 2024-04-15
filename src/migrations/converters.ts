@@ -341,24 +341,36 @@ export const converterFunctions = {
   },
 
   convertPhoneStringToUSInternational(value: string): string {
+    // Normalize input: Remove all non-digit characters except the leading +
+    const normalizedValue = value.startsWith("+")
+      ? "+" + value.slice(1).replace(/\D/g, "")
+      : value.replace(/\D/g, "");
+
     // Check if the value is not a string or doesn't contain digits, return as is
-    if (typeof value !== "string" || !/\d/.test(value)) return value;
+    if (typeof normalizedValue !== "string" || !/\d/.test(normalizedValue))
+      return value;
 
-    // Remove all non-digit characters for a clean slate
-    const digits = value.replace(/\D/g, "");
-
-    // Ensure the resulting string is not longer than 15 characters, including country code
-    if (digits.length > 11) return value; // Return original if it exceeds the length limit
-
-    // If the cleaned number starts with 1 and is 11 digits, it's already in US international format
-    if (digits.startsWith("1") && digits.length === 11) {
-      return `+${digits}`;
+    // Handle numbers with a leading + (indicating an international format)
+    if (normalizedValue.startsWith("+")) {
+      // If the number is already in a valid international format, return as is
+      if (normalizedValue.length > 11 && normalizedValue.length <= 15) {
+        return normalizedValue;
+      }
+    } else {
+      // For numbers without a leading +, check the length and format
+      if (normalizedValue.length === 10) {
+        // US numbers without country code, prepend +1
+        return `+1${normalizedValue}`;
+      } else if (
+        normalizedValue.length === 11 &&
+        normalizedValue.startsWith("1")
+      ) {
+        // US numbers with country code but missing +, prepend +
+        return `+${normalizedValue}`;
+      }
     }
-    // If it's exactly 10 digits, prepend with +1 to conform to US international format
-    else if (digits.length === 10) {
-      return `+1${digits}`;
-    }
-    // Otherwise, return the original value as it doesn't conform to expected US formats
+
+    // For numbers that don't fit expected formats, return the original value
     return value;
   },
 

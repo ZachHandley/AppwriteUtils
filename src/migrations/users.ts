@@ -1,5 +1,5 @@
 import type { AppwriteConfig, ConfigCollection } from "./schema.js";
-import { Databases, ID, Query, Users } from "node-appwrite";
+import { Databases, ID, Query, Users, type Models } from "node-appwrite";
 import {
   AuthUserSchema,
   type AuthUser,
@@ -52,19 +52,23 @@ export class UsersController {
     console.log("Creating user with item", item);
 
     // Attempt to find an existing user by email or phone.
-    let queryConditions = [];
+    let foundUsers: Models.User<Models.Preferences>[] = [];
     if (item.email) {
-      queryConditions.push(Query.equal("email", item.email));
+      const foundUsersByEmail = await this.users.list([
+        Query.equal("email", item.email),
+      ]);
+      foundUsers = foundUsersByEmail.users;
     }
     if (item.phone) {
-      queryConditions.push(Query.equal("phone", item.phone));
+      const foundUsersByPhone = await this.users.list([
+        Query.equal("phone", item.phone),
+      ]);
+      foundUsers = foundUsers.length
+        ? foundUsers.concat(foundUsersByPhone.users)
+        : foundUsersByPhone.users;
     }
 
-    const foundUsers = await this.users.list(
-      // @ts-ignore
-      queryConditions.length ? Query.or(...queryConditions) : []
-    );
-    let userToReturn = foundUsers.users[0] || undefined;
+    let userToReturn = foundUsers[0] || undefined;
 
     if (!userToReturn) {
       console.log("Creating user cause not found");
@@ -114,10 +118,15 @@ export class UsersController {
         item.phone.startsWith("+") &&
         (_.isUndefined(userToReturn.phone) || _.isEmpty(userToReturn.phone))
       ) {
-        userToReturn = await this.users.updatePhone(
-          userToReturn.$id,
-          item.phone
-        );
+        const userFoundWithPhone = await this.users.list([
+          Query.equal("phone", item.phone),
+        ]);
+        if (userFoundWithPhone.total === 0) {
+          userToReturn = await this.users.updatePhone(
+            userToReturn.$id,
+            item.phone
+          );
+        }
       }
     }
     if (item.$createdAt && item.$updatedAt) {
