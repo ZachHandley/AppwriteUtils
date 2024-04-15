@@ -58,7 +58,7 @@ export class UsersController {
       userToReturn = await this.users.create(
         item.userId || ID.unique(),
         item.email,
-        item.phone,
+        item.phone && item.phone.length < 15 ? item.phone : undefined,
         item.password?.toLowerCase() || `changeMe${item.email}`.toLowerCase(),
         item.name
       );
@@ -79,7 +79,11 @@ export class UsersController {
       if (item.name && item.name !== userToReturn.name) {
         userToReturn = await this.users.updateName(userToReturn.$id, item.name);
       }
-      if (item.phone && item.phone !== userToReturn.phone) {
+      if (
+        item.phone &&
+        item.phone !== userToReturn.phone &&
+        item.phone.length < 15
+      ) {
         userToReturn = await this.users.updatePhone(
           userToReturn.$id,
           item.phone
