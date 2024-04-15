@@ -156,6 +156,7 @@ If the converter name has `[arr]` or `[Arr]` anywhere in it, the converter will 
 - `joinBySlash(values: any[]): string`
 - `joinByHyphen(values: any[]): string`
 - `convertPhoneStringToUSInternational(value: string): +1 formatted string`
+- `validateOrNullEmail` - Added because sometimes you want to just nullify or validate the emails for users and what not before validation
 
 ### Validation Rules
 

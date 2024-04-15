@@ -371,7 +371,7 @@ export const converterFunctions = {
   },
 
   /**
-   * A function that removes invalid elements from an array.
+   * A function that removes invalid elements from an array
    *
    * @param {any[]} array - the input array
    * @return {any[]} the filtered array without invalid elements
@@ -388,6 +388,12 @@ export const converterFunctions = {
         element !== "null" &&
         !_.isEmpty(element)
     );
+  },
+
+  validateOrNullEmail(email: string): string | null {
+    if (!email) return null;
+    const emailRegex = /^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$/;
+    return emailRegex.test(email) ? email : null;
   },
 
   /**

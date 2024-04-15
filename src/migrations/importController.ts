@@ -226,7 +226,10 @@ export class ImportController {
         );
         let createIdToUse: string | undefined = undefined;
         let associatedDoc: Models.Document | undefined;
-        if (isMembersCollection && finalItem.hasOwnProperty("email")) {
+        if (
+          isMembersCollection &&
+          (finalItem.hasOwnProperty("email") || item.hasOwnProperty("phone"))
+        ) {
           console.log("Found members collection, creating user...");
           const usersController = new UsersController(
             this.config,
@@ -270,7 +273,7 @@ export class ImportController {
           );
         } else if (isMembersCollection) {
           console.log(
-            `Skipping user creation for ${item} due to lack of email...`
+            `Skipping user & contact creation for ${item} due to lack of email...`
           );
         }
 

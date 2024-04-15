@@ -50,37 +50,53 @@ export class UsersController {
 
   async createUserAndReturn(item: AuthUserCreate) {
     console.log("Creating user with item", item);
-    const foundUsersEmail = await this.users.list([
-      Query.equal("email", item.email),
-    ]);
-    let foundUsers = foundUsersEmail.users;
-    if (item.phone) {
-      const foundUsersPhone = await this.users.list([
-        Query.equal("phone", item.phone),
-      ]);
-      foundUsers = foundUsers.concat(foundUsersPhone.users);
+
+    // Attempt to find an existing user by email or phone.
+    let queryConditions = [];
+    if (item.email) {
+      queryConditions.push(Query.equal("email", item.email));
     }
-    let userToReturn = foundUsers[0] || undefined;
+    if (item.phone) {
+      queryConditions.push(Query.equal("phone", item.phone));
+    }
+
+    const foundUsers = await this.users.list(
+      // @ts-ignore
+      queryConditions.length ? Query.or(...queryConditions) : []
+    );
+    let userToReturn = foundUsers.users[0] || undefined;
+
     if (!userToReturn) {
       console.log("Creating user cause not found");
       userToReturn = await this.users.create(
         item.userId || ID.unique(),
         item.email,
-        item.phone && item.phone.length < 15 ? item.phone : undefined,
+        item.phone && item.phone.length < 15 && item.phone.startsWith("+")
+          ? item.phone
+          : undefined,
         item.password?.toLowerCase() || `changeMe${item.email}`.toLowerCase(),
         item.name
       );
     } else {
       console.log("Updating user cause found");
+      // Update user details as necessary, ensuring email uniqueness if attempting an update.
       if (
         item.email &&
         item.email !== userToReturn.email &&
-        _.isUndefined(userToReturn.email)
+        !_.isEmpty(item.email) &&
+        !_.isUndefined(item.email)
       ) {
-        userToReturn = await this.users.updateEmail(
-          userToReturn.$id,
-          item.email
-        );
+        const emailExists = await this.users.list([
+          Query.equal("email", item.email),
+        ]);
+        if (emailExists.users.length === 0) {
+          userToReturn = await this.users.updateEmail(
+            userToReturn.$id,
+            item.email
+          );
+        } else {
+          console.log("Email update skipped: Email already exists.");
+        }
       }
       if (item.password) {
         userToReturn = await this.users.updatePassword(
@@ -95,6 +111,7 @@ export class UsersController {
         item.phone &&
         item.phone !== userToReturn.phone &&
         item.phone.length < 15 &&
+        item.phone.startsWith("+") &&
         (_.isUndefined(userToReturn.phone) || _.isEmpty(userToReturn.phone))
       ) {
         userToReturn = await this.users.updatePhone(
