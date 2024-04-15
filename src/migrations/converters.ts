@@ -93,6 +93,14 @@ export const converterFunctions = {
     return [];
   },
 
+  trim(value: string): string {
+    try {
+      return value.trim();
+    } catch (error) {
+      return value;
+    }
+  },
+
   /**
    * Removes the start and end quotes from a string.
    * @param value The string to remove quotes from.
