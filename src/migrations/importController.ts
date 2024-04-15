@@ -219,7 +219,7 @@ export class ImportController {
           importDef.attributeMappings
         );
         let createIdToUse: string | undefined = undefined;
-        if (isMembersCollection) {
+        if (isMembersCollection && finalItem.hasOwnProperty("email")) {
           console.log("Found members collection, creating user...");
           const usersController = new UsersController(
             this.config,
@@ -246,6 +246,10 @@ export class ImportController {
             `Set createIdToUse to ${createIdToUse}. Deleted keys: ${deletedKeys.join(
               ", "
             )}.`
+          );
+        } else if (isMembersCollection) {
+          console.log(
+            `Skipping user creation for ${item} due to lack of email...`
           );
         }
 
