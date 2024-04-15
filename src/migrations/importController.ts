@@ -247,6 +247,14 @@ export class ImportController {
           console.log(
             "Created user, deleting keys in finalItem that exist in user..."
           );
+          const associatedDocFound = await this.database.listDocuments(
+            db.$id,
+            collection.$id,
+            [Query.equal("email", finalItem.email)]
+          );
+          if (associatedDocFound.documents.length > 0) {
+            associatedDoc = associatedDocFound.documents[0];
+          }
           // Delete keys in finalItem that also exist in user
           let deletedKeys: string[] = [];
           Object.keys(finalItem).forEach((key) => {
@@ -259,11 +267,6 @@ export class ImportController {
             `Set createIdToUse to ${createIdToUse}. Deleted keys: ${deletedKeys.join(
               ", "
             )}.`
-          );
-          const associatedDoc = await this.database.listDocuments(
-            db.$id,
-            collection.$id,
-            [Query.equal("email", finalItem.email)]
           );
         } else if (isMembersCollection) {
           console.log(
