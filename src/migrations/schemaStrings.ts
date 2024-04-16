@@ -11,8 +11,11 @@ export const createSchemaString = (
   const pascalName = toPascalCase(name);
 
   let imports = `import { z } from "zod";\n`;
+  let isMockIncluded = false;
   // Commented out for now, we don't need this atm
-  // let mockIncludedString = `import { generateMock } from "@anatine/zod-mock";\n`;
+  if (isMockIncluded) {
+    imports += `import { generateMock } from "@anatine/zod-mock";\n`;
+  }
 
   // Collect unique related collections for relationship attributes
   const relatedCollections = attributes
@@ -76,13 +79,15 @@ export const createSchemaString = (
     schemaString += `;\n`;
   }
   schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
-  schemaString += `export const get${pascalName}MockData = (numMocks: number = 1) => {\n`;
-  schemaString += `  const mocksGenerated: ${pascalName}[] = [];\n`;
-  schemaString += `  for (let i = 0; i < numMocks; i++) {\n`;
-  schemaString += `    mocksGenerated.push(generateMock(${pascalName}Schema, { seed: i }));\n`;
-  schemaString += `  }\n`;
-  schemaString += `  return mocksGenerated;\n`;
-  schemaString += `};\n\n`;
+  if (isMockIncluded) {
+    schemaString += `export const get${pascalName}MockData = (numMocks: number = 1) => {\n`;
+    schemaString += `  const mocksGenerated: ${pascalName}[] = [];\n`;
+    schemaString += `  for (let i = 0; i < numMocks; i++) {\n`;
+    schemaString += `    mocksGenerated.push(generateMock(${pascalName}Schema, { seed: i }));\n`;
+    schemaString += `  }\n`;
+    schemaString += `  return mocksGenerated;\n`;
+    schemaString += `};\n\n`;
+  }
   return schemaString;
 };
 
