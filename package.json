@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils",
-  "version": "0.9.9891",
+  "version": "0.9.9892",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
   "bin": {
     "appwrite-utils-setup": "./dist/setup.js",
@@ -26,7 +26,8 @@
   "main": "dist/main.js",
   "types": "dist/types.d.ts",
   "exports": {
-    ".": "./dist/main.js"
+    ".": "./dist/types.js",
+    "./types": "./dist/types.d.ts"
   },
   "files": [
     "README.md",
