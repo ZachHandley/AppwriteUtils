@@ -6,7 +6,7 @@ import {
   type Storage,
 } from "node-appwrite";
 import type { AppwriteConfig } from "./schema.js";
-import validationRules, { type ValidationRules } from "./validationRules.js";
+import { validationRules, type ValidationRules } from "./validationRules.js";
 import {
   converterFunctions,
   convertObjectBySchema,

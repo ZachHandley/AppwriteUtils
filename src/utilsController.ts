@@ -17,7 +17,8 @@ import {
   afterImportActions,
   type AfterImportActions,
 } from "./migrations/afterImportActions.js";
-import validationRules, {
+import {
+  validationRules,
   type ValidationRules,
 } from "./migrations/validationRules.js";
 import { ImportController } from "./migrations/importController.js";

@@ -301,13 +301,6 @@ export class ImportController {
 
           context = { ...context, ...finalItem };
 
-          const attributeMappingsWithActions =
-            this.getAttributeMappingsWithActions(
-              importDef.attributeMappings,
-              context,
-              finalItem
-            );
-
           if (
             !(await this.importDataActions.validateItem(
               finalItem,
@@ -347,6 +340,12 @@ export class ImportController {
             context = { ...context, ...afterContext };
           }
           const afterImportActionContext = structuredClone(context);
+          const attributeMappingsWithActions =
+            this.getAttributeMappingsWithActions(
+              importDef.attributeMappings,
+              context,
+              finalItem
+            );
           if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
             this.postImportActionsQueue.push({
               context: afterImportActionContext,

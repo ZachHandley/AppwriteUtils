@@ -61,5 +61,3 @@ export const validationRules = {
   get: (object: any, path: string, defaultValue: any): any =>
     _.get(object, path, defaultValue),
 };
-
-export default validationRules;
