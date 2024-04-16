@@ -462,7 +462,7 @@ export class ImportController {
           params: [
             "{dbId}",
             "{collId}",
-            "{docId}",
+            "{$id}",
             mapping.targetKey,
             `${this.config!.documentBucketId}_${context.dbName
               .toLowerCase()
