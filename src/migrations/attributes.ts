@@ -309,7 +309,21 @@ export const createUpdateCollectionAttributes = async (
   attributes: Attribute[]
 ): Promise<void> => {
   console.log(`Creating/Updating attributes for collection: ${collection.$id}`);
-  for (const attribute of attributes) {
-    await createOrUpdateAttribute(db, dbId, collection, attribute);
+
+  const batchSize = 5; // Size of each batch
+  for (let i = 0; i < attributes.length; i += batchSize) {
+    // Slice the attributes array to get a batch of at most batchSize elements
+    const batch = attributes.slice(i, i + batchSize);
+    const attributePromises = batch.map((attribute) =>
+      createOrUpdateAttribute(db, dbId, collection, attribute)
+    );
+
+    // Await the completion of all promises in the current batch
+    const results = await Promise.allSettled(attributePromises);
+    results.forEach((result) => {
+      if (result.status === "rejected") {
+        console.error("An attribute promise was rejected:", result.reason);
+      }
+    });
   }
 };

@@ -98,31 +98,53 @@ export class ImportController {
   }
 
   async importCollections(db: ConfigDatabase) {
-    for (const collection of this.config.collections) {
-      let isMembersCollection = false;
-      if (
-        this.config.usersCollectionName.toLowerCase().replace(" ", "") ===
-        collection.name.toLowerCase().replace(" ", "")
-      ) {
-        isMembersCollection = true;
-      }
-      const collectionExists = await checkForCollection(
-        this.database,
-        db.$id,
-        collection
-      );
-      if (!collectionExists) {
-        console.warn(`No collection found for ${collection.name}`);
-        continue;
-      }
+    const maxParallel = 3; // Maximum number of collections to process in parallel
+    let activePromises: Promise<void>[] = []; // Array to keep track of active promises
 
-      const updatedCollection = { ...collection, $id: collectionExists.$id };
-      await this.processImportDefinitions(
-        db,
-        updatedCollection,
-        isMembersCollection
-      );
+    for (const collection of this.config.collections) {
+      // Function that returns a promise for processing a single collection
+      const processCollection = async (col: ConfigCollection) => {
+        let isMembersCollection = false;
+        if (
+          this.config.usersCollectionName.toLowerCase().replace(" ", "") ===
+          col.name.toLowerCase().replace(" ", "")
+        ) {
+          isMembersCollection = true;
+        }
+        const collectionExists = await checkForCollection(
+          this.database,
+          db.$id,
+          col
+        );
+        if (!collectionExists) {
+          console.warn(`No collection found for ${col.name}`);
+          return; // Skip this iteration
+        }
+
+        const updatedCollection = { ...col, $id: collectionExists.$id };
+        await this.processImportDefinitions(
+          db,
+          updatedCollection,
+          isMembersCollection
+        );
+      };
+
+      // Add the current collection's processing promise to the activePromises array
+      activePromises.push(processCollection(collection));
+
+      // If the number of active promises reaches the limit, wait for one to finish
+      if (activePromises.length >= maxParallel) {
+        await Promise.race(activePromises).then(() => {
+          // Remove the promise that finished from the activePromises array
+          activePromises = activePromises.filter(
+            (p) => p !== Promise.race(activePromises)
+          );
+        });
+      }
     }
+
+    // After the loop, wait for the remaining promises to finish
+    await Promise.all(activePromises);
   }
 
   async processImportDefinitions(
@@ -131,10 +153,10 @@ export class ImportController {
     isMembersCollection: boolean = false
   ) {
     this.documentCache.clear();
-    const updateDefs = collection.importDefs.filter(
+    const updateDefs: ImportDef[] = collection.importDefs.filter(
       (def) => def.type === "update"
     );
-    const createDefs = collection.importDefs.filter(
+    const createDefs: ImportDef[] = collection.importDefs.filter(
       (def) => def.type === "create" || !def.type
     );
 
@@ -217,121 +239,128 @@ export class ImportController {
   ) {
     for (let i = 0; i < dataToImport.length; i += this.batchLimit) {
       const batch = dataToImport.slice(i, i + this.batchLimit);
-      for (const item of batch) {
-        let context = this.createContext(db, collection, item);
-        let finalItem = await this.transformData(
-          item,
-          importDef.attributeMappings
-        );
-        let createIdToUse: string | undefined = undefined;
-        let associatedDoc: Models.Document | undefined;
-        if (
-          isMembersCollection &&
-          (finalItem.hasOwnProperty("email") || item.hasOwnProperty("phone"))
-        ) {
-          console.log("Found members collection, creating user...");
-          const usersController = new UsersController(
-            this.config,
-            this.database
+      const results = await Promise.allSettled(
+        batch.map(async (item: any) => {
+          let context = this.createContext(db, collection, item);
+          let finalItem = await this.transformData(
+            item,
+            importDef.attributeMappings
           );
-          const userToCreate = AuthUserCreateSchema.safeParse({
-            ...finalItem,
-          });
-          if (!userToCreate.success) {
-            console.error(userToCreate.error);
-            continue;
-          }
-          const user = await usersController.createUserAndReturn(
-            userToCreate.data
-          );
-          createIdToUse = user.$id;
-          context = { ...context, ...user };
-          console.log(
-            "Created user, deleting keys in finalItem that exist in user..."
-          );
-          const associatedDocFound = await this.database.listDocuments(
-            db.$id,
-            context.collId,
-            [Query.equal("$id", createIdToUse)]
-          );
-          if (associatedDocFound.documents.length > 0) {
-            associatedDoc = associatedDocFound.documents[0];
-          }
-          // Delete keys in finalItem that also exist in user
-          let deletedKeys: string[] = [];
-          Object.keys(finalItem).forEach((key) => {
-            if (user.hasOwnProperty(key)) {
-              delete finalItem[key];
-              deletedKeys.push(key);
+          let createIdToUse: string | undefined = undefined;
+          let associatedDoc: Models.Document | undefined;
+          if (
+            isMembersCollection &&
+            (finalItem.hasOwnProperty("email") || item.hasOwnProperty("phone"))
+          ) {
+            console.log("Found members collection, creating user...");
+            const usersController = new UsersController(
+              this.config,
+              this.database
+            );
+            const userToCreate = AuthUserCreateSchema.safeParse({
+              ...finalItem,
+            });
+            if (!userToCreate.success) {
+              console.error(userToCreate.error);
+              return;
             }
-          });
-          console.log(
-            `Set createIdToUse to ${createIdToUse}. Deleted keys: ${deletedKeys.join(
-              ", "
-            )}.`
-          );
-        } else if (isMembersCollection) {
-          console.log(
-            `Skipping user & contact creation for ${item} due to lack of email...`
-          );
-        }
-
-        context = { ...context, ...finalItem };
-
-        const attributeMappingsWithActions =
-          this.getAttributeMappingsWithActions(
-            importDef.attributeMappings,
-            context,
-            finalItem
-          );
-
-        if (
-          !(await this.importDataActions.validateItem(
-            finalItem,
-            importDef.attributeMappings,
-            context
-          ))
-        ) {
-          console.error("Validation failed for item:", finalItem);
-          continue;
-        }
-
-        let afterContext;
-        if (
-          (importDef.type === "create" || !importDef.type) &&
-          !associatedDoc
-        ) {
-          const createdContext = await this.handleCreate(
-            context,
-            finalItem,
-            updateDefs,
-            createIdToUse
-          );
-          if (createdContext) {
-            afterContext = createdContext;
+            const user = await usersController.createUserAndReturn(
+              userToCreate.data
+            );
+            createIdToUse = user.$id;
+            context = { ...context, ...user };
+            console.log(
+              "Created user, deleting keys in finalItem that exist in user..."
+            );
+            const associatedDocFound = await this.database.listDocuments(
+              db.$id,
+              context.collId,
+              [Query.equal("$id", createIdToUse)]
+            );
+            if (associatedDocFound.documents.length > 0) {
+              associatedDoc = associatedDocFound.documents[0];
+            }
+            // Delete keys in finalItem that also exist in user
+            let deletedKeys: string[] = [];
+            Object.keys(finalItem).forEach((key) => {
+              if (user.hasOwnProperty(key)) {
+                delete finalItem[key];
+                deletedKeys.push(key);
+              }
+            });
+            console.log(
+              `Set createIdToUse to ${createIdToUse}. Deleted keys: ${deletedKeys.join(
+                ", "
+              )}.`
+            );
+          } else if (isMembersCollection) {
+            console.log(
+              `Skipping user & contact creation for ${item} due to lack of email...`
+            );
           }
-        } else {
-          const updatedContext = await this.handleUpdate(
-            context,
-            finalItem,
-            importDef
-          );
-          if (updatedContext) {
-            afterContext = updatedContext;
+
+          context = { ...context, ...finalItem };
+
+          const attributeMappingsWithActions =
+            this.getAttributeMappingsWithActions(
+              importDef.attributeMappings,
+              context,
+              finalItem
+            );
+
+          if (
+            !(await this.importDataActions.validateItem(
+              finalItem,
+              importDef.attributeMappings,
+              context
+            ))
+          ) {
+            console.error("Validation failed for item:", finalItem);
+            return;
           }
+
+          let afterContext;
+          if (
+            (importDef.type === "create" || !importDef.type) &&
+            !associatedDoc
+          ) {
+            const createdContext = await this.handleCreate(
+              context,
+              finalItem,
+              updateDefs,
+              createIdToUse
+            );
+            if (createdContext) {
+              afterContext = createdContext;
+            }
+          } else {
+            const updatedContext = await this.handleUpdate(
+              context,
+              finalItem,
+              importDef
+            );
+            if (updatedContext) {
+              afterContext = updatedContext;
+            }
+          }
+          if (afterContext) {
+            context = { ...context, ...afterContext };
+          }
+          const afterImportActionContext = structuredClone(context);
+          if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
+            this.postImportActionsQueue.push({
+              context: afterImportActionContext,
+              finalItem: finalItem,
+              attributeMappings: attributeMappingsWithActions,
+            });
+          }
+        })
+      );
+      results.forEach((result) => {
+        if (result.status === "rejected") {
+          console.error("A process batch promise was rejected:", result.reason);
         }
-        if (afterContext) {
-          context = { ...context, ...afterContext };
-        }
-        const afterImportActionContext = structuredClone(context);
-        if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
-          this.postImportActionsQueue.push({
-            context: afterImportActionContext,
-            finalItem: finalItem,
-            attributeMappings: attributeMappingsWithActions,
-          });
-        }
-      }
+      });
     }
   }
 
@@ -453,17 +482,29 @@ export class ImportController {
   }
 
   async executePostImportActions() {
-    for (const action of this.postImportActionsQueue) {
-      const { context, finalItem, attributeMappings } = action;
-      console.log(
-        `Executing post-import actions for document: ${context.docId}`
-      );
-      await this.importDataActions.executeAfterImportActions(
-        finalItem,
-        attributeMappings,
-        context
-      );
-    }
+    const results = await Promise.allSettled(
+      this.postImportActionsQueue.map(async (action) => {
+        const { context, finalItem, attributeMappings } = action;
+        console.log(
+          `Executing post-import actions for document: ${context.docId}`
+        );
+        return this.importDataActions.executeAfterImportActions(
+          finalItem,
+          attributeMappings,
+          context
+        );
+      })
+    );
+
+    results.forEach((result) => {
+      if (result.status === "rejected") {
+        console.error(
+          "A post-import action promise was rejected:",
+          result.reason
+        );
+      }
+    });
+
     this.postImportActionsQueue = [];
   }
 }
