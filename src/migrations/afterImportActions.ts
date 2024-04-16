@@ -10,7 +10,6 @@ import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import fetch from "node-fetch";
 
 const getDatabaseFromConfig = (config: AppwriteConfig) => {
   return new Databases(config.appwriteClient!);

@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils",
-  "version": "0.9.9893",
+  "version": "0.9.9894",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
   "bin": {
     "appwrite-utils-setup": "./dist/setup.js",
@@ -55,7 +55,6 @@
     "lodash": "^4.17.21",
     "luxon": "^3.4.4",
     "node-appwrite": "^12.0.1",
-    "node-fetch": "^3.3.2",
     "typescript": "^5.0.0",
     "zod": "^3.22.4"
   }
