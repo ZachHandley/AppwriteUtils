@@ -28,6 +28,33 @@ export const findCollectionsWithRelationships = (config: AppwriteConfig) => {
   return toReturn;
 };
 
+async function fetchAllDocuments(
+  dbId: string,
+  database: Databases,
+  collectionId: string
+): Promise<Models.Document[]> {
+  let allDocuments: Models.Document[] = [];
+  let after; // This will be used for pagination
+
+  while (true) {
+    const response: Models.DocumentList<Models.Document> =
+      await database.listDocuments(dbId, collectionId, [
+        Query.limit(100), // Adjust based on the maximum limit your database allows
+        ...(after ? [Query.cursorAfter(after)] : []),
+      ]);
+
+    allDocuments = allDocuments.concat(response.documents);
+
+    if (response.documents.length === 0 || response.total === 0) {
+      break; // Exit the loop if there are no more documents to fetch
+    }
+
+    after = response.documents[response.documents.length - 1].$id; // Prepare for the next page
+  }
+
+  return allDocuments;
+}
+
 export async function resolveAndUpdateRelationships(
   dbId: string,
   database: Databases,
@@ -45,18 +72,15 @@ export async function resolveAndUpdateRelationships(
     `Found ${collectionsWithRelationships.size} collections with relationships.`
   );
 
+  // Process each collection sequentially
   for (const collection of collections) {
     console.log(
       `Processing collection: ${collection.name} (${collection.$id})`
     );
-    let moreDocuments = true;
-    let lastDocumentId: string | undefined;
-    let processedDocumentsCount = 0;
     const relAttributeMap = collectionsWithRelationships.get(
       collection.name
     ) as RelationshipAttribute[]; // Get the relationship attributes for the collections
 
-    // Prepare relationship updates for documents
     if (!relAttributeMap) {
       console.log(
         `No mapping found for collection: ${collection.name}, skipping...`
@@ -64,44 +88,45 @@ export async function resolveAndUpdateRelationships(
       continue;
     }
 
-    while (moreDocuments) {
-      const { documents, nextCursor } = await fetchDocuments(
-        dbId,
-        database,
-        collection.$id,
-        lastDocumentId
-      );
-      console.log(
-        `Fetched ${documents.length} documents from collection: ${collection.name}`
-      );
-
-      const updates = await prepareDocumentUpdates(
-        database,
-        dbId,
-        collection.name,
-        documents,
-        relAttributeMap
-      );
-      console.log(
-        `Prepared ${updates.length} updates for collection: ${collection.name}`
-      );
-
-      // Execute updates in batches
-      await executeUpdatesInBatches(dbId, database, updates);
-      console.log(
-        `Executed updates for ${updates.length} documents in collection: ${collection.name}`
-      );
-
-      lastDocumentId = nextCursor;
-      moreDocuments = documents.length > 0 && nextCursor !== undefined;
-      processedDocumentsCount += documents.length;
-    }
-    console.log(
-      `Finished processing ${processedDocumentsCount} documents in collection: ${collection.name}`
-    );
+    await processCollection(dbId, database, collection, relAttributeMap);
   }
   console.log(
     `Completed relationship resolution and update for database ID: ${dbId}`
+  );
+}
+
+async function processCollection(
+  dbId: string,
+  database: Databases,
+  collection: Models.Collection,
+  relAttributeMap: RelationshipAttribute[]
+) {
+  console.log(`Fetching all documents from collection: ${collection.name}`);
+  const allDocuments = await fetchAllDocuments(dbId, database, collection.$id);
+  console.log(
+    `Fetched ${allDocuments.length} documents from collection: ${collection.name}`
+  );
+
+  const batchSize = 10; // Process documents in batches of 10
+
+  for (let i = 0; i < allDocuments.length; i += batchSize) {
+    const batch = allDocuments.slice(i, i + batchSize);
+    console.log(`Processing batch of ${batch.length} documents`);
+
+    const updates = await prepareDocumentUpdates(
+      database,
+      dbId,
+      collection.name,
+      batch,
+      relAttributeMap
+    );
+
+    // Execute updates for the current batch
+    await executeUpdatesInBatches(dbId, database, updates);
+  }
+
+  console.log(
+    `Finished processing all documents in collection: ${collection.name}`
   );
 }
 
@@ -138,9 +163,32 @@ async function findDocumentsByOriginalId(
   targetKey: string,
   originalId: string | string[]
 ): Promise<Models.Document[] | undefined> {
-  const query = Query.equal(targetKey, originalId);
+  const collection = await database.listCollections(dbId, [
+    Query.equal("$id", relatedCollectionId),
+  ]);
+  if (collection.total === 0) {
+    console.log(`Collection ${relatedCollectionId} doesn't exist, skipping...`);
+    return undefined;
+  }
+  const targetAttr = collection.collections[0].attributes.find(
+    // @ts-ignore
+    (attr) => attr.key === targetKey
+  ) as any;
+  if (!targetAttr) {
+    console.log(
+      `Attribute ${targetKey} not found in collection ${relatedCollectionId}, skipping...`
+    );
+    return undefined;
+  }
+  let queries: string[] = [];
+  if (targetAttr.array) {
+    // @ts-ignore
+    queries.push(Query.contains(targetKey, originalId));
+  } else {
+    queries.push(Query.equal(targetKey, originalId));
+  }
   const response = await database.listDocuments(dbId, relatedCollectionId, [
-    query,
+    ...queries,
     Query.limit(500), // Adjust the limit based on your needs or implement pagination
   ]);
   if (response.total > 0) {
@@ -170,9 +218,10 @@ async function prepareDocumentUpdates(
     updatePayload: any;
   }[] = [];
 
-  const thisCollectionId = (
+  const thisCollection = (
     await database.listCollections(dbId, [Query.equal("name", collectionName)])
-  ).collections[0]?.$id;
+  ).collections[0];
+  const thisCollectionId = thisCollection?.$id;
 
   if (!thisCollectionId) {
     console.log(`No collection found with name: ${collectionName}`);

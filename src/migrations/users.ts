@@ -74,12 +74,12 @@ export class UsersController {
       console.log("Creating user cause not found");
       userToReturn = await this.users.create(
         item.userId || ID.unique(),
-        item.email,
+        item.email || undefined,
         item.phone && item.phone.length < 15 && item.phone.startsWith("+")
           ? item.phone
           : undefined,
         item.password?.toLowerCase() || `changeMe${item.email}`.toLowerCase(),
-        item.name
+        item.name || undefined
       );
     } else {
       console.log("Updating user cause found");

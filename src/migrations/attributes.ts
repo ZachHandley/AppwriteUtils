@@ -310,7 +310,7 @@ export const createUpdateCollectionAttributes = async (
 ): Promise<void> => {
   console.log(`Creating/Updating attributes for collection: ${collection.$id}`);
 
-  const batchSize = 5; // Size of each batch
+  const batchSize = 3; // Size of each batch
   for (let i = 0; i < attributes.length; i += batchSize) {
     // Slice the attributes array to get a batch of at most batchSize elements
     const batch = attributes.slice(i, i + batchSize);
