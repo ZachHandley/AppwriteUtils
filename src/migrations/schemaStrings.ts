@@ -10,7 +10,9 @@ export const createSchemaString = (
   // What if the name is already PascalCase?
   const pascalName = toPascalCase(name);
 
-  let imports = `import { z } from "zod";\nimport { generateMock } from "@anatine/zod-mock";\n`;
+  let imports = `import { z } from "zod";\n`;
+  // Commented out for now, we don't need this atm
+  // let mockIncludedString = `import { generateMock } from "@anatine/zod-mock";\n`;
 
   // Collect unique related collections for relationship attributes
   const relatedCollections = attributes

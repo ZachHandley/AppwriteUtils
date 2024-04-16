@@ -186,6 +186,9 @@ export const afterImportActions = {
       const collection = await db.getCollection(dbId, collId);
       const attributes = collection.attributes as any[];
       const attribute = attributes.find((a) => a.key === fieldName);
+      console.log(
+        `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
+      );
       let isArray = false;
       if (!attribute) {
         console.log(
