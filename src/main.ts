@@ -11,6 +11,9 @@ export {
   AuthUserSchema,
 } from "./schemas/authUser.js";
 export { getFileViewUrl, getFileDownloadUrl } from "./utils/index.js";
+export { converterFunctions } from "./migrations/converters.js";
+export { validationRules } from "./migrations/validationRules.js";
+export { afterImportActions } from "./migrations/afterImportActions.js";
 
 const args = process.argv.slice(2);
 

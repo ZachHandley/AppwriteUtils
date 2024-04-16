@@ -130,32 +130,6 @@ async function processCollection(
   );
 }
 
-async function fetchDocuments(
-  dbId: string,
-  database: Databases,
-  collectionId: string,
-  lastDocumentId?: string
-): Promise<{ documents: Models.Document[]; nextCursor: string | undefined }> {
-  console.log(
-    `Fetching documents for collection ID: ${collectionId} starting after document ID: ${lastDocumentId}`
-  );
-  const queries = [Query.limit(250)];
-  if (lastDocumentId) {
-    queries.push(Query.cursorAfter(lastDocumentId));
-  }
-  const response = await database.listDocuments(dbId, collectionId, queries);
-  console.log(
-    `Fetched ${response.documents.length} documents from collection ID: ${collectionId}`
-  );
-  return {
-    documents: response.documents,
-    nextCursor:
-      response.documents.length > 0
-        ? response.documents[response.documents.length - 1].$id
-        : undefined,
-  };
-}
-
 async function findDocumentsByOriginalId(
   database: Databases,
   dbId: string,
@@ -328,10 +302,33 @@ async function processInBatches<T>(
   batchSize: number,
   processFunction: (batch: T[]) => Promise<void>
 ) {
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    await processFunction(batch);
+  const maxParallelBatches = 25; // Adjust this value to control the number of parallel batches
+  let currentIndex = 0;
+  let activeBatchPromises: Promise<void>[] = [];
+
+  while (currentIndex < items.length) {
+    // While there's still data to process and we haven't reached our parallel limit
+    while (
+      currentIndex < items.length &&
+      activeBatchPromises.length < maxParallelBatches
+    ) {
+      const batch = items.slice(currentIndex, currentIndex + batchSize);
+      currentIndex += batchSize;
+      // Add new batch processing promise to the array
+      activeBatchPromises.push(processFunction(batch));
+    }
+
+    // Wait for one of the batch processes to complete
+    await Promise.race(activeBatchPromises).then(() => {
+      // Remove the resolved promise from the activeBatchPromises array
+      activeBatchPromises = activeBatchPromises.filter(
+        (p) => p !== Promise.race(activeBatchPromises)
+      );
+    });
   }
+
+  // After processing all batches, ensure all active promises are resolved
+  await Promise.all(activeBatchPromises);
 }
 
 async function executeUpdatesInBatches(

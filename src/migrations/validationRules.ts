@@ -4,7 +4,7 @@ export interface ValidationRules {
   [key: string]: (value: any, ...args: any[]) => boolean;
 }
 
-const validationRules: ValidationRules = {
+export const validationRules: ValidationRules = {
   isNumber: (value: any): boolean => _.isNumber(value),
   isString: (value: any): boolean => _.isString(value),
   isBoolean: (value: any): boolean => _.isBoolean(value),
