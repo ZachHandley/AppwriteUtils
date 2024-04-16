@@ -168,6 +168,11 @@ export const startSetup = async (
 
   const databaseNames = config.databases.map((db) => db.name);
 
+  // Move to here so it always runs if it's set to true
+  if (setupOptions.generateSchemas) {
+    await generateSchemas(config, appwriteFolderPath);
+  }
+
   for (const db of config.databases) {
     // Determine if the current database should be processed based on the setup options
     const processDatabase =
@@ -194,10 +199,6 @@ export const startSetup = async (
         await backupDatabase(database, db.$id, storage);
       }
       deletedCollections = await wipeDatabase(database, db.$id);
-    }
-
-    if (setupOptions.generateSchemas && processDatabase) {
-      await generateSchemas(config, appwriteFolderPath);
     }
 
     if (processDatabase) {

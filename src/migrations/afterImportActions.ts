@@ -183,105 +183,123 @@ export const afterImportActions = {
     try {
       const db = getDatabaseFromConfig(config);
       const storage = getStorageFromConfig(config);
-      const collection = await db.getCollection(dbId, collId);
-      const attributes = collection.attributes as any[];
-      const attribute = attributes.find((a) => a.key === fieldName);
-      console.log(
-        `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
-      );
-      let isArray = false;
-      if (!attribute) {
+      try {
+        const collection = await db.getCollection(dbId, collId);
+        const attributes = collection.attributes as any[];
+        const attribute = attributes.find((a) => a.key === fieldName);
         console.log(
-          `Field ${fieldName} not found in collection ${collId}, weird, skipping...`
+          `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
         );
-        return;
-      } else if (attribute.array === true) {
-        isArray = true;
-      }
-      if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
-        // Create a temporary directory
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appwrite-"));
-        const tempFilePath = path.join(tempDir, fileName);
-
-        // Download the file using fetch
-        const response = await fetch(filePath);
-        if (!response.ok)
-          console.error(
-            `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`
-          );
-
-        // Use arrayBuffer if buffer is not available
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        fs.writeFileSync(tempFilePath, buffer);
-
-        // Create InputFile from the downloaded file
-        const inputFile = InputFile.fromPath(tempFilePath, fileName);
-
-        // Use the full file name (with extension) for creating the file
-        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
-
-        const doc = await db.getDocument(dbId, collId, docId);
-        const existingFieldValue = doc[fieldName as keyof typeof doc];
-
-        let updateData: string | string[];
-        if (Array.isArray(existingFieldValue) && isArray) {
-          // If the existing field value is an array, create a new array with all existing items plus the new file ID
-          updateData = [...existingFieldValue, file.$id];
-        } else if (existingFieldValue && !isArray) {
-          // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
-          updateData = file.$id;
-        } else if (isArray) {
-          // If the field is an array and there's no existing value, then that is the value of the array
-          updateData = [file.$id];
-        } else {
-          // If there's no existing value, just use the new file ID
-          updateData = file.$id;
-        }
-
-        await db.updateDocument(dbId, collId, docId, {
-          [fieldName]: updateData,
-        });
-
-        // If the file was downloaded, delete it after uploading
-        fs.unlinkSync(tempFilePath);
-      } else {
-        const files = fs.readdirSync(filePath);
-        const fileFullName = files.find((file) => file.includes(fileName));
-        if (!fileFullName) {
-          console.error(
-            `File starting with '${fileName}' not found in '${filePath}'`
+        let isArray = false;
+        if (!attribute) {
+          console.log(
+            `Field ${fieldName} not found in collection ${collId}, weird, skipping...`
           );
           return;
+        } else if (attribute.array === true) {
+          isArray = true;
         }
-        const pathToFile = path.join(filePath, fileFullName);
-        const inputFile = InputFile.fromPath(pathToFile, fileName);
-        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+        if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
+          // Create a temporary directory
+          const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appwrite-"));
+          const tempFilePath = path.join(tempDir, fileName);
 
-        const doc = await db.getDocument(dbId, collId, docId);
-        const existingFieldValue = doc[fieldName as keyof typeof doc];
+          // Download the file using fetch
+          const response = await fetch(filePath);
+          if (!response.ok)
+            console.error(
+              `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`
+            );
 
-        let updateData: string | string[];
-        if (Array.isArray(existingFieldValue)) {
-          // If the existing field value is an array, create a new array with all existing items plus the new file ID
-          updateData = [...existingFieldValue, file.$id];
-        } else if (existingFieldValue) {
-          // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
-          updateData = [existingFieldValue, file.$id];
-        } else if (isArray) {
-          // If the field is an array and there's no existing value, then that is the value of the array
-          updateData = [file.$id];
+          // Use arrayBuffer if buffer is not available
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          fs.writeFileSync(tempFilePath, buffer);
+
+          // Create InputFile from the downloaded file
+          const inputFile = InputFile.fromPath(tempFilePath, fileName);
+
+          // Use the full file name (with extension) for creating the file
+          const file = await storage.createFile(
+            bucketId,
+            ID.unique(),
+            inputFile
+          );
+
+          const doc = await db.getDocument(dbId, collId, docId);
+          const existingFieldValue = doc[fieldName as keyof typeof doc];
+
+          let updateData: string | string[];
+          if (Array.isArray(existingFieldValue) && isArray) {
+            // If the existing field value is an array, create a new array with all existing items plus the new file ID
+            updateData = [...existingFieldValue, file.$id];
+          } else if (existingFieldValue && !isArray) {
+            // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
+            updateData = file.$id;
+          } else if (isArray) {
+            // If the field is an array and there's no existing value, then that is the value of the array
+            updateData = [file.$id];
+          } else {
+            // If there's no existing value, just use the new file ID
+            updateData = file.$id;
+          }
+
+          await db.updateDocument(dbId, collId, docId, {
+            [fieldName]: updateData,
+          });
+
+          // If the file was downloaded, delete it after uploading
+          fs.unlinkSync(tempFilePath);
         } else {
-          // If there's no existing value, just use the new file ID
-          updateData = file.$id;
-        }
+          const files = fs.readdirSync(filePath);
+          const fileFullName = files.find((file) => file.includes(fileName));
+          if (!fileFullName) {
+            console.error(
+              `File starting with '${fileName}' not found in '${filePath}'`
+            );
+            return;
+          }
+          const pathToFile = path.join(filePath, fileFullName);
+          const inputFile = InputFile.fromPath(pathToFile, fileName);
+          const file = await storage.createFile(
+            bucketId,
+            ID.unique(),
+            inputFile
+          );
 
-        await db.updateDocument(dbId, collId, docId, {
-          [fieldName]: updateData,
-        });
+          const doc = await db.getDocument(dbId, collId, docId);
+          const existingFieldValue = doc[fieldName as keyof typeof doc];
+
+          let updateData: string | string[];
+          if (Array.isArray(existingFieldValue)) {
+            // If the existing field value is an array, create a new array with all existing items plus the new file ID
+            updateData = [...existingFieldValue, file.$id];
+          } else if (existingFieldValue) {
+            // If there's an existing value but it's not an array, create a new array with the existing value and the new file ID
+            updateData = [existingFieldValue, file.$id];
+          } else if (isArray) {
+            // If the field is an array and there's no existing value, then that is the value of the array
+            updateData = [file.$id];
+          } else {
+            // If there's no existing value, just use the new file ID
+            updateData = file.$id;
+          }
+
+          await db.updateDocument(dbId, collId, docId, {
+            [fieldName]: updateData,
+          });
+        }
+      } catch (error) {
+        console.error("Error creating file and updating field: ", error);
+        console.log(
+          `Params were: dbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}`
+        );
       }
     } catch (error) {
       console.error("Error creating file and updating field: ", error);
+      console.log(
+        `Params were: dbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}`
+      );
     }
   },
 };
