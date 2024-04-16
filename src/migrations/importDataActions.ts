@@ -120,7 +120,8 @@ export class ImportDataActions {
       }
       for (const ruleDef of validationActions) {
         const { action, params } = ruleDef;
-        const validationRule = validationRules[action];
+        const validationRule =
+          validationRules[action as keyof typeof validationRules];
 
         if (!validationRule) {
           console.warn(`Validation rule '${action}' is not defined.`);
@@ -136,10 +137,10 @@ export class ImportDataActions {
         let isValid = false;
         if (Array.isArray(item)) {
           isValid = item.every((item) =>
-            validationRule(item, ...resolvedParams)
+            (validationRule as any)(item, ...resolvedParams)
           );
         } else {
-          isValid = validationRule(item, ...resolvedParams);
+          isValid = (validationRule as any)(item, ...resolvedParams);
         }
         if (!isValid) {
           console.error(

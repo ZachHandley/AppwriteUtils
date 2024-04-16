@@ -1,4 +1,4 @@
-import type { AppwriteConfig } from "@/main.js";
+import type { AppwriteConfig } from "../types.js";
 import type { Models, Storage } from "node-appwrite";
 import fs from "node:fs";
 import path from "node:path";

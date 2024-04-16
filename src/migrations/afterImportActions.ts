@@ -24,7 +24,7 @@ export interface AfterImportActions {
   [key: string]: (config: AppwriteConfig, ...args: any[]) => Promise<any>;
 }
 
-export const afterImportActions: AfterImportActions = {
+export const afterImportActions = {
   updateCreatedDocument: async (
     config: AppwriteConfig,
     dbId: string,
