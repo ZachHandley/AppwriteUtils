@@ -1,60 +1,13 @@
 {
-  "name": "appwrite-utils",
+  "name": "appwrite-utils-monorepo",
   "version": "0.1.12",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more.",
-  "bin": {
-    "appwrite-utils-setup": "./dist/setup.js",
-    "appwrite-utils-migrate": "./dist/main.js"
-  },
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/zachhandley/AppwriteUtils"
-  },
-  "keywords": [
-    "appwrite",
-    "utils",
-    "utility",
-    "functions",
-    "database",
-    "management",
-    "data",
-    "conversion",
-    "import",
-    "migrations",
-    "management"
-  ],
-  "main": "dist/main.js",
-  "types": "dist/types.d.ts",
-  "exports": {
-    ".": "./dist/types.js",
-    "./types": "./dist/types.d.ts"
-  },
-  "files": [
-    "README.md",
-    "dist/**/*"
-  ],
-  "type": "module",
-  "scripts": {
-    "setup": "tsx --no-cache ./src/setup.ts",
-    "migrate": "tsx --no-cache ./src/main.ts",
-    "build": "tsc",
-    "deploy": "npm run build && npm publish --access public"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.0.8",
-    "@types/js-yaml": "^4.0.9",
-    "@types/lodash": "^4.17.0",
-    "@types/luxon": "^3.4.2"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "js-yaml": "^4.1.0",
-    "lodash": "^4.17.21",
-    "luxon": "^3.4.4",
-    "node-appwrite": "^12.0.1",
-    "typescript": "^5.0.0",
-    "zod": "^3.22.4"
   }
 }

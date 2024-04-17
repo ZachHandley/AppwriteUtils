@@ -148,7 +148,7 @@ export class SchemaGenerator {
         endNameTypes += "[]";
         endNameLazy += ".array()";
       }
-      endNameLazy += ".optional()";
+      endNameLazy += ".nullish()";
       imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
       relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
       if (relatedTypes.length > 0 && curNum !== maxNum) {

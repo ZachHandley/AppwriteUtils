@@ -11,7 +11,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
 
-    // Bundler mode
+    // NodeNext mode
     "moduleResolution": "NodeNext",
     "verbatimModuleSyntax": true,
     "noEmit": false,
@@ -30,15 +30,8 @@
     "esModuleInterop": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "declaration": true,
-    "paths": {
-      "@/*": ["src/*"],
-      "@utils/*": ["src/utils/*"],
-      "@utils": ["src/utils"],
-      "@migrations/*": ["src/migrations/*"],
-      "@migrations": ["src/migrations"]
-    }
+    "declaration": true
   },
-  "include": ["main.ts", "src/**/*"],
+  "include": ["src/main.ts", "src/**/*"],
   "exclude": ["node_modules", "dist", "src/appwrite", "example/*"]
 }

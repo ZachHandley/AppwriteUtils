@@ -1,0 +1,25 @@
+{
+  "name": "appwrite-utils",
+  "module": "src/index.ts",
+  "version": "0.1.12",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zachhandley/AppwriteUtils"
+  },
+  "scripts": {
+    "build": "bun run tsc",
+    "deploy": "bun run build && bun publish --access public"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "appwrite": "^14.0.1"
+  }
+}
