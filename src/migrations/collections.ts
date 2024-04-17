@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "../utils/index.js";
 import _ from "lodash";
-import { createSchemaString } from "./schemaStrings.js";
+import { SchemaGenerator } from "./schemaStrings.js";
 import path from "path";
 
 const { join } = _;
@@ -146,19 +146,8 @@ export const generateSchemas = async (
   config: AppwriteConfig,
   appwriteFolderPath: string
 ): Promise<void> => {
-  const configCollections = config.collections;
-  for (const { attributes, ...collection } of configCollections) {
-    console.log(`Processing schema for collection: ${collection.name}`);
-    const camelCaseName = toCamelCase(collection.name);
-    const schemaName = toPascalCase(collection.name);
-    const schemaString = createSchemaString(schemaName, attributes);
-    const schemaPath = path.join(appwriteFolderPath, "schemas");
-    console.log(`Writing schema to: ${schemaPath}`);
-    const schemaFile = `${schemaPath}/${camelCaseName}.ts`;
-
-    ensureDirectoryExistence(schemaFile);
-    writeFileSync(schemaFile, schemaString, { flag: "w" });
-  }
+  const schemaGenerator = new SchemaGenerator(config, appwriteFolderPath);
+  schemaGenerator.generateSchemas();
 };
 
 export const createOrUpdateCollections = async (

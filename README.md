@@ -223,6 +223,7 @@ After Import Actions run after the import and do something with the old data, ne
 
 ### Changelog
 
+- 0.1.12: NPM kept giving me version errors :( anyways -- I have added batching, fixed an issue with the schema regeneration and rewrote it entirely (child collections should now properly resolve) and I added batching to relationships and stuff too, it's pretty neat!
 - 0.9.986: Added join operators for arrays, join those divorcees!
 - 0.9.985: Added the ability to import Users with your data, noted in the #key-features, here's the description:
 
