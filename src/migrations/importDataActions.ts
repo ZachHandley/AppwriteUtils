@@ -162,9 +162,6 @@ export class ImportDataActions {
     context: { [key: string]: any }
   ): Promise<void> {
     for (const mapping of attributeMap) {
-      console.log(
-        `Processing post-import actions for attribute: ${mapping.targetKey}`
-      );
       const { postImportActions } = mapping;
       if (!postImportActions || !Array.isArray(postImportActions)) {
         console.warn(

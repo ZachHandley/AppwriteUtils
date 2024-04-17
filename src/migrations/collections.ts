@@ -20,7 +20,7 @@ export const documentExists = async (
   dbId: string,
   targetCollectionId: string,
   toCreateObject: any
-): Promise<boolean> => {
+): Promise<Models.Document | null> => {
   // Had to do this because kept running into issues with type checking arrays so, sorry 40ms
   const collection = await db.getCollection(dbId, targetCollectionId);
   const attributes = collection.attributes as any[];
@@ -68,7 +68,7 @@ export const documentExists = async (
     targetCollectionId,
     validQueryParams
   );
-  return result.documents.length > 0 && result.total > 0;
+  return result.documents[0] || null;
 };
 
 export const checkForCollection = async (

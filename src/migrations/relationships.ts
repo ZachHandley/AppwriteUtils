@@ -60,17 +60,8 @@ export async function resolveAndUpdateRelationships(
   database: Databases,
   config: AppwriteConfig
 ) {
-  console.log(
-    `Starting relationship resolution and update for database ID: ${dbId}`
-  );
   const collections = await fetchAllCollections(dbId, database);
-  console.log(
-    `Fetched ${collections.length} collections to process for relationships.`
-  );
   const collectionsWithRelationships = findCollectionsWithRelationships(config);
-  console.log(
-    `Found ${collectionsWithRelationships.size} collections with relationships.`
-  );
 
   // Process each collection sequentially
   for (const collection of collections) {
@@ -101,7 +92,6 @@ async function processCollection(
   collection: Models.Collection,
   relAttributeMap: RelationshipAttribute[]
 ) {
-  console.log(`Fetching all documents from collection: ${collection.name}`);
   const allDocuments = await fetchAllDocuments(dbId, database, collection.$id);
   console.log(
     `Fetched ${allDocuments.length} documents from collection: ${collection.name}`
@@ -111,7 +101,6 @@ async function processCollection(
 
   for (let i = 0; i < allDocuments.length; i += batchSize) {
     const batch = allDocuments.slice(i, i + batchSize);
-    console.log(`Processing batch of ${batch.length} documents`);
 
     const updates = await prepareDocumentUpdates(
       database,
@@ -124,10 +113,6 @@ async function processCollection(
     // Execute updates for the current batch
     await executeUpdatesInBatches(dbId, database, updates);
   }
-
-  console.log(
-    `Finished processing all documents in collection: ${collection.name}`
-  );
 }
 
 async function findDocumentsByOriginalId(
@@ -166,9 +151,7 @@ async function findDocumentsByOriginalId(
     Query.limit(500), // Adjust the limit based on your needs or implement pagination
   ]);
   if (response.total > 0) {
-    console.log(
-      `Found ${response.total} documents by original ID: ${originalId}`
-    );
+    return undefined;
   }
 
   if (response.documents.length > 0) {
@@ -204,14 +187,11 @@ async function prepareDocumentUpdates(
 
   // Function to process a batch of documents
   const processDocumentBatch = async (docBatch: Models.Document[]) => {
-    console.log(`Processing document batch with ${docBatch.length} documents`);
     for (const doc of docBatch) {
-      console.log(`Processing document: ${doc.$id}`);
       let updatePayload: { [key: string]: any } = {};
 
       for (const rel of relationships) {
         // Check if the relationship has importMapping defined
-        console.log(`Checking relationship ${rel.key}`);
         if (!rel.importMapping) {
           console.log("No import mapping found, skipping...");
           continue;
@@ -229,9 +209,6 @@ async function prepareDocumentUpdates(
         const targetField = rel.importMapping.targetField || originalIdField; // Use originalIdField if targetField is not specified
         const originalId = doc[originalIdField as keyof typeof doc];
         if (!originalId) {
-          console.log(
-            `Document doesn't have field ${originalIdField}, skipping...`
-          );
           continue; // Skip if the document doesn't have the original ID field
         }
         console.log(`Original ID: ${originalId}`);
@@ -245,7 +222,6 @@ async function prepareDocumentUpdates(
           continue; // Skip if the related collection doesn't exist
         }
         const relatedCollectionId = collection.collections[0].$id;
-        console.log(`Related collection ID: ${relatedCollectionId}`);
 
         // Find documents in the related collection that match the original ID
         const foundDocuments = await findDocumentsByOriginalId(
@@ -257,7 +233,6 @@ async function prepareDocumentUpdates(
         );
 
         if (foundDocuments && foundDocuments.length > 0) {
-          console.log(`Found ${foundDocuments.length} related documents`);
           const relationshipKey = rel.key;
           const existingRefs = doc[relationshipKey as keyof typeof doc] || [];
           let existingRefIds: string[] = [];
@@ -285,8 +260,6 @@ async function prepareDocumentUpdates(
           documentId: doc.$id,
           updatePayload: updatePayload,
         });
-      } else {
-        console.log(`No updates needed for document: ${doc.$id}`);
       }
     }
   };

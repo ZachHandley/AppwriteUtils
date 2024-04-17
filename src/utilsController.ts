@@ -128,7 +128,7 @@ export class UtilsController {
 
     // Start the setup
     console.log(
-      "Starting setup, this step sets up migrations, runs backup, wipes databases, and updates schemas..."
+      "Starting setup, this step sets up migrations, runs backup, wipes databases, and updates schemas (depending on your options)..."
     );
     await startSetup(
       this.database,
@@ -144,8 +144,8 @@ export class UtilsController {
       // await this.generateMockData();
     }
 
-    console.log("Starting import data...");
     if (options.importData) {
+      console.log("Starting import data...");
       const importDataActions = new ImportDataActions(
         this.database,
         this.storage,
@@ -163,8 +163,8 @@ export class UtilsController {
         options
       );
       await importController.run();
+      console.log("Import data complete.");
     }
-    console.log("Import data complete.");
 
     // if (options.checkDuplicates) {
     //   await this.checkDuplicates();

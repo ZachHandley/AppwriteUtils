@@ -28,18 +28,11 @@ export const createOrUpdateAttribute = async (
   let relatedCollectionId: string | undefined;
   if (attribute.type === "relationship") {
     if (nameToIdMapping.has(attribute.relatedCollection)) {
-      console.log(
-        `Name to ID Mapping has relationship collection with name: ${attribute.relatedCollection}`
-      );
       relatedCollectionId = nameToIdMapping.get(attribute.relatedCollection);
-      console.log(`Fetching collection by ID: ${relatedCollectionId}`);
       try {
         collectionFoundViaRelatedCollection = await db.getCollection(
           dbId,
           relatedCollectionId!
-        );
-        console.log(
-          `Collection found: ${collectionFoundViaRelatedCollection.$id}`
         );
       } catch (e) {
         console.log(
@@ -48,24 +41,15 @@ export const createOrUpdateAttribute = async (
         collectionFoundViaRelatedCollection = undefined;
       }
     } else {
-      console.log(
-        `Name to ID mapping does not have collection with name: ${attribute.relatedCollection}`
-      );
       const collectionsPulled = await db.listCollections(dbId, [
         Query.equal("name", attribute.relatedCollection),
       ]);
       if (collectionsPulled.total > 0) {
-        console.log(
-          `Found ${collectionsPulled.total} collections with name: ${attribute.relatedCollection}`
-        );
         collectionFoundViaRelatedCollection = collectionsPulled.collections[0];
         relatedCollectionId = collectionFoundViaRelatedCollection.$id;
         nameToIdMapping.set(attribute.relatedCollection, relatedCollectionId);
       }
     }
-    console.log(
-      `Related collection ID: ${relatedCollectionId}, found: ${collectionFoundViaRelatedCollection}`
-    );
     if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
       console.log(`Enqueueing operation for attribute: ${attribute.key}`);
       enqueueOperation({
@@ -297,9 +281,6 @@ export const createOrUpdateAttribute = async (
       console.error("Invalid attribute type");
       break;
   }
-  console.log(
-    `Found ${numSameAttributes} attributes with the same name and did nothing`
-  );
 };
 
 export const createUpdateCollectionAttributes = async (
@@ -308,7 +289,9 @@ export const createUpdateCollectionAttributes = async (
   collection: Models.Collection,
   attributes: Attribute[]
 ): Promise<void> => {
-  console.log(`Creating/Updating attributes for collection: ${collection.$id}`);
+  console.log(
+    `Creating/Updating attributes for collection: ${collection.name}`
+  );
 
   const batchSize = 3; // Size of each batch
   for (let i = 0; i < attributes.length; i += batchSize) {
@@ -326,4 +309,7 @@ export const createUpdateCollectionAttributes = async (
       }
     });
   }
+  console.log(
+    `Finished creating/updating attributes for collection: ${collection.name}`
+  );
 };

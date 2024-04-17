@@ -405,7 +405,7 @@ export class ImportController {
       return context;
     } else {
       console.log("Document already exists, skipping creation.");
-      return;
+      return existing;
     }
   }
 
@@ -462,7 +462,7 @@ export class ImportController {
           params: [
             "{dbId}",
             "{collId}",
-            "{$id}",
+            "{docId}",
             mapping.targetKey,
             `${this.config!.documentBucketId}_${context.dbName
               .toLowerCase()
