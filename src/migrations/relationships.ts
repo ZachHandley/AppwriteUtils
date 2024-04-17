@@ -193,7 +193,6 @@ async function prepareDocumentUpdates(
       for (const rel of relationships) {
         // Check if the relationship has importMapping defined
         if (!rel.importMapping) {
-          console.log("No import mapping found, skipping...");
           continue;
         }
         // Skip if not dealing with the parent side of a two-way relationship
@@ -211,7 +210,6 @@ async function prepareDocumentUpdates(
         if (!originalId) {
           continue; // Skip if the document doesn't have the original ID field
         }
-        console.log(`Original ID: ${originalId}`);
         const collection = await database.listCollections(dbId, [
           Query.equal("name", rel.relatedCollection),
         ]);

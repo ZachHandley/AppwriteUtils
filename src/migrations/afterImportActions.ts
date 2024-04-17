@@ -199,9 +199,9 @@ export const afterImportActions = {
       const collection = await db.getCollection(dbId, collId);
       const attributes = collection.attributes as any[];
       const attribute = attributes.find((a) => a.key === fieldName);
-      console.log(
-        `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
-      );
+      // console.log(
+      //   `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
+      // );
       let isArray = false;
       if (!attribute) {
         console.log(
@@ -258,12 +258,12 @@ export const afterImportActions = {
         } else {
           updateData = file.$id; // Set the new file ID
         }
-        console.log(
-          "Updating document with file: ",
-          doc.$id,
-          `${fieldName}: `,
-          updateData
-        );
+        // console.log(
+        //   "Updating document with file: ",
+        //   doc.$id,
+        //   `${fieldName}: `,
+        //   updateData
+        // );
 
         // If the file was downloaded, delete it after uploading
         fs.unlinkSync(tempFilePath);
@@ -286,11 +286,11 @@ export const afterImportActions = {
           updateData = file.$id; // Set the new file ID
         }
         // Update the document with the new file ID, removing any existing URL if present
-        console.log(
-          `Updating document with file: ${
-            file.$id
-          }, ${fieldName}: ${JSON.stringify(updateData, null, 2)}`
-        );
+        // console.log(
+        //   `Updating document with file: ${
+        //     file.$id
+        //   }, ${fieldName}: ${JSON.stringify(updateData, null, 2)}`
+        // );
         await db.updateDocument(dbId, collId, doc.$id, {
           [fieldName]: updateData,
         });
