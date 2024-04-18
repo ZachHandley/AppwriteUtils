@@ -24,6 +24,19 @@ import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
 import { AuthUserCreateSchema } from "../types.js";
 import { UsersController } from "./users.js";
+import { logger } from "./logging.js";
+import {
+  ContextObject,
+  createOrFindAfterImportOperation,
+  getAfterImportOperations,
+  setAllPendingAfterImportActionsToReady,
+  updateOperation,
+} from "./migrationHelper.js";
+import {
+  BatchSchema,
+  OperationCreateSchema,
+  OperationSchema,
+} from "./backup.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -34,11 +47,11 @@ export class ImportController {
   private setupOptions: SetupOptions;
   private documentCache: Map<string, any>;
   private batchLimit: number = 25; // Define batch size limit
-  private postImportActionsQueue: {
-    context: any;
-    finalItem: any;
-    attributeMappings: AttributeMappings;
-  }[] = [];
+  // private postImportActionsQueue: {
+  //   context: any;
+  //   finalItem: any;
+  //   attributeMappings: AttributeMappings;
+  // }[] = [];
 
   constructor(
     config: AppwriteConfig,
@@ -90,7 +103,7 @@ export class ImportController {
       console.log(`---------------------------------`);
       await this.importCollections(db);
       await resolveAndUpdateRelationships(db.$id, this.database!, this.config!);
-      await this.executePostImportActions();
+      await this.executePostImportActions(db.$id);
       console.log(`---------------------------------`);
       console.log(`Finished import data for database: ${db.name}`);
       console.log(`---------------------------------`);
@@ -188,6 +201,12 @@ export class ImportController {
       );
       await this.processBatch(db, collection, importDef, dataToImport);
     }
+
+    await setAllPendingAfterImportActionsToReady(
+      this.database,
+      db.$id,
+      collection.$id
+    );
   }
 
   async loadData(importDef: ImportDef): Promise<any[]> {
@@ -268,6 +287,7 @@ export class ImportController {
               userToCreate.data
             );
             createIdToUse = user.$id;
+            context.docId = createIdToUse;
             context = { ...context, ...user };
             console.log(
               "Created user, deleting keys in finalItem that exist in user..."
@@ -347,11 +367,26 @@ export class ImportController {
               finalItem
             );
           if (attributeMappingsWithActions.some((m) => m.postImportActions)) {
-            this.postImportActionsQueue.push({
-              context: afterImportActionContext,
+            logger.info(
+              `Pushing to post-import actions queue for ${context.docId}`
+            );
+            const afterImportOperationContext = ContextObject.parse({
+              dbId: db.$id,
+              collectionId: collection.$id,
               finalItem: finalItem,
               attributeMappings: attributeMappingsWithActions,
+              context: afterImportActionContext,
             });
+            await createOrFindAfterImportOperation(
+              this.database,
+              context.collId,
+              afterImportOperationContext
+            );
+            // this.postImportActionsQueue.push({
+            //   context: afterImportActionContext,
+            //   finalItem: finalItem,
+            //   attributeMappings: attributeMappingsWithActions,
+            // });
           }
         })
       );
@@ -480,30 +515,86 @@ export class ImportController {
     });
   }
 
-  async executePostImportActions() {
-    const results = await Promise.allSettled(
-      this.postImportActionsQueue.map(async (action) => {
-        const { context, finalItem, attributeMappings } = action;
-        console.log(
-          `Executing post-import actions for document: ${context.docId}`
-        );
-        return this.importDataActions.executeAfterImportActions(
-          finalItem,
-          attributeMappings,
-          context
-        );
-      })
-    );
-
+  async executePostImportActions(dbId: string) {
+    const collectionActionsPromises = [];
+    for (const collection of this.config.collections) {
+      collectionActionsPromises.push(
+        this.executeActionsInParallel(dbId, collection)
+      );
+    }
+    const results = await Promise.allSettled(collectionActionsPromises);
     results.forEach((result) => {
       if (result.status === "rejected") {
-        console.error(
-          "A post-import action promise was rejected:",
-          result.reason
-        );
+        console.error("A process batch promise was rejected:", result.reason);
       }
     });
+  }
 
-    this.postImportActionsQueue = [];
+  async executeActionsInParallel(dbId: string, collection: ConfigCollection) {
+    const collectionExists = await checkForCollection(
+      this.database,
+      dbId,
+      collection
+    );
+    if (!collectionExists) {
+      logger.error(`No collection found for ${collection.name}`);
+      return; // Skip this iteration
+    }
+    const operations = await getAfterImportOperations(
+      this.database,
+      collectionExists.$id
+    );
+
+    for (const operation of operations) {
+      if (!operation.batches) {
+        continue;
+      }
+      const batches = operation.batches;
+      const promises = [];
+      for (const batch of batches) {
+        const batchId = batch;
+        promises.push(
+          this.database.getDocument("migrations", "batches", batchId)
+        );
+      }
+      const results = await Promise.allSettled(promises);
+      results.forEach((result) => {
+        if (result.status === "rejected") {
+          logger.error("A process batch promise was rejected:", result.reason);
+        }
+      });
+      const resultsData = results
+        .map((result) => (result.status === "fulfilled" ? result.value : null))
+        .filter((result: any) => result !== null && !result.processed)
+        .map((result) => BatchSchema.parse(result));
+      for (const batch of resultsData) {
+        const actionOperation = ContextObject.parse(JSON.parse(batch.data));
+        const { context, finalItem, attributeMappings } = actionOperation;
+        try {
+          await this.importDataActions.executeAfterImportActions(
+            finalItem,
+            attributeMappings,
+            context
+          );
+          // Mark batch as processed
+          await this.database.deleteDocument(
+            "migrations",
+            "batches",
+            batch.$id
+          );
+          await updateOperation(this.database, operation.$id, {
+            status: "completed",
+            batches: [],
+          });
+        } catch (error) {
+          logger.error(`Failed to execute batch ${batch.$id}:`, error);
+        }
+      }
+
+      // After processing all batches, update the operation status
+      await updateOperation(this.database, operation.$id, {
+        status: "completed", // Or determine based on batch success/failure
+      });
+    }
   }
 }

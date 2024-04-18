@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./.appwrite/appwriteUtilsConfigSchema.json
 appwriteEndpoint: 'https://appwrite.blackleafdigital.com/v1' # Your Appwrite endpoint
-appwriteProject: '65f31b9f540542961b39' # Your Appwrite project
+appwriteProject: '' # Your Appwrite project
 appwriteKey: '' # Your Appwrite API key (needs storage and databases at minimum)
 appwriteClient: null # Your Appwrite client -- don't worry about this
 enableDevDatabase: true # Enable development database alongside main
@@ -84,6 +84,18 @@ collections:
             targetKey: 'name'
           - oldKey: 'email'
             targetKey: 'email'
+          - oldKey: 'doesntMatter'
+            targetKey: 'dogIds'
+            postImportActions:
+              - action: 'setFieldFromOtherCollectionDocuments'
+                params:
+                  - "{dbId}"
+                  - "{collId}"
+                  - "{docId}"
+                  - "dogIds"
+                  - "Dogs"
+                  - "ownerIdOrig"
+                  - "{id}"
           - oldKey: 'doesntMatter'
             targetKey: 'profilePhoto'
             fileData: { name: "profilePhoto_{id}", path: "importData/profilePhotos" }

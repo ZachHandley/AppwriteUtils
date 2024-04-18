@@ -78,3 +78,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 - Syncing configuration
 - Better file format for config (potentially)
 - Separation of collections and import configuration from main config
+
+### Changelog
+
+- 0.0.5: Added `setFieldFromOtherCollectionDocuments` to set an array of ID's for instance from another collection as a `postImportAction`

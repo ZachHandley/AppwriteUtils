@@ -1,21 +1,182 @@
 import { ID, Query, type Databases } from "node-appwrite";
-import { OperationSchema } from "./backup.js";
+import { BatchSchema, OperationSchema, type Operation } from "./backup.js";
+import { type AttributeMappings, AttributeMappingsSchema } from "./schema.js";
+import { z } from "zod";
+import { logger } from "./logging.js";
+
+/**
+ * Object that contains the context for an action that needs to be executed after import
+ * Used in the afterImportActionsDefinitions
+ * @type {ContextObject}
+ * @typedef {Object} ContextObject
+ * @property {string} collectionId - The ID of the collection
+ * @property {any} finalItem - The final item that was imported
+ * @property {string} action - The name of the action
+ * @property {string[]} params - The parameters for the action
+ * @property {Object} context - The context object for the action (all the data of this specific item)
+ */
+export const ContextObject = z.object({
+  dbId: z.string(),
+  collectionId: z.string(),
+  finalItem: z.any(),
+  attributeMappings: AttributeMappingsSchema,
+  context: z.any(),
+});
+
+export type ContextObject = z.infer<typeof ContextObject>;
+
+export const createOrFindAfterImportOperation = async (
+  database: Databases,
+  collectionId: string,
+  context: ContextObject
+) => {
+  let operation = await findOrCreateOperation(
+    database,
+    collectionId,
+    "afterImportAction"
+  );
+  if (!operation.batches) {
+    operation.batches = [];
+  }
+
+  // Directly create a new batch for the context without checking for an existing batch
+  const contextData = JSON.stringify(context);
+  // Create a new batch with the contextData
+  const newBatchId = await addBatch(database, operation, contextData);
+  // Update the operation with the new batch's $id
+  operation.batches.push(newBatchId);
+  await database.updateDocument(
+    "migrations",
+    "currentOperations",
+    operation.$id,
+    { batches: operation.batches }
+  );
+};
+
+export const addBatch = async (
+  database: Databases,
+  operation: Operation,
+  data: string
+) => {
+  const batch = await database.createDocument(
+    "migrations",
+    "batches",
+    ID.unique(),
+    {
+      data,
+      processed: false,
+    }
+  );
+  await database.updateDocument(
+    "migrations",
+    "currentOperations",
+    operation.$id,
+    {
+      batches: [...(operation.batches || []), batch.$id],
+    }
+  );
+  return batch.$id;
+};
+
+export const getAfterImportOperations = async (
+  database: Databases,
+  collectionId: string
+) => {
+  let lastDocumentId: string | undefined;
+  const allOperations = [];
+  let total = 0;
+
+  do {
+    const query = [
+      Query.equal("collectionId", collectionId),
+      Query.equal("operationType", "afterImportAction"),
+      Query.equal("status", "ready"),
+      Query.limit(100),
+    ];
+
+    if (lastDocumentId) {
+      query.push(Query.cursorAfter(lastDocumentId));
+    }
+
+    const operations = await database.listDocuments(
+      "migrations",
+      "currentOperations",
+      query
+    );
+    total = operations.total; // Update total with the latest fetch
+    allOperations.push(...operations.documents);
+
+    if (operations.documents.length > 0) {
+      lastDocumentId =
+        operations.documents[operations.documents.length - 1].$id;
+    }
+  } while (allOperations.length < total);
+
+  const allOps = allOperations.map((op) => OperationSchema.parse(op));
+  return allOps;
+};
+
+export const setAllPendingAfterImportActionsToReady = async (
+  database: Databases,
+  dbId: string,
+  collectionId: string
+) => {
+  let lastDocumentId: string | undefined;
+  do {
+    const query = [
+      Query.equal("collectionId", collectionId),
+      Query.equal("status", "pending"),
+      Query.limit(100),
+    ];
+
+    if (lastDocumentId) {
+      query.push(Query.cursorAfter(lastDocumentId));
+    }
+
+    const operations = await database.listDocuments(
+      "migrations",
+      "currentOperations",
+      query
+    );
+
+    // Update each pending operation to 'ready'
+    for (const operation of operations.documents) {
+      await database.updateDocument(
+        "migrations",
+        "currentOperations",
+        operation.$id,
+        { status: "ready" }
+      );
+    }
+
+    // Prepare for the next iteration in case there are more than 100 documents
+    if (operations.documents.length > 0) {
+      lastDocumentId =
+        operations.documents[operations.documents.length - 1].$id;
+    } else {
+      lastDocumentId = undefined; // No more documents to process
+    }
+  } while (lastDocumentId); // Continue if there's a last document indicating more documents might exist
+
+  logger.info(
+    `All pending operations for collection ${collectionId} are now set to ready.`
+  );
+};
 
 export const findOrCreateOperation = async (
   database: Databases,
   collectionId: string,
-  operationType: string
+  operationType: string,
+  additionalQueries?: string[]
 ) => {
-  // Here you would query your database for an existing operation
-  // If it doesn't exist, create a new one
-  // This is a simplified example
   const operations = await database.listDocuments(
     "migrations",
     "currentOperations",
     [
       Query.equal("collectionId", collectionId),
       Query.equal("operationType", operationType),
-      Query.equal("status", "in_progress"),
+      Query.equal("status", "pending"),
+      ...(additionalQueries || []),
     ]
   );
 
@@ -30,7 +191,7 @@ export const findOrCreateOperation = async (
       {
         operationType,
         collectionId,
-        status: "in_progress",
+        status: "pending",
         batches: [],
         progress: 0,
         total: 0,

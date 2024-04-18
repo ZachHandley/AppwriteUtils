@@ -128,6 +128,101 @@ export const afterImportActions = {
       );
     }
   },
+  /**
+   * Updates a field in a document by setting it with document IDs from another collection
+   * based on a matching field value.
+   */
+  setFieldFromOtherCollectionDocuments: async (
+    config: AppwriteConfig,
+    dbId: string,
+    collIdOrName: string,
+    docId: string,
+    fieldName: string,
+    otherCollIdOrName: string,
+    matchingFieldName: string,
+    matchingFieldValue: any
+  ): Promise<void> => {
+    const db = getDatabaseFromConfig(config);
+
+    // Helper function to find a collection ID by name or return the ID if given
+    const findCollectionId = async (collectionIdentifier: string) => {
+      const collections = await db.listCollections(dbId, [
+        Query.equal("name", collectionIdentifier),
+        Query.limit(1),
+      ]);
+      return collections.total > 0
+        ? collections.collections[0].$id
+        : collectionIdentifier;
+    };
+
+    // Function to check if the target field is an array
+    const isTargetFieldArray = async (
+      collectionId: string,
+      fieldName: string
+    ) => {
+      const collection = await db.getCollection(dbId, collectionId);
+      const attribute = collection.attributes.find(
+        (attr: any) => attr.key === fieldName
+      );
+      // @ts-ignore
+      return attribute?.array === true;
+    };
+
+    try {
+      const targetCollectionId = await findCollectionId(collIdOrName);
+      const otherCollectionId = await findCollectionId(otherCollIdOrName);
+      const targetFieldIsArray = await isTargetFieldArray(
+        targetCollectionId,
+        fieldName
+      );
+
+      // Function to recursively fetch all matching documents from the other collection
+      const fetchAllMatchingDocuments = async (
+        cursor?: string
+      ): Promise<Models.Document[]> => {
+        const docLimit = 100;
+        const queries = targetFieldIsArray
+          ? // @ts-ignore
+            [Query.contains(matchingFieldName, [matchingFieldValue])]
+          : [Query.equal(matchingFieldName, matchingFieldValue)];
+        if (cursor) {
+          queries.push(Query.cursorAfter(cursor));
+        }
+        queries.push(Query.limit(docLimit));
+        const response = await db.listDocuments(
+          dbId,
+          otherCollectionId,
+          queries
+        );
+        const documents = response.documents;
+        if (documents.length === 0 || documents.length < docLimit) {
+          return documents;
+        }
+        const nextCursor = documents[documents.length - 1].$id;
+        const nextBatch = await fetchAllMatchingDocuments(nextCursor);
+        return documents.concat(nextBatch);
+      };
+
+      const matchingDocuments = await fetchAllMatchingDocuments();
+      const documentIds = matchingDocuments.map((doc) => doc.$id);
+
+      if (documentIds.length > 0) {
+        const updatePayload = targetFieldIsArray
+          ? { [fieldName]: documentIds }
+          : { [fieldName]: documentIds[0] };
+        await db.updateDocument(dbId, targetCollectionId, docId, updatePayload);
+
+        console.log(
+          `Field ${fieldName} updated successfully in document ${docId} with ${documentIds.length} document IDs.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Error setting field from other collection documents: ",
+        error
+      );
+    }
+  },
   createOrGetBucket: async (
     config: AppwriteConfig,
     bucketName: string,
@@ -258,6 +353,9 @@ export const afterImportActions = {
         } else {
           updateData = file.$id; // Set the new file ID
         }
+        await db.updateDocument(dbId, collId, doc.$id, {
+          [fieldName]: updateData,
+        });
         // console.log(
         //   "Updating document with file: ",
         //   doc.$id,

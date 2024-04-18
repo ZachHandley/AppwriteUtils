@@ -64,7 +64,16 @@ export const OperationSchema = z.object({
   progress: z.number(),
   total: z.number(),
   error: z.string(),
-  status: z.enum(["pending", "in_progress", "completed", "error"]),
+  status: z
+    .enum([
+      "pending",
+      "ready",
+      "in_progress",
+      "completed",
+      "error",
+      "cancelled",
+    ])
+    .default("pending"),
 });
 
 export type Operation = z.infer<typeof OperationSchema>;
@@ -133,7 +142,14 @@ export const getMigrationCollectionSchemas = () => {
     attributeSchema.parse({
       key: "status",
       type: "enum",
-      elements: ["pending", "in_progress", "completed", "error"],
+      elements: [
+        "pending",
+        "ready",
+        "in_progress",
+        "completed",
+        "error",
+        "cancelled",
+      ],
       error: "Invalid Status",
       array: false,
       xdefault: "pending",
