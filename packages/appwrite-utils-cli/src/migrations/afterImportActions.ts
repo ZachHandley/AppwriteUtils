@@ -140,7 +140,8 @@ export const afterImportActions = {
     fieldName: string,
     otherCollIdOrName: string,
     matchingFieldName: string,
-    matchingFieldValue: any
+    matchingFieldValue: any,
+    fieldToSet?: string
   ): Promise<void> => {
     const db = getDatabaseFromConfig(config);
 
@@ -214,6 +215,97 @@ export const afterImportActions = {
 
         console.log(
           `Field ${fieldName} updated successfully in document ${docId} with ${documentIds.length} document IDs.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Error setting field from other collection documents: ",
+        error
+      );
+    }
+  },
+  setTargetFieldFromOtherCollectionDocumentsByMatchingField: async (
+    config: AppwriteConfig,
+    dbId: string,
+    collIdOrName: string,
+    docId: string,
+    fieldName: string,
+    otherCollIdOrName: string,
+    matchingFieldName: string,
+    matchingFieldValue: any,
+    targetField: string
+  ): Promise<void> => {
+    const db = getDatabaseFromConfig(config);
+
+    const findCollectionId = async (collectionIdentifier: string) => {
+      const collections = await db.listCollections(dbId, [
+        Query.equal("name", collectionIdentifier),
+        Query.limit(1),
+      ]);
+      return collections.total > 0
+        ? collections.collections[0].$id
+        : collectionIdentifier;
+    };
+
+    const isTargetFieldArray = async (
+      collectionId: string,
+      fieldName: string
+    ) => {
+      const collection = await db.getCollection(dbId, collectionId);
+      const attribute = collection.attributes.find(
+        (attr: any) => attr.key === fieldName
+      );
+      // @ts-ignore
+      return attribute?.array === true;
+    };
+
+    try {
+      const targetCollectionId = await findCollectionId(collIdOrName);
+      const otherCollectionId = await findCollectionId(otherCollIdOrName);
+      const targetFieldIsArray = await isTargetFieldArray(
+        targetCollectionId,
+        fieldName
+      );
+
+      const fetchAllMatchingDocuments = async (
+        cursor?: string
+      ): Promise<Models.Document[]> => {
+        const docLimit = 100;
+        const queries = [
+          Query.equal(matchingFieldName, matchingFieldValue),
+          Query.limit(docLimit),
+        ];
+        if (cursor) {
+          queries.push(Query.cursorAfter(cursor));
+        }
+        const response = await db.listDocuments(
+          dbId,
+          otherCollectionId,
+          queries
+        );
+        const documents = response.documents;
+        if (documents.length === 0 || documents.length < docLimit) {
+          return documents;
+        }
+        const nextCursor = documents[documents.length - 1].$id;
+        const nextBatch = await fetchAllMatchingDocuments(nextCursor);
+        return documents.concat(nextBatch);
+      };
+
+      const matchingDocuments = await fetchAllMatchingDocuments();
+      // Map the values from the targetField instead of the document IDs
+      const targetFieldValues = matchingDocuments.map(
+        (doc) => doc[targetField as keyof typeof doc]
+      );
+
+      if (targetFieldValues.length > 0) {
+        const updatePayload = targetFieldIsArray
+          ? { [fieldName]: targetFieldValues }
+          : { [fieldName]: targetFieldValues[0] };
+        await db.updateDocument(dbId, targetCollectionId, docId, updatePayload);
+
+        console.log(
+          `Field ${fieldName} updated successfully in document ${docId} with values from field ${targetField}.`
         );
       }
     } catch (error) {
