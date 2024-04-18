@@ -20,7 +20,7 @@ export type DogsBase = z.infer<typeof DogsSchemaBase> & {
 };
 
 export const DogsSchema: z.ZodType<DogsBase> = DogsSchemaBase.extend({
-  owner: z.lazy(() => MembersSchema.optional()),
+  owner: z.lazy(() => MembersSchema.nullish()),
 });
 
 export type Dogs = z.infer<typeof DogsSchema>;

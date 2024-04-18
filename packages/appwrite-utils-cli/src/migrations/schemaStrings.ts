@@ -33,7 +33,6 @@ export class SchemaGenerator {
       collection.attributes.forEach((attr) => {
         if (attr.type === "relationship" && attr.twoWay && attr.twoWayKey) {
           const relationshipAttr = attr as RelationshipAttribute;
-          console.log(`Extracting relationship: ${attr.key}`);
           let isArrayParent = false;
           let isArrayChild = false;
           switch (relationshipAttr.relationType) {
@@ -131,8 +130,6 @@ export class SchemaGenerator {
       const isArray = detail.isArray ? "array" : "";
       return [relatedCollectionName, key, isArray];
     });
-
-    console.log(relatedCollections);
 
     let relatedTypes = "";
     let relatedTypesLazy = "";

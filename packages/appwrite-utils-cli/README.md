@@ -44,7 +44,7 @@ appwrite-setup --example
 Run migration and management tasks with specific flags according to your needs:
 
 ```bash
-appwrite-run --args
+appwrite-migrate --args
 ```
 
 Replace `--args` with the appropriate options:
@@ -62,13 +62,19 @@ Replace `--args` with the appropriate options:
 For example, to run migrations in a development environment and import data:
 
 ```bash
-appwrite-run --dev --import
+appwrite-migrate --dev --import
 ```
 
 To initialize your project, generate schemas, but not import data:
 
 ```bash
-appwrite-run --init
+appwrite-migrate --init
 ```
 
-This setup ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line.
+This setup ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line. I also have added logging automatically for information and errors as the console can be hard to keep up with.
+
+### Roadmap
+
+- Syncing configuration
+- Better file format for config (potentially)
+- Separation of collections and import configuration from main config

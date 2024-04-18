@@ -285,15 +285,10 @@ export const afterImportActions = {
         } else {
           updateData = file.$id; // Set the new file ID
         }
-        // Update the document with the new file ID, removing any existing URL if present
-        // console.log(
-        //   `Updating document with file: ${
-        //     file.$id
-        //   }, ${fieldName}: ${JSON.stringify(updateData, null, 2)}`
-        // );
         await db.updateDocument(dbId, collId, doc.$id, {
           [fieldName]: updateData,
         });
+        console.log("Created file from path: ", file.$id);
       }
     } catch (error) {
       console.error("Error creating file and updating field: ", error);

@@ -10,11 +10,11 @@
   },
   "bin": {
     "appwrite-setup": "./dist/setup.js",
-    "appwrite-run": "./dist/main.js"
+    "appwrite-migrate": "./dist/main.js"
   },
   "scripts": {
     "build": "bun run tsc",
-    "deploy": "bun run build && bun publish --access public",
+    "deploy": "bun run build && npm publish --access public",
     "postinstall": "echo 'This package is intended for CLI use only and should not be added as a dependency in other projects.'"
   },
   "dependencies": {
@@ -22,6 +22,7 @@
     "lodash": "^4.17.21",
     "luxon": "^3.4.4",
     "node-appwrite": "^12.0.1",
+    "winston": "^3.13.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {

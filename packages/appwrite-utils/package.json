@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "bun run tsc",
-    "deploy": "bun run build && bun publish --access public"
+    "deploy": "bun run build && npm publish --access public"
   },
   "devDependencies": {
     "@types/bun": "latest"

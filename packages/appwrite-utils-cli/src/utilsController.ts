@@ -76,34 +76,34 @@ export class UtilsController {
     this.appwriteConfigPath = appwriteConfigPath;
   }
 
-  async loadCustomDefinitions(): Promise<void> {
-    try {
-      const customDefinitionsPath = path.join(
-        this.appwriteFolderPath,
-        "customDefinitions.ts"
-      );
-      if (fs.existsSync(customDefinitionsPath)) {
-        // Dynamically import custom definitions
-        const customDefinitions = (await import(
-          customDefinitionsPath
-        )) as typeof import("customDefinitions");
-        this.converterDefinitions = {
-          ...this.converterDefinitions,
-          ...customDefinitions.converterDefinitions,
-        };
-        this.validityRuleDefinitions = {
-          ...this.validityRuleDefinitions,
-          ...customDefinitions.validityRuleDefinitions,
-        };
-        this.afterImportActionsDefinitions = {
-          ...this.afterImportActionsDefinitions,
-          ...customDefinitions.afterImportActionsDefinitions,
-        };
-      }
-    } catch (error) {
-      console.error("Failed to load custom definitions:", error);
-    }
-  }
+  // async loadCustomDefinitions(): Promise<void> {
+  //   try {
+  //     const customDefinitionsPath = path.join(
+  //       this.appwriteFolderPath,
+  //       "customDefinitions.ts"
+  //     );
+  //     if (fs.existsSync(customDefinitionsPath)) {
+  //       // Dynamically import custom definitions
+  //       const customDefinitions = (await import(
+  //         customDefinitionsPath
+  //       )) as typeof import("customDefinitions");
+  //       this.converterDefinitions = {
+  //         ...this.converterDefinitions,
+  //         ...customDefinitions.converterDefinitions,
+  //       };
+  //       this.validityRuleDefinitions = {
+  //         ...this.validityRuleDefinitions,
+  //         ...customDefinitions.validityRuleDefinitions,
+  //       };
+  //       this.afterImportActionsDefinitions = {
+  //         ...this.afterImportActionsDefinitions,
+  //         ...customDefinitions.afterImportActionsDefinitions,
+  //       };
+  //     }
+  //   } catch (error) {
+  //     console.error("Failed to load custom definitions:", error);
+  //   }
+  // }
 
   async init() {
     if (!this.config) {

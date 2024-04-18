@@ -16,6 +16,7 @@ import {
   afterImportActions,
   type AfterImportActions,
 } from "./afterImportActions.js";
+import { logger } from "./logging.js";
 
 type AttributeMappings =
   AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];
@@ -77,7 +78,7 @@ export class ImportDataActions {
               return converterFunction(value);
             }
           } else {
-            console.warn(
+            logger.warn(
               `Converter function '${converterName}' is not defined.`
             );
             return value;
@@ -124,7 +125,7 @@ export class ImportDataActions {
           validationRules[action as keyof typeof validationRules];
 
         if (!validationRule) {
-          console.warn(`Validation rule '${action}' is not defined.`);
+          logger.warn(`Validation rule '${action}' is not defined.`);
           continue; // Optionally, consider undefined rules as a validation failure.
         }
 
@@ -143,7 +144,7 @@ export class ImportDataActions {
           isValid = (validationRule as any)(item, ...resolvedParams);
         }
         if (!isValid) {
-          console.error(
+          logger.error(
             `Validation failed for rule '${action}' with params ${params.join(
               ", "
             )}`
@@ -177,14 +178,18 @@ export class ImportDataActions {
             mapping.targetKey
           }' with params ${params.join(", ")}...`
         );
+        logger.info(
+          `Executing post-import action '${action}' for attribute '${
+            mapping.targetKey
+          }' with params ${params.join(", ")}...`
+        );
         try {
           await this.executeAction(action, params, context, item);
         } catch (error) {
-          console.error(
+          logger.error(
             `Failed to execute post-import action '${action}' for attribute '${mapping.targetKey}':`,
             error
           );
-          throw error; // Rethrow the error to stop the import process
         }
       }
     }
@@ -208,19 +213,23 @@ export class ImportDataActions {
 
         // Execute the action with resolved parameters
         // Parameters are passed as-is, with objects treated as single parameters
-        console.log(
-          `Executing action '${actionName}' with params:`,
+        logger.info(
+          `Executing action '${actionName}' from context: ${JSON.stringify(
+            context,
+            null,
+            2
+          )} with params:`,
           resolvedParams
         );
         await (actionMethod as any)(this.config, ...resolvedParams);
       } catch (error: any) {
-        console.error(`Error executing action '${actionName}':`, error);
+        logger.error(`Error executing action '${actionName}':`, error);
         throw new Error(
           `Execution failed for action '${actionName}': ${error.message}`
         );
       }
     } else {
-      console.warn(`Action '${actionName}' is not defined.`);
+      logger.warn(`Action '${actionName}' is not defined.`);
       throw new Error(`Action '${actionName}' is not defined.`);
     }
   }
@@ -277,7 +286,7 @@ export class ImportDataActions {
             : resolvedValue;
           resolvedString = resolvedString.replace(match[0], value);
         } else {
-          console.log(`Failed to resolve ${template} in context: `, context);
+          logger.warn(`Failed to resolve ${template} in context: `, context);
         }
       }
       // console.log(`Resolved string: ${resolvedString}`);

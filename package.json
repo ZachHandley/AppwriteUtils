@@ -9,5 +9,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/zachhandley/AppwriteUtils"
+  },
+  "scripts": {
+    "build": "cd packages/appwrite-utils && bun run build && cd ../appwrite-utils-cli && bun run build",
+    "deploy": "cd packages/appwrite-utils && bun run deploy && cd ../appwrite-utils-cli && bun run deploy"
   }
 }
