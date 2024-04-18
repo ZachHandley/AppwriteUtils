@@ -143,9 +143,11 @@ export class SchemaGenerator {
       let endNameLazy = `${relatedPascalName}Schema`;
       if (relatedCollection[2] === "array") {
         endNameTypes += "[]";
-        endNameLazy += ".array()";
+        endNameLazy += ".array().default([])";
+      } else if (!(relatedCollection[2] === "array")) {
+        endNameTypes += " | null";
+        endNameLazy += ".nullish()";
       }
-      endNameLazy += ".nullish()";
       imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
       relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
       if (relatedTypes.length > 0 && curNum !== maxNum) {

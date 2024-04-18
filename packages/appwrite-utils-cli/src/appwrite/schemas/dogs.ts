@@ -16,7 +16,7 @@ export const DogsSchemaBase = z.object({
 });
 
 export type DogsBase = z.infer<typeof DogsSchemaBase> & {
-  owner?: Members;
+  owner?: Members | null;
 };
 
 export const DogsSchema: z.ZodType<DogsBase> = DogsSchemaBase.extend({

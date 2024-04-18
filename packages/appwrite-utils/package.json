@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils",
   "module": "src/index.ts",
-  "version": "0.1.12",
+  "version": "0.1.14",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -9,6 +9,13 @@
     "type": "git",
     "url": "https://github.com/zachhandley/AppwriteUtils"
   },
+  "keywords": [
+    "appwrite",
+    "utils",
+    "helper",
+    "file",
+    "data"
+  ],
   "scripts": {
     "build": "bun run tsc",
     "deploy": "bun run build && npm publish --access public"

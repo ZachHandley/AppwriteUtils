@@ -17,7 +17,7 @@ export type MembersBase = z.infer<typeof MembersSchemaBase> & {
 };
 
 export const MembersSchema: z.ZodType<MembersBase> = MembersSchemaBase.extend({
-  dogs: z.lazy(() => DogsSchema.array().nullish()),
+  dogs: z.lazy(() => DogsSchema.array().default([])),
 });
 
 export type Members = z.infer<typeof MembersSchema>;

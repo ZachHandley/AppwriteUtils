@@ -126,7 +126,4 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-src/appwrite/appwriteConfig.yaml
-
-
-src/appwrite
+packages/appwrite-utils-cli/src/appwrite/appwriteConfig.yaml
