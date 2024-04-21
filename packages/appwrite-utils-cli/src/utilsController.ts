@@ -46,6 +46,7 @@ export interface SetupOptions {
   generateMockData: boolean;
   importData: boolean;
   checkDuplicates: boolean;
+  shouldWriteFile: boolean;
 }
 
 type CollectionConfig = AppwriteConfig["collections"];

@@ -107,7 +107,8 @@ export class ImportController {
         this.appwriteFolderPath,
         this.importDataActions,
         this.database,
-        this.config
+        this.config,
+        this.setupOptions.shouldWriteFile
       );
       await dataLoader.start(db.$id);
       await this.importCollections(db, dataLoader);
@@ -156,19 +157,26 @@ export class ImportController {
             );
             const userBatchPromises = userBatches
               .map((userBatch) => {
-                if (userBatch.finalData && userBatch) {
-                  return usersController
-                    .createUserAndReturn(userBatch.finalData)
-                    .then(() => console.log("Created user"))
-                    .catch((error) => {
-                      logger.error(
-                        "Error creating user:",
-                        error,
-                        "\nUser data is ",
-                        userBatch.finalData
-                      );
-                      throw error;
-                    });
+                if (userBatch.finalData && userBatch.finalData.length > 0) {
+                  const userId = userBatch.finalData.userId;
+                  if (dataLoader.userExistsMap.has(userId)) {
+                    if (!dataLoader.userExistsMap.get(userId)) {
+                      return usersController
+                        .createUserAndReturn(userBatch.finalData)
+                        .then(() => console.log("Created user"))
+                        .catch((error) => {
+                          logger.error(
+                            "Error creating user:",
+                            error,
+                            "\nUser data is ",
+                            userBatch.finalData
+                          );
+                          throw error;
+                        });
+                    } else {
+                      return Promise.resolve();
+                    }
+                  }
                 }
               })
               .flat();

@@ -62,19 +62,23 @@ export class DataLoader {
   // Maps to hold email and phone to user ID mappings for unique-ness in User Accounts
   private emailToUserIdMap = new Map<string, string>();
   private phoneToUserIdMap = new Map<string, string>();
+  userExistsMap = new Map<string, boolean>();
+  private shouldWriteFile = false;
 
   // Constructor to initialize the DataLoader with necessary configurations
   constructor(
     appwriteFolderPath: string,
     importDataActions: ImportDataActions,
     database: Databases,
-    config: AppwriteConfig
+    config: AppwriteConfig,
+    shouldWriteFile?: boolean
   ) {
     this.appwriteFolderPath = appwriteFolderPath;
     this.importDataActions = importDataActions;
     this.database = database;
     this.usersController = new UsersController(config, database);
     this.config = config;
+    this.shouldWriteFile = shouldWriteFile || false;
   }
 
   // Helper method to generate a consistent key for collections
@@ -212,6 +216,16 @@ export class DataLoader {
   async getAllUsers() {
     const users = new UsersController(this.config, this.database);
     const allUsers = await users.getAllUsers();
+    // Iterate over the users and setup our maps ahead of time for email and phone
+    for (const user of allUsers) {
+      if (user.email) {
+        this.emailToUserIdMap.set(user.email, user.$id);
+      }
+      if (user.phone) {
+        this.phoneToUserIdMap.set(user.phone, user.$id);
+      }
+      this.userExistsMap.set(user.$id, true);
+    }
     return allUsers;
   }
 
@@ -223,15 +237,6 @@ export class DataLoader {
     await this.setupMaps(dbId);
     const allUsers = await this.getAllUsers();
     console.log(`Fetched ${allUsers.length} users`);
-    // Iterate over the users and setup our maps ahead of time for email and phone
-    for (const user of allUsers) {
-      if (user.email) {
-        this.emailToUserIdMap.set(user.email, user.$id);
-      }
-      if (user.phone) {
-        this.phoneToUserIdMap.set(user.phone, user.$id);
-      }
-    }
     // Iterate over the configured databases to find the matching one
     for (const db of this.config.databases) {
       if (db.$id !== dbId) {
@@ -286,7 +291,9 @@ export class DataLoader {
     console.log("---------------------------------");
     console.log(`Data setup for database: ${dbId} completed`);
     console.log("---------------------------------");
-    // this.writeMapsToJsonFile();
+    if (this.shouldWriteFile) {
+      this.writeMapsToJsonFile();
+    }
   }
 
   async updateReferencesInRelatedCollections() {
@@ -442,46 +449,46 @@ export class DataLoader {
   //   }
   // }
 
-  // private writeMapsToJsonFile() {
-  //   const outputDir = path.resolve(process.cwd());
-  //   const outputFile = path.join(outputDir, "dataLoaderOutput.json");
+  private writeMapsToJsonFile() {
+    const outputDir = path.resolve(process.cwd());
+    const outputFile = path.join(outputDir, "dataLoaderOutput.json");
 
-  //   const dataToWrite = {
-  //     dataFromCollections: Array.from(this.importMap.entries()).map(
-  //       ([key, value]) => {
-  //         return {
-  //           collection: key,
-  //           data: value.data.map((item: any) => item.finalData),
-  //         };
-  //       }
-  //     ),
-  //     // Convert Maps to arrays of entries for serialization
-  //     mergedUserMap: Array.from(this.mergedUserMap.entries()),
-  //     // emailToUserIdMap: Array.from(this.emailToUserIdMap.entries()),
-  //     // phoneToUserIdMap: Array.from(this.phoneToUserIdMap.entries()),
-  //   };
+    const dataToWrite = {
+      dataFromCollections: Array.from(this.importMap.entries()).map(
+        ([key, value]) => {
+          return {
+            collection: key,
+            data: value.data.map((item: any) => item.finalData),
+          };
+        }
+      ),
+      // Convert Maps to arrays of entries for serialization
+      mergedUserMap: Array.from(this.mergedUserMap.entries()),
+      // emailToUserIdMap: Array.from(this.emailToUserIdMap.entries()),
+      // phoneToUserIdMap: Array.from(this.phoneToUserIdMap.entries()),
+    };
 
-  //   // Use JSON.stringify with a replacer function to handle Maps
-  //   const replacer = (key: any, value: any) => {
-  //     if (value instanceof Map) {
-  //       return Array.from(value.entries());
-  //     }
-  //     return value;
-  //   };
+    // Use JSON.stringify with a replacer function to handle Maps
+    const replacer = (key: any, value: any) => {
+      if (value instanceof Map) {
+        return Array.from(value.entries());
+      }
+      return value;
+    };
 
-  //   fs.writeFile(
-  //     outputFile,
-  //     JSON.stringify(dataToWrite, replacer, 2),
-  //     "utf8",
-  //     (err) => {
-  //       if (err) {
-  //         console.error("Error writing data to JSON file:", err);
-  //         return;
-  //       }
-  //       console.log(`Data successfully written to ${outputFile}`);
-  //     }
-  //   );
-  // }
+    fs.writeFile(
+      outputFile,
+      JSON.stringify(dataToWrite, replacer, 2),
+      "utf8",
+      (err) => {
+        if (err) {
+          console.error("Error writing data to JSON file:", err);
+          return;
+        }
+        console.log(`Data successfully written to ${outputFile}`);
+      }
+    );
+  }
 
   /**
    * Prepares user data by checking for duplicates based on email or phone, adding to a duplicate map if found,

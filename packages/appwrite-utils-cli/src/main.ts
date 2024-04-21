@@ -16,6 +16,7 @@ async function main() {
   let generateSchemas = false;
   let importData = false;
   let wipeDocuments = false;
+  let shouldWriteFile = false;
   if (args.includes("--prod")) {
     runProd = true;
   }
@@ -43,6 +44,9 @@ async function main() {
   if (args.includes("--wipe-users") || args.includes("--wipeUsers")) {
     wipeUsers = true;
   }
+  if (args.includes("--write-data") || args.includes("--writeData")) {
+    shouldWriteFile = true;
+  }
   if (args.includes("--init")) {
     await controller.run({
       runProd: runProd,
@@ -56,6 +60,7 @@ async function main() {
       generateMockData: false,
       importData: false,
       checkDuplicates: false,
+      shouldWriteFile: shouldWriteFile,
     });
   } else {
     await controller.run({
@@ -70,6 +75,7 @@ async function main() {
       wipeUsers: wipeUsers,
       importData: importData,
       checkDuplicates: false,
+      shouldWriteFile: shouldWriteFile,
     });
   }
 }
