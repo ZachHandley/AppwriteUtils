@@ -11,6 +11,7 @@ import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { logger } from "./logging.js";
 
 const getDatabaseFromConfig = (config: AppwriteConfig) => {
   if (!config.appwriteClient) {
@@ -481,6 +482,9 @@ export const afterImportActions = {
         console.log("Created file from path: ", file.$id);
       }
     } catch (error) {
+      logger.error(
+        `Error creating file and updating field, params were:\ndbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}\n\nError: ${error}`
+      );
       console.error("Error creating file and updating field: ", error);
       console.log(
         `Params were: dbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}`

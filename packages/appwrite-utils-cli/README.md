@@ -81,5 +81,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.23: Added batching to user deletion
+- 0.0.22: Converted all import processes except `postImportActions` and Relationship Resolution to the local data import, so it should be much faster.
 - 0.0.6: Added `setTargetFieldFromOtherCollectionDocumentsByMatchingField` for the below, but setting a different field than the field you matched. The names are long, but at least you know what's going on lmao.
 - 0.0.5: Added `setFieldFromOtherCollectionDocuments` to set an array of ID's for instance from another collection as a `postImportAction`

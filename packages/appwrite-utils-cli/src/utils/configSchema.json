@@ -580,31 +580,60 @@
             "type": "string",
             "enum": ["create", "update"],
             "default": "create",
-            "description": "Determines the operation mode for the import process; 'create' for adding new documents, 'update' for modifying existing ones."
-          },
-          "updateMapping": {
-            "type": "object",
-            "properties": {
-              "originalIdField": {
-                "type": "string",
-                "description": "Identifies the field in the source data that corresponds to the document ID for update operations."
-              },
-              "targetField": {
-                "type": "string",
-                "description": "Specifies the field in the destination collection to match with 'originalIdField' for updates. If not set, 'originalIdField' is used by default."
-              }
-            },
-            "required": ["originalIdField", "targetField"],
-            "description": "Provides the mapping details for updating documents, including the fields used to identify and match documents in the target collection. This is mandatory when 'type' is set to 'update'.",
-            "nullable": true
+            "description": "The type of import action, if update you should set an object for the originalIdField and targetField"
           },
           "filePath": {
             "type": "string",
-            "description": "Specifies the path to the file containing the data to be imported. This should be a relative or absolute path pointing to the data file."
+            "description": "The file path of the data to import"
           },
           "basePath": {
             "type": "string",
-            "description": "Defines the root level path within the data file from where to start importing. For instance, if the data is nested under a specific object key in a JSON file, this key should be specified here."
+            "description": "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS, if nothing then leave it gone"
+          },
+          "primaryKeyField": {
+            "type": "string",
+            "default": "id",
+            "description": "The field in the import data representing the primary key for this import data (if any)"
+          },
+          "idMappings": {
+            "type": "array",
+            "description": "The id mappings for the attribute to map ID's to",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sourceField": {
+                  "type": "string",
+                  "description": "The key of the data in the import data to match in the current data (this collection import data)"
+                },
+                "fieldToSet": {
+                  "type": "string",
+                  "description": "The field to set in the target collection, if different from sourceField"
+                },
+                "targetField": {
+                  "type": "string",
+                  "description": "The field in the target collection to match with sourceField that will then be updated"
+                },
+                "targetCollection": {
+                  "type": "string",
+                  "description": "The collection to search"
+                }
+              },
+              "required": ["sourceField", "targetField", "targetCollection"]
+            }
+          },
+          "updateMapping": {
+            "type": "object",
+            "description": "Configuration for mapping and resolving the update during data import",
+            "properties": {
+              "originalIdField": {
+                "type": "string",
+                "description": "The field in the import data representing the original ID to match"
+              },
+              "targetField": {
+                "type": "string",
+                "description": "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
+              }
+            }
           },
           "attributeMappings": {
             "type": "array",

@@ -92,7 +92,6 @@ export class ImportDataActions {
     const convertedItem = convertObjectBySchema(item, conversionSchema);
     // Merge the converted item back into the original item object
     Object.assign(item, convertedItem);
-    console.log("Converted item:", item);
     return item;
   }
 
@@ -114,9 +113,6 @@ export class ImportDataActions {
         !Array.isArray(validationActions) ||
         !validationActions.length
       ) {
-        console.warn(
-          "No validation actions defined for the item, assuming true"
-        );
         return true; // Assume items without validation actions as valid.
       }
       for (const ruleDef of validationActions) {
@@ -178,11 +174,6 @@ export class ImportDataActions {
             mapping.targetKey
           }' with params ${params.join(", ")}...`
         );
-        logger.info(
-          `Executing post-import action '${action}' for attribute '${
-            mapping.targetKey
-          }' with params ${params.join(", ")}...`
-        );
         try {
           await this.executeAction(action, params, context, item);
         } catch (error) {
@@ -213,6 +204,10 @@ export class ImportDataActions {
 
         // Execute the action with resolved parameters
         // Parameters are passed as-is, with objects treated as single parameters
+        console.log(
+          `Executing action '${actionName}' from context with params:`,
+          resolvedParams
+        );
         logger.info(
           `Executing action '${actionName}' from context: ${JSON.stringify(
             context,
@@ -223,7 +218,11 @@ export class ImportDataActions {
         );
         await (actionMethod as any)(this.config, ...resolvedParams);
       } catch (error: any) {
-        logger.error(`Error executing action '${actionName}':`, error);
+        logger.error(
+          `Error executing action '${actionName}' with context:`,
+          context,
+          error
+        );
         throw new Error(
           `Execution failed for action '${actionName}': ${error.message}`
         );
@@ -286,7 +285,10 @@ export class ImportDataActions {
             : resolvedValue;
           resolvedString = resolvedString.replace(match[0], value);
         } else {
-          logger.warn(`Failed to resolve ${template} in context: `, context);
+          logger.warn(
+            `Failed to resolve ${template} in context: `,
+            JSON.stringify({ ...context, ...item }, null, 2)
+          );
         }
       }
       // console.log(`Resolved string: ${resolvedString}`);

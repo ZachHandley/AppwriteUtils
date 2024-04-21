@@ -5,6 +5,7 @@ import {
   InputFile,
   type Models,
   ID,
+  Permission,
 } from "node-appwrite";
 import { type OperationCreate, type BackupCreate } from "./backup.js";
 import { splitIntoBatches } from "./migrationHelper.js";
@@ -72,7 +73,13 @@ export const initOrGetDocumentStorage = async (
     // Name Document Storage
     const documentStorage = await storage.createBucket(
       `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`,
-      "Document Storage"
+      `Document Storage ${dbName}`,
+      [
+        Permission.read("any"),
+        Permission.create("users"),
+        Permission.update("users"),
+        Permission.delete("users"),
+      ]
     );
     return documentStorage;
   }
@@ -104,7 +111,7 @@ export const wipeDocumentStorage = async (
       const fileIds = filesPulled.files.map((file) => file.$id);
       allFiles.push(...fileIds);
     }
-    moreFiles = filesPulled.files.length > 100; // Adjust based on the limit
+    moreFiles = filesPulled.files.length === 100; // Adjust based on the limit
     if (moreFiles) {
       lastFileId = filesPulled.files[filesPulled.files.length - 1].$id;
     }

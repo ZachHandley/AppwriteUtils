@@ -266,9 +266,9 @@ export const setupDirsFiles = async (example: boolean = false) => {
     }
   }
 
-  if (!existsSync(appwriteCustomDefsFile)) {
-    writeFileSync(appwriteCustomDefsFile, customDefinitionsFile);
-  }
+  // if (!existsSync(appwriteCustomDefsFile)) {
+  //   writeFileSync(appwriteCustomDefsFile, customDefinitionsFile);
+  // }
 
   // if (!existsSync(appwriteMigrationsFolder)) {
   //   mkdirSync(appwriteMigrationsFolder, { recursive: true });

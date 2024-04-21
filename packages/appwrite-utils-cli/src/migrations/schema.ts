@@ -435,6 +435,80 @@ export const AttributeMappingsSchema = z.array(
   })
 );
 
+export const importDefSchema = z
+  .object({
+    type: z
+      .enum(["create", "update"])
+      .default("create")
+      .optional()
+      .describe(
+        "The type of import action, if update you should set an object for the originalIdField and targetField"
+      ),
+    filePath: z.string().describe("The file path of the data to import"),
+    basePath: z
+      .string()
+      .optional()
+      .describe(
+        "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS, if nothing then leave it gone"
+      ),
+    primaryKeyField: z
+      .string()
+      .default("id")
+      .describe(
+        "The field in the import data representing the primary key for this import data (if any)"
+      ),
+    idMappings: z
+      .array(
+        z.object({
+          sourceField: z
+            .string()
+            .describe(
+              "The key of the data in the import data to match in the current data"
+            ),
+          fieldToSet: z
+            .string()
+            .optional()
+            .describe(
+              "The field to set in the target collection, if different from sourceField"
+            ),
+          targetField: z
+            .string()
+            .describe(
+              "The field in the target collection to match with sourceField that will then be updated"
+            ),
+          targetCollection: z.string().describe("The collection to search"),
+        })
+      )
+      .optional()
+      .describe("The id mappings for the attribute to map ID's to"),
+    updateMapping: z
+      .object({
+        originalIdField: z
+          .string()
+          .describe(
+            "The field in the import data representing the original ID to match"
+          ),
+        targetField: z
+          .string()
+          .describe(
+            "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
+          ),
+      })
+      .optional()
+      .describe(
+        "Configuration for mapping and resolving the update during data import"
+      ),
+    attributeMappings: AttributeMappingsSchema.describe(
+      "The attribute mappings to use for the import"
+    ),
+  })
+  .describe("An individual import definition for the database");
+
+export const importDefSchemas = z
+  .array(importDefSchema)
+  .default([])
+  .describe("The import definitions for the database");
+
 export const collectionSchema = z.object({
   $id: z
     .string()
@@ -473,48 +547,7 @@ export const collectionSchema = z.object({
     .array(indexSchema)
     .default([])
     .describe("The indexes of the collection"),
-  importDefs: z
-    .array(
-      z.object({
-        type: z
-          .enum(["create", "update"])
-          .default("create")
-          .optional()
-          .describe(
-            "The type of import action, if update you should set an object for the originalIdField and targetField"
-          ),
-        filePath: z.string().describe("The file path of the data to import"),
-        basePath: z
-          .string()
-          .optional()
-          .describe(
-            "The base path of the import e.g. if you have JSON, and the array is in the RECORDS object, then this would be RECORDS, if nothing then leave it gone"
-          ),
-        updateMapping: z
-          .object({
-            originalIdField: z
-              .string()
-              .describe(
-                "The field in the import data representing the original ID to match"
-              ),
-            targetField: z
-              .string()
-              .describe(
-                "The field in the target collection that matches the original ID. Optional, defaults to the same as originalIdField if not provided"
-              ),
-          })
-          .optional()
-          .describe(
-            "Configuration for mapping and resolving the update during data import"
-          ),
-        attributeMappings: AttributeMappingsSchema.describe(
-          "The attribute mappings to use for the import"
-        ),
-      })
-    )
-    .optional()
-    .default([])
-    .describe("The import definitions of the collection, if needed"),
+  importDefs: importDefSchemas,
 });
 
 export const CollectionCreateSchema = collectionSchema.omit({
@@ -569,6 +602,7 @@ export const AppwriteConfigSchema = z.object({
     .default([
       { $id: "dev", name: "Development" },
       { $id: "main", name: "Main" },
+      { $id: "staging", name: "Staging" },
       { $id: "migrations", name: "Migrations" },
     ])
     .describe("Databases to create, $id is the id of the database"),
@@ -586,7 +620,7 @@ export type ConfigCollections = AppwriteConfig["collections"];
 export type ConfigCollection = ConfigCollections[number];
 export type ConfigDatabases = AppwriteConfig["databases"];
 export type ConfigDatabase = ConfigDatabases[number];
-export type ImportDefs = ConfigCollections[number]["importDefs"];
-export type ImportDef = ImportDefs[number];
+export type ImportDefs = z.infer<typeof importDefSchemas>;
+export type ImportDef = z.infer<typeof importDefSchema>;
 export type AttributeMappings = z.infer<typeof AttributeMappingsSchema>;
 export type AttributeMapping = AttributeMappings[number];

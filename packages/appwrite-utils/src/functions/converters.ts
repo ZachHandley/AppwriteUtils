@@ -596,7 +596,6 @@ export const convertObjectByAttributeMappings = (
       }
     }
   }
-  console.log("Resolved object:", result);
   return result;
 };
 
