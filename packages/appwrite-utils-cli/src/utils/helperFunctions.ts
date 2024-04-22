@@ -2,6 +2,8 @@ import type { AppwriteConfig } from "../types.js";
 import type { Models, Storage } from "node-appwrite";
 import fs from "node:fs";
 import path from "node:path";
+import type { CollectionImportData } from "src/migrations/dataLoader.js";
+import type { ConfigCollection } from "src/migrations/schema.js";
 
 export const toPascalCase = (str: string): string => {
   return (
@@ -108,4 +110,19 @@ export const getFileDownloadUrl = (
   return `${endpoint}/storage/buckets/${bucketId}/files/${fileId}/download?project=${projectId}${
     jwt ? `&jwt=${jwt.jwt}` : ""
   }`;
+};
+
+export const finalizeByAttributeMap = async (
+  appwriteFolderPath: string,
+  collection: ConfigCollection,
+  item: CollectionImportData["data"][number]
+) => {
+  const schemaFolderPath = path.join(appwriteFolderPath, "schemas");
+  const zodSchema = await import(
+    `${schemaFolderPath}/${toCamelCase(collection.name)}.ts`
+  );
+  return zodSchema.parse({
+    ...item.context,
+    ...item.finalData,
+  });
 };

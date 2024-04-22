@@ -160,7 +160,15 @@ export class ImportController {
                 if (userBatch.finalData && userBatch.finalData.length > 0) {
                   const userId = userBatch.finalData.userId;
                   if (dataLoader.userExistsMap.has(userId)) {
-                    if (!dataLoader.userExistsMap.get(userId)) {
+                    // We only are storing the existing user ID's as true, so we need to check for that
+                    if (!(dataLoader.userExistsMap.get(userId) === true)) {
+                      const userId =
+                        userBatch.finalData.userId ||
+                        userBatch.context.userId ||
+                        userBatch.context.docId;
+                      if (!userBatch.finalData.userId) {
+                        userBatch.finalData.userId = userId;
+                      }
                       return usersController
                         .createUserAndReturn(userBatch.finalData)
                         .then(() => console.log("Created user"))
@@ -171,9 +179,9 @@ export class ImportController {
                             "\nUser data is ",
                             userBatch.finalData
                           );
-                          throw error;
                         });
                     } else {
+                      console.log("Skipped existing user: ", userId);
                       return Promise.resolve();
                     }
                   }
@@ -190,8 +198,8 @@ export class ImportController {
         }
       }
 
-      if (!importOperationId || isUsersCollection) {
-        // Skip further processing for the users collection or if no import operation is found
+      if (!importOperationId) {
+        // Skip further processing if no import operation is found
         continue;
       }
 
@@ -218,10 +226,19 @@ export class ImportController {
         console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
         const batchPromises = batches.map((item) => {
           const id =
-            item.finalData.docId ||
             item.context.docId ||
             item.context.userId ||
+            item.finalData.docId ||
             item.finalData.userId;
+          if (item.finalData.hasOwnProperty("userId")) {
+            delete item.finalData.userId;
+          }
+          if (item.finalData.hasOwnProperty("docId")) {
+            delete item.finalData.docId;
+          }
+          if (!item.finalData) {
+            return Promise.resolve();
+          }
           return this.database
             .createDocument(db.$id, collection.$id, id, item.finalData)
             .then(() => {

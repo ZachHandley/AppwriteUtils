@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import _ from "lodash";
-import type { AppwriteConfig } from "./schema.js";
+import type { AppwriteConfig, ConfigCollection } from "./schema.js";
 
 const { cloneDeep, isObject } = _;
 
@@ -16,7 +16,7 @@ export const converterFunctions = {
    */
   anyToString(value: any): string | null {
     if (value == null) return null;
-    return typeof value === "string" ? value : JSON.stringify(value);
+    return typeof value === "string" ? value : `${value}`;
   },
 
   /**

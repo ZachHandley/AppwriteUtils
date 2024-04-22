@@ -45,7 +45,7 @@ export class ImportDataActions {
     this.afterImportActionsDefinitions = afterImportActionsDefinitions;
   }
 
-  async runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
+  runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
     const conversionSchema = attributeMappings.reduce((schema, mapping) => {
       schema[mapping.targetKey] = (originalValue: any) => {
         return mapping.converters.reduce((value, converterName) => {

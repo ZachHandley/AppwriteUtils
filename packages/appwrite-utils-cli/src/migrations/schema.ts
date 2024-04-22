@@ -435,6 +435,28 @@ export const AttributeMappingsSchema = z.array(
   })
 );
 
+export const idMappingSchema = z.array(
+  z.object({
+    sourceField: z
+      .string()
+      .describe(
+        "The key of the data in the import data to match in the current data"
+      ),
+    fieldToSet: z
+      .string()
+      .optional()
+      .describe(
+        "The field to set in the target collection, if different from sourceField"
+      ),
+    targetField: z
+      .string()
+      .describe(
+        "The field in the target collection to match with sourceField that will then be updated"
+      ),
+    targetCollection: z.string().describe("The collection to search"),
+  })
+);
+
 export const importDefSchema = z
   .object({
     type: z
@@ -457,28 +479,7 @@ export const importDefSchema = z
       .describe(
         "The field in the import data representing the primary key for this import data (if any)"
       ),
-    idMappings: z
-      .array(
-        z.object({
-          sourceField: z
-            .string()
-            .describe(
-              "The key of the data in the import data to match in the current data"
-            ),
-          fieldToSet: z
-            .string()
-            .optional()
-            .describe(
-              "The field to set in the target collection, if different from sourceField"
-            ),
-          targetField: z
-            .string()
-            .describe(
-              "The field in the target collection to match with sourceField that will then be updated"
-            ),
-          targetCollection: z.string().describe("The collection to search"),
-        })
-      )
+    idMappings: idMappingSchema
       .optional()
       .describe("The id mappings for the attribute to map ID's to"),
     updateMapping: z
@@ -622,5 +623,7 @@ export type ConfigDatabases = AppwriteConfig["databases"];
 export type ConfigDatabase = ConfigDatabases[number];
 export type ImportDefs = z.infer<typeof importDefSchemas>;
 export type ImportDef = z.infer<typeof importDefSchema>;
+export type IdMappings = z.infer<typeof idMappingSchema>;
+export type IdMapping = IdMappings[number];
 export type AttributeMappings = z.infer<typeof AttributeMappingsSchema>;
 export type AttributeMapping = AttributeMappings[number];
