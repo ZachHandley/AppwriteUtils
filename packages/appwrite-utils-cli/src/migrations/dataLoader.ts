@@ -369,36 +369,37 @@ export class DataLoader {
                 )
                   ? item.context[idMapping.sourceField]
                   : [item.context[idMapping.sourceField]];
+                const resolvedNewIds: string[] = [];
 
                 oldIds.forEach((oldId: any) => {
-                  let newIdForOldId;
+                  // Attempt to find a new ID for the old ID
+                  let newIdForOldId = this.findNewIdForOldId(oldId, idMapping);
 
-                  // Handling users merged into a new ID
-                  newIdForOldId = this.findNewIdForOldId(oldId, idMapping);
-
-                  if (newIdForOldId) {
-                    const targetField =
-                      idMapping.fieldToSet || idMapping.targetField;
-                    const isArray = collectionConfig.attributes.some(
-                      (attribute) =>
-                        attribute.key === targetField && attribute.array
-                    );
-
-                    // Properly update the target field based on whether it should be an array
-                    if (isArray) {
-                      if (!Array.isArray(item.finalData[targetField])) {
-                        item.finalData[targetField] = [newIdForOldId];
-                      } else if (
-                        !item.finalData[targetField].includes(newIdForOldId)
-                      ) {
-                        item.finalData[targetField].push(newIdForOldId);
-                      }
-                    } else {
-                      item.finalData[targetField] = newIdForOldId;
-                    }
-                    needsUpdate = true;
+                  // Check if a new ID was found and it's not already included
+                  if (
+                    newIdForOldId &&
+                    !resolvedNewIds.includes(newIdForOldId)
+                  ) {
+                    resolvedNewIds.push(newIdForOldId);
                   }
                 });
+                if (resolvedNewIds.length) {
+                  const targetField =
+                    idMapping.fieldToSet || idMapping.targetField;
+                  const isArray = collectionConfig.attributes.some(
+                    (attribute) =>
+                      attribute.key === targetField && attribute.array
+                  );
+
+                  // Set the target field based on whether it's an array or single value
+                  if (isArray) {
+                    item.finalData[targetField] = resolvedNewIds;
+                  } else {
+                    // In case of a single value, use the first resolved ID
+                    item.finalData[targetField] = resolvedNewIds[0];
+                  }
+                  needsUpdate = true;
+                }
               }
             }
           }
@@ -416,29 +417,20 @@ export class DataLoader {
   }
 
   findNewIdForOldId(oldId: string, idMapping: IdMapping) {
-    // Check merged users first for any corresponding new ID
-    let newIdForOldId;
+    // First, check if the old ID has been merged into a new one
     for (const [newUserId, oldIds] of this.mergedUserMap.entries()) {
       if (oldIds.includes(oldId)) {
-        newIdForOldId = newUserId;
-        break;
+        return newUserId;
       }
     }
 
-    // If no new ID found in merged users, check the old-to-new ID map for the target collection
-    if (!newIdForOldId) {
-      const targetCollectionKey = this.getCollectionKey(
-        idMapping.targetCollection
-      );
-      const targetOldIdToNewIdMap =
-        this.oldIdToNewIdPerCollectionMap.get(targetCollectionKey);
-
-      if (targetOldIdToNewIdMap && targetOldIdToNewIdMap.has(oldId)) {
-        newIdForOldId = targetOldIdToNewIdMap.get(oldId);
-      }
-    }
-
-    return newIdForOldId;
+    // If not merged, look for a direct mapping from old to new ID
+    const targetCollectionKey = this.getCollectionKey(
+      idMapping.targetCollection
+    );
+    const targetOldIdToNewIdMap =
+      this.oldIdToNewIdPerCollectionMap.get(targetCollectionKey);
+    return targetOldIdToNewIdMap?.get(oldId);
   }
 
   private writeMapsToJsonFile() {
