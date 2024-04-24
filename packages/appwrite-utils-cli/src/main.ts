@@ -7,6 +7,7 @@ async function main() {
   const controller = new UtilsController();
   await controller.init();
 
+  let sync = false;
   let runProd = false;
   let runStaging = false;
   let runDev = false;
@@ -17,6 +18,9 @@ async function main() {
   let importData = false;
   let wipeDocuments = false;
   let shouldWriteFile = false;
+  if (args.includes("--sync")) {
+    sync = true;
+  }
   if (args.includes("--prod")) {
     runProd = true;
   }
@@ -49,6 +53,7 @@ async function main() {
   }
   if (args.includes("--init")) {
     await controller.run({
+      sync: sync,
       runProd: runProd,
       runStaging: runStaging,
       runDev: runDev,
@@ -64,6 +69,7 @@ async function main() {
     });
   } else {
     await controller.run({
+      sync: sync,
       runProd: runProd,
       runStaging: runStaging,
       runDev: runDev,

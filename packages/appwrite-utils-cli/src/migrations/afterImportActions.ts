@@ -13,7 +13,7 @@ import fs from "fs";
 import os from "os";
 import { logger } from "./logging.js";
 
-const getDatabaseFromConfig = (config: AppwriteConfig) => {
+export const getDatabaseFromConfig = (config: AppwriteConfig) => {
   if (!config.appwriteClient) {
     config.appwriteClient = new Client()
       .setEndpoint(config.appwriteEndpoint)
@@ -23,7 +23,7 @@ const getDatabaseFromConfig = (config: AppwriteConfig) => {
   return new Databases(config.appwriteClient!);
 };
 
-const getStorageFromConfig = (config: AppwriteConfig) => {
+export const getStorageFromConfig = (config: AppwriteConfig) => {
   if (!config.appwriteClient) {
     config.appwriteClient = new Client()
       .setEndpoint(config.appwriteEndpoint)

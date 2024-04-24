@@ -23,6 +23,7 @@ import {
 } from "./migrations/validationRules.js";
 import { ImportController } from "./migrations/importController.js";
 import _ from "lodash";
+import { AppwriteToX } from "./migrations/appwriteToX.js";
 
 async function loadConfig(configPath: string) {
   if (!fs.existsSync(configPath)) {
@@ -35,6 +36,7 @@ async function loadConfig(configPath: string) {
 }
 
 export interface SetupOptions {
+  sync: boolean;
   runProd: boolean;
   runStaging: boolean;
   runDev: boolean;
@@ -125,6 +127,13 @@ export class UtilsController {
     await this.init(); // Ensure initialization is done
     if (!this.database || !this.storage || !this.config) {
       throw new Error("Database or storage not initialized");
+    }
+
+    if (options.sync) {
+      console.log("Starting synchronization with server...");
+      const appwriteToX = new AppwriteToX(this.config, this.appwriteFolderPath);
+      await appwriteToX.toSchemas();
+      console.log("Synchronization complete, YAML and Schemas updated");
     }
 
     // Start the setup

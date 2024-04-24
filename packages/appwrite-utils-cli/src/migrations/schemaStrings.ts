@@ -7,6 +7,7 @@ import type {
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
+import { dump } from "js-yaml";
 
 interface RelationshipDetail {
   parentCollection: string;
@@ -26,6 +27,16 @@ export class SchemaGenerator {
     this.config = config;
     this.appwriteFolderPath = appwriteFolderPath;
     this.extractRelationships();
+  }
+
+  public updateYamlSchemas(): void {
+    // Output this.config to a YAML file at appwriteFolderPath/appwriteConfig.yaml
+    let finalConfig = this.config;
+    finalConfig.appwriteClient = null;
+    const yamlConfig = finalConfig;
+    const yamlPath = path.join(this.appwriteFolderPath, "appwriteConfig.yaml");
+    fs.writeFileSync(yamlPath, dump(yamlConfig), { encoding: "utf-8" });
+    console.log(`YAML written to ${yamlPath}`);
   }
 
   private extractRelationships(): void {

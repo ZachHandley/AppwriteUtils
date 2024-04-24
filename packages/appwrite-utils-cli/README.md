@@ -15,11 +15,19 @@
 
 ## Installation
 
-To use `appwrite-utils-cli`, you should install it globally via npm to make it accessible from anywhere in your command line:
+To use `appwrite-utils-cli`, you can install it globally via npm to make it accessible from anywhere in your command line:
 
 ```bash
 npm install -g appwrite-utils-cli
 ```
+
+However, due to the nature of the speed at which I am developing this project, I would recommend the following command:
+
+```bash
+npx --package=appwrite-utils-cli@latest appwrite-migrate -- --arg1 --arg2 --arg3
+```
+
+**DO NOT INSTALL THIS LOCALLY INTO YOUR PROJECT, IT IS MEANT TO BE USED AS A COMMAND LINE TOOL ONLY**
 
 ## Usage
 
@@ -30,7 +38,7 @@ After installation, you can access the tool directly from your command line usin
 Set up your Appwrite project with necessary configurations:
 
 ```bash
-appwrite-setup
+npx --package=appwrite-utils-cli@latest appwrite-setup
 ```
 
 To generate an example configuration file:
@@ -39,12 +47,20 @@ To generate an example configuration file:
 appwrite-setup --example
 ```
 
+To synchronize your `appwriteConfig.yaml` with your Appwrite Database, first you must run the setup command and enter your Appwrite instances details in the `projectId`, `endpoint`, and `apiKey`, then run the following
+
+```bash
+npx --package=appwrite-utils-cli@latest appwrite-migrate -- --sync
+```
+
+This will initialize your config and generate schemas for your database using ZOD to `src/appwrite/schemas`
+
 ### Running Migrations and Tasks
 
 Run migration and management tasks with specific flags according to your needs:
 
 ```bash
-appwrite-migrate --args
+npx --package=appwrite-utils-cli@latest appwrite-migrate --args
 ```
 
 Replace `--args` with the appropriate options:
@@ -58,17 +74,19 @@ Replace `--args` with the appropriate options:
 - `--import`: Import data into your databases.
 - `--backup`: Perform a backup of your databases.
 - `--wipe-users` or `--wipeUsers`: Wipe all user data.
+- `--write-data` or `--writeData`: Write converted imported data to file
+- `--sync`: Synchronize your project's config and generate schema for your database
 
 For example, to run migrations in a development environment and import data:
 
 ```bash
-appwrite-migrate --dev --import
+npx --package=appwrite-utils-cli@latest appwrite-migrate --dev --import
 ```
 
 To initialize your project, generate schemas, but not import data:
 
 ```bash
-appwrite-migrate --init
+npx --package=appwrite-utils-cli@latest appwrite-migrate --init
 ```
 
 This setup ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line. I also have added logging automatically for information and errors as the console can be hard to keep up with.
@@ -81,6 +99,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.254: Added `--sync` to synchronize your Appwrite instance with your local `appwriteConfig.yaml` and generate schemas
 - 0.0.253: Added `--writeData` (or `--write-data`) to command to write the output of the import data to a file called dataLoaderOutput in your root dir
 - 0.0.23: Added batching to user deletion
 - 0.0.22: Converted all import processes except `postImportActions` and Relationship Resolution to the local data import, so it should be much faster.

@@ -1,4 +1,4 @@
-import { ID, IndexType } from "node-appwrite";
+import { ID, IndexType, Permission } from "node-appwrite";
 import { z } from "zod";
 
 const stringAttributeSchema = z.object({
@@ -376,6 +376,8 @@ export const indexSchema = z.object({
   orders: z.array(z.string()).optional(),
 });
 
+export const indexesSchema = z.array(indexSchema);
+
 export type Index = z.infer<typeof indexSchema>;
 
 export const AttributeMappingsSchema = z.array(
@@ -510,12 +512,45 @@ export const importDefSchemas = z
   .default([])
   .describe("The import definitions for the database");
 
+export const permissionSchema = z
+  .object({
+    permission: z.string(),
+    target: z.string(),
+  })
+  .or(
+    z.string().transform((val) => {
+      const trimmedVal = val.trim();
+      // Adjusted regex to match double quotes
+      const match = trimmedVal.match(/^(\w+)\("([^"]+)"\)$/);
+      if (!match) {
+        throw new Error(`Invalid permission format: ${trimmedVal}`);
+      }
+      return {
+        permission: match[1],
+        target: match[2],
+      };
+    })
+  );
+
+export const permissionsSchema = z.array(permissionSchema).optional();
+
+export const attributesSchema = z.array(attributeSchema).default([]);
+
 export const collectionSchema = z.object({
+  name: z.string().describe("The name of the collection"),
   $id: z
     .string()
     .optional()
     .default(ID.unique())
     .describe("The ID of the collection, auto generated if not provided"),
+  enabled: z
+    .boolean()
+    .default(true)
+    .describe("Whether the collection is enabled or not"),
+  documentSecurity: z
+    .boolean()
+    .default(false)
+    .describe("Whether document security is enabled or not"),
   $createdAt: z.string(),
   $updatedAt: z.string(),
   $permissions: z
@@ -527,19 +562,6 @@ export const collectionSchema = z.object({
     )
     .default([])
     .describe("The permissions of the collection"),
-  databaseId: z
-    .string()
-    .optional()
-    .describe("The ID of the database the collection belongs to"),
-  name: z.string().describe("The name of the collection"),
-  enabled: z
-    .boolean()
-    .default(true)
-    .describe("Whether the collection is enabled or not"),
-  documentSecurity: z
-    .boolean()
-    .default(false)
-    .describe("Whether document security is enabled or not"),
   attributes: z
     .array(attributeSchema)
     .default([])
@@ -549,6 +571,10 @@ export const collectionSchema = z.object({
     .default([])
     .describe("The indexes of the collection"),
   importDefs: importDefSchemas,
+  databaseId: z
+    .string()
+    .optional()
+    .describe("The ID of the database the collection belongs to"),
 });
 
 export const CollectionCreateSchema = collectionSchema.omit({
