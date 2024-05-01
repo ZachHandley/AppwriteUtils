@@ -133,7 +133,7 @@ export class DataLoader {
   }
 
   // Method to load data from a file specified in the import definition
-  async loadData(importDef: ImportDef): Promise<any[]> {
+  loadData(importDef: ImportDef): any[] {
     // Resolve the file path and check if the file exists
     const filePath = path.resolve(this.appwriteFolderPath, importDef.filePath);
     if (!fs.existsSync(filePath)) {
@@ -194,10 +194,7 @@ export class DataLoader {
    * @param attributeMappings - The mappings that define how each attribute should be transformed.
    * @returns The transformed item.
    */
-  async transformData(
-    item: any,
-    attributeMappings: AttributeMappings
-  ): Promise<any> {
+  transformData(item: any, attributeMappings: AttributeMappings): any {
     // Convert the item using the attribute mappings provided
     const convertedItem = convertObjectByAttributeMappings(
       item,
@@ -328,7 +325,8 @@ export class DataLoader {
         }
       }
       console.log("Running update references");
-      await this.updateReferencesInRelatedCollections();
+      await this.dealWithMergedUsers();
+      await this.updateOldReferencesForNew();
       console.log("Done running update references");
     }
     // for (const collection of this.config.collections) {
@@ -339,6 +337,137 @@ export class DataLoader {
     console.log("---------------------------------");
     if (this.shouldWriteFile) {
       this.writeMapsToJsonFile();
+    }
+  }
+
+  async dealWithMergedUsers() {
+    const usersCollectionKey = this.getCollectionKey(
+      this.config.usersCollectionName
+    );
+    const usersCollectionPrimaryKeyFields = new Set();
+
+    // Collect primary key fields from the users collection definitions
+    this.config.collections.forEach((collection) => {
+      if (this.getCollectionKey(collection.name) === usersCollectionKey) {
+        collection.importDefs.forEach((importDef) => {
+          if (importDef.primaryKeyField) {
+            usersCollectionPrimaryKeyFields.add(importDef.primaryKeyField);
+          }
+        });
+      }
+    });
+
+    // Iterate over all collections to update references based on merged users
+    this.config.collections.forEach((collection) => {
+      const collectionData = this.importMap.get(
+        this.getCollectionKey(collection.name)
+      );
+      if (!collectionData || !collectionData.data) return;
+
+      collection.importDefs.forEach((importDef) => {
+        importDef.idMappings?.forEach((idMapping) => {
+          if (
+            this.getCollectionKey(idMapping.targetCollection) ===
+            usersCollectionKey
+          ) {
+            if (usersCollectionPrimaryKeyFields.has(idMapping.targetField)) {
+              // Process each item in the collection
+              collectionData.data.forEach((item) => {
+                const oldId = item.context[idMapping.sourceField];
+                const newId = this.mergedUserMap.get(oldId);
+
+                if (newId) {
+                  // Update context to use new user ID
+                  item.context[idMapping.fieldToSet || idMapping.targetField] =
+                    newId;
+                }
+              });
+            }
+          }
+        });
+      });
+    });
+  }
+
+  async updateOldReferencesForNew() {
+    for (const collectionConfig of this.config.collections) {
+      const collectionKey = this.getCollectionKey(collectionConfig.name);
+      const collectionData = this.importMap.get(collectionKey);
+
+      if (!collectionData || !collectionData.data) continue;
+
+      console.log(
+        `Updating references for collection: ${collectionConfig.name}`
+      );
+
+      let needsUpdate = false;
+
+      // Iterate over each data item in the current collection
+      for (let i = 0; i < collectionData.data.length; i++) {
+        if (collectionConfig.importDefs) {
+          for (const importDef of collectionConfig.importDefs) {
+            if (importDef.idMappings) {
+              for (const idMapping of importDef.idMappings) {
+                const targetCollectionKey = this.getCollectionKey(
+                  idMapping.targetCollection
+                );
+                const fieldToSetKey =
+                  idMapping.fieldToSet || idMapping.sourceField;
+                const valueToMatch =
+                  collectionData.data[i].context[idMapping.sourceField];
+
+                if (!valueToMatch || _.isEmpty(valueToMatch)) continue;
+
+                const targetCollectionData =
+                  this.importMap.get(targetCollectionKey);
+                if (!targetCollectionData || !targetCollectionData.data)
+                  continue;
+
+                const foundData = targetCollectionData.data.filter((data) => {
+                  const targetValue = data.context[idMapping.targetField];
+                  const isMatch = `${targetValue}` === `${valueToMatch}`;
+                  // Debugging output to understand what's being compared
+                  logger.warn(
+                    `Comparing target: ${targetValue} with match: ${valueToMatch} - Result: ${isMatch}`
+                  );
+                  return isMatch;
+                });
+
+                if (!foundData.length) {
+                  console.log(
+                    `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey}`
+                  );
+                  logger.error(
+                    `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey} -- idMapping: ${JSON.stringify(
+                      idMapping,
+                      null,
+                      2
+                    )}`
+                  );
+                  continue;
+                }
+
+                needsUpdate = true;
+
+                // Properly handle arrays and non-arrays
+                if (
+                  Array.isArray(collectionData.data[i].finalData[fieldToSetKey])
+                ) {
+                  collectionData.data[i].finalData[fieldToSetKey] =
+                    foundData.map((data) => data.finalData);
+                } else {
+                  collectionData.data[i].finalData[fieldToSetKey] =
+                    foundData[0].finalData;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (needsUpdate) {
+        this.importMap.set(collectionKey, collectionData);
+      }
     }
   }
 
@@ -373,16 +502,24 @@ export class DataLoader {
 
                 oldIds.forEach((oldId: any) => {
                   // Attempt to find a new ID for the old ID
-                  let newIdForOldId = this.findNewIdForOldId(oldId, idMapping);
+                  let newIdForOldId = this.findNewIdForOldId(
+                    oldId,
+                    idMapping,
+                    importDef
+                  );
 
-                  // Check if a new ID was found and it's not already included
                   if (
                     newIdForOldId &&
                     !resolvedNewIds.includes(newIdForOldId)
                   ) {
                     resolvedNewIds.push(newIdForOldId);
+                  } else {
+                    logger.error(
+                      `No new ID found for old ID ${oldId} in collection ${collectionConfig.name}`
+                    );
                   }
                 });
+
                 if (resolvedNewIds.length) {
                   const targetField =
                     idMapping.fieldToSet || idMapping.targetField;
@@ -392,12 +529,9 @@ export class DataLoader {
                   );
 
                   // Set the target field based on whether it's an array or single value
-                  if (isArray) {
-                    item.finalData[targetField] = resolvedNewIds;
-                  } else {
-                    // In case of a single value, use the first resolved ID
-                    item.finalData[targetField] = resolvedNewIds[0];
-                  }
+                  item.finalData[targetField] = isArray
+                    ? resolvedNewIds
+                    : resolvedNewIds[0];
                   needsUpdate = true;
                 }
               }
@@ -416,21 +550,39 @@ export class DataLoader {
     }
   }
 
-  findNewIdForOldId(oldId: string, idMapping: IdMapping) {
-    // First, check if the old ID has been merged into a new one
-    for (const [newUserId, oldIds] of this.mergedUserMap.entries()) {
-      if (oldIds.includes(oldId)) {
-        return newUserId;
-      }
-    }
-
-    // If not merged, look for a direct mapping from old to new ID
+  findNewIdForOldId(oldId: string, idMapping: IdMapping, importDef: ImportDef) {
+    // First, check if this ID mapping is related to the users collection.
     const targetCollectionKey = this.getCollectionKey(
       idMapping.targetCollection
     );
-    const targetOldIdToNewIdMap =
-      this.oldIdToNewIdPerCollectionMap.get(targetCollectionKey);
-    return targetOldIdToNewIdMap?.get(oldId);
+    const isUsersCollection =
+      targetCollectionKey ===
+      this.getCollectionKey(this.config.usersCollectionName);
+
+    // If handling users, check the mergedUserMap for any existing new ID.
+    if (isUsersCollection) {
+      for (const [newUserId, oldIds] of this.mergedUserMap.entries()) {
+        if (oldIds.includes(oldId)) {
+          return newUserId;
+        }
+      }
+    }
+
+    // If not a user or no merged ID found, check the regular ID mapping from old to new.
+    const targetCollectionData = this.importMap.get(targetCollectionKey);
+    if (targetCollectionData) {
+      const foundEntry = targetCollectionData.data.find(
+        (entry) => entry.context[importDef.primaryKeyField] === oldId
+      );
+      if (foundEntry) {
+        return foundEntry.context.docId; // Assuming `docId` stores the new ID after import
+      }
+    }
+
+    logger.error(
+      `No corresponding new ID found for ${oldId} in ${targetCollectionKey}`
+    );
+    return null; // Return null if no new ID is found
   }
 
   private writeMapsToJsonFile() {
@@ -438,6 +590,16 @@ export class DataLoader {
     const outputFile = path.join(outputDir, "dataLoaderOutput.json");
 
     const dataToWrite = {
+      // Convert Maps to arrays of entries for serialization
+      oldIdToNewIdPerCollectionMap: Array.from(
+        this.oldIdToNewIdPerCollectionMap.entries()
+      ).map(([key, value]) => {
+        return {
+          collection: key,
+          data: Array.from(value.entries()),
+        };
+      }),
+      mergedUserMap: Array.from(this.mergedUserMap.entries()),
       dataFromCollections: Array.from(this.importMap.entries()).map(
         ([key, value]) => {
           return {
@@ -446,8 +608,6 @@ export class DataLoader {
           };
         }
       ),
-      // Convert Maps to arrays of entries for serialization
-      mergedUserMap: Array.from(this.mergedUserMap.entries()),
       // emailToUserIdMap: Array.from(this.emailToUserIdMap.entries()),
       // phoneToUserIdMap: Array.from(this.phoneToUserIdMap.entries()),
     };
@@ -489,7 +649,7 @@ export class DataLoader {
     newId: string
   ): Promise<any> {
     // Transform the item data based on the attribute mappings
-    let transformedItem = await this.transformData(item, attributeMappings);
+    let transformedItem = this.transformData(item, attributeMappings);
     const userData = AuthUserCreateSchema.safeParse(transformedItem);
     if (!userData.success) {
       logger.error(
@@ -569,7 +729,7 @@ export class DataLoader {
     importDef: ImportDef
   ): Promise<void> {
     // Load the raw data based on the import definition
-    const rawData = await this.loadData(importDef);
+    const rawData = this.loadData(importDef);
     const operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
@@ -754,7 +914,7 @@ export class DataLoader {
     importDef: ImportDef
   ): Promise<void> {
     // Load the raw data based on the import definition
-    const rawData = await this.loadData(importDef);
+    const rawData = this.loadData(importDef);
     const operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
@@ -793,7 +953,7 @@ export class DataLoader {
       // Create a context object for the item, including the new ID
       let context = this.createContext(db, collection, item, itemIdNew);
       // Transform the item data based on the attribute mappings
-      const transformedData = await this.transformData(
+      const transformedData = this.transformData(
         item,
         importDef.attributeMappings
       );
@@ -884,7 +1044,7 @@ export class DataLoader {
       return;
     }
     // Load the raw data based on the import definition
-    const rawData = await this.loadData(importDef);
+    const rawData = this.loadData(importDef);
     const operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
@@ -895,7 +1055,7 @@ export class DataLoader {
     }
     for (const item of rawData) {
       // Transform the item data based on the attribute mappings
-      let transformedData = await this.transformData(
+      let transformedData = this.transformData(
         item,
         importDef.attributeMappings
       );

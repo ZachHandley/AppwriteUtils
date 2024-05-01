@@ -8,6 +8,7 @@ import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import { dump } from "js-yaml";
+import { getDatabaseFromConfig } from "./afterImportActions.js";
 
 interface RelationshipDetail {
   parentCollection: string;
@@ -74,6 +75,9 @@ export class SchemaGenerator {
             isArrayParent,
             isArrayChild
           );
+          console.log(
+            `Extracted relationship: ${attr.key}\n\t${collection.name} -> ${relationshipAttr.relatedCollection}, databaseId: ${collection.databaseId}`
+          );
         }
       });
     });
@@ -133,22 +137,35 @@ export class SchemaGenerator {
 
     // Use the relationshipMap to find related collections
     const relationshipDetails = this.relationshipMap.get(name) || [];
-    const relatedCollections = relationshipDetails.map((detail) => {
-      const relatedCollectionName = detail.isChild
-        ? detail.parentCollection
-        : detail.childCollection;
-      const key = detail.isChild ? detail.childKey : detail.parentKey;
-      const isArray = detail.isArray ? "array" : "";
-      return [relatedCollectionName, key, isArray];
-    });
+    const relatedCollections = relationshipDetails
+      .filter((detail, index, self) => {
+        const uniqueKey = `${detail.parentCollection}-${detail.childCollection}-${detail.parentKey}-${detail.childKey}`;
+        return (
+          index ===
+          self.findIndex(
+            (obj) =>
+              `${obj.parentCollection}-${obj.childCollection}-${obj.parentKey}-${obj.childKey}` ===
+              uniqueKey
+          )
+        );
+      })
+      .map((detail) => {
+        const relatedCollectionName = detail.isChild
+          ? detail.parentCollection
+          : detail.childCollection;
+        const key = detail.isChild ? detail.childKey : detail.parentKey;
+        const isArray = detail.isArray ? "array" : "";
+        return [relatedCollectionName, key, isArray];
+      });
 
     let relatedTypes = "";
     let relatedTypesLazy = "";
     let curNum = 0;
     let maxNum = relatedCollections.length;
     relatedCollections.forEach((relatedCollection) => {
-      const relatedPascalName = toPascalCase(relatedCollection[0]);
-      const relatedCamelName = toCamelCase(relatedCollection[0]);
+      console.log(relatedCollection);
+      let relatedPascalName = toPascalCase(relatedCollection[0]);
+      let relatedCamelName = toCamelCase(relatedCollection[0]);
       curNum++;
       let endNameTypes = relatedPascalName;
       let endNameLazy = `${relatedPascalName}Schema`;
@@ -218,10 +235,18 @@ export class SchemaGenerator {
       case "integer":
         baseSchemaCode = "z.number().int()";
         if (attribute.min !== undefined) {
-          baseSchemaCode += `.min(${attribute.min}, "Minimum value of ${attribute.min} not met")`;
+          if (BigInt(attribute.min) === BigInt(-9223372036854776000)) {
+            delete attribute.min;
+          } else {
+            baseSchemaCode += `.min(${attribute.min}, "Minimum value of ${attribute.min} not met")`;
+          }
         }
         if (attribute.max !== undefined) {
-          baseSchemaCode += `.max(${attribute.max}, "Maximum value of ${attribute.max} exceeded")`;
+          if (BigInt(attribute.max) === BigInt(9223372036854776000)) {
+            delete attribute.max;
+          } else {
+            baseSchemaCode += `.max(${attribute.max}, "Maximum value of ${attribute.max} exceeded")`;
+          }
         }
         if (attribute.xdefault !== undefined) {
           baseSchemaCode += `.default(${attribute.xdefault})`;

@@ -65,6 +65,9 @@ export class AppwriteToX {
 
     // Loop through each database
     for (const database of databases) {
+      if (database.name.toLowerCase() === "migrations") {
+        continue;
+      }
       const collections = await fetchAllCollections(database.$id, db);
 
       // Loop through each collection in the current database
@@ -77,7 +80,38 @@ export class AppwriteToX {
         const collPermissions = this.parsePermissionsArray(
           collection.$permissions
         );
-        const collAttributes = attributesSchema.parse(collection.attributes);
+        const collAttributes = attributesSchema
+          .parse(collection.attributes)
+          .filter((attribute) =>
+            attribute.type === "relationship"
+              ? attribute.side !== "child"
+              : true
+          );
+        for (const attribute of collAttributes) {
+          if (
+            attribute.type === "relationship" &&
+            attribute.relatedCollection
+          ) {
+            console.log(
+              `Fetching related collection for ID: ${attribute.relatedCollection}`
+            );
+            try {
+              const relatedCollectionPulled = await db.getCollection(
+                database.$id,
+                attribute.relatedCollection
+              );
+              console.log(
+                `Fetched Collection Name: ${relatedCollectionPulled.name}`
+              );
+              attribute.relatedCollection = relatedCollectionPulled.name;
+              console.log(
+                `Updated attribute.relatedCollection to: ${attribute.relatedCollection}`
+              );
+            } catch (error) {
+              console.log("Error fetching related collection:", error);
+            }
+          }
+        }
         this.collToAttributeMap.set(collection.name, collAttributes);
         const collIndexes = indexesSchema.parse(collection.indexes);
 
