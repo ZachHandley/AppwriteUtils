@@ -5,10 +5,21 @@ import _ from "lodash";
 
 const attributesSame = (a: Attribute, b: Attribute) => {
   // Direct type comparison for non-string types
+  // Also check if the type IS string and has a format for either
+  // That means the format is the type of the attribute
   if (
     a.type === b.type &&
     !((a.type === "string" && a.format) || (b.type === "string" && b.format))
   ) {
+    if (a.type === "relationship" && b.type === "relationship") {
+      return (
+        a.key === b.key &&
+        a.relationType === b.relationType &&
+        a.twoWay === b.twoWay &&
+        a.twoWayKey === b.twoWayKey &&
+        a.required === b.required
+      );
+    }
     return a.key === b.key && a.array === b.array && a.required === b.required;
   }
 
@@ -55,7 +66,13 @@ export const createOrUpdateAttribute = async (
     return;
   } else if (foundAttribute && !attributesSame(foundAttribute, attribute)) {
     console.log(
-      `Deleting attribute with same key ${attribute.key} -- ${foundAttribute.key} but different values, assuming update...`
+      `Deleting attribute with same key ${attribute.key} -- ${
+        foundAttribute.key
+      } but different values -- ${JSON.stringify(
+        attribute,
+        null,
+        2
+      )} -- ${JSON.stringify(foundAttribute, null, 2)}`
     );
     await db.deleteAttribute(dbId, collection.$id, attribute.key);
   }

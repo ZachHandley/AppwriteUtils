@@ -415,8 +415,13 @@ export const parseAttribute = (
     attribute.format &&
     attribute.format.length > 0
   ) {
+    console.log(
+      `Parsing attribute ${attribute.key} with format ${
+        attribute.format
+      }, setting type to ${attribute.format.toLowerCase()}`
+    );
     // @ts-expect-error
-    attribute.type = attribute.format;
+    attribute.type = attribute.format.toLowerCase();
     delete attribute.format;
   }
   if (attribute.type === "string") {
