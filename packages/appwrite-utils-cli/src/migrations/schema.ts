@@ -410,6 +410,15 @@ export const parseAttribute = (
     | EnumAttribute
     | RelationshipAttribute
 ) => {
+  if (
+    attribute.type === "string" &&
+    attribute.format &&
+    attribute.format.length > 0
+  ) {
+    // @ts-expect-error
+    attribute.type = attribute.format;
+    delete attribute.format;
+  }
   if (attribute.type === "string") {
     return stringAttributeSchema.parse(attribute);
   } else if (attribute.type === "integer") {

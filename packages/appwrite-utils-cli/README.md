@@ -118,6 +118,8 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.272: That's what I get for not testing lmao, also updated logic for checking for existing attributes to take the `format` into consideration from the database (URL's are not of `type: "url"`, they are of `format: "url"`)
+- 0.0.271: Small change to update attributes that are different from each other by deleting the attribute and recreating, as we cannot update most things
 - 0.0.270: Fixed enums in `--sync`, added optional OpenAPI generation (in progress, almost done, but wanted to push other changes), added `--endpoint`, `--project`, `--key` as optional parameters to change the target destination (shoutout to [pingu24k](https://github.com/pingu2k4) for pointing out these bugs and suggesting those changes for endpoint customization)
 - 0.0.254: Added `--sync` to synchronize your Appwrite instance with your local `appwriteConfig.yaml` and generate schemas
 - 0.0.253: Added `--writeData` (or `--write-data`) to command to write the output of the import data to a file called dataLoaderOutput in your root dir

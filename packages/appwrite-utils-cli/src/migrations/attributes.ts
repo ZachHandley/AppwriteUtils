@@ -1,6 +1,39 @@
 import { Query, type Databases, type Models } from "node-appwrite";
-import type { Attribute } from "./schema.js";
+import { parseAttribute, type Attribute } from "./schema.js";
 import { nameToIdMapping, enqueueOperation } from "./queue.js";
+import _ from "lodash";
+
+const attributesSame = (a: Attribute, b: Attribute) => {
+  // Direct type comparison for non-string types
+  if (
+    a.type === b.type &&
+    !((a.type === "string" && a.format) || (b.type === "string" && b.format))
+  ) {
+    return a.key === b.key && a.array === b.array && a.required === b.required;
+  }
+
+  if (a.type === "string" && a.format) {
+    // @ts-expect-error
+    a.type = a.format;
+  }
+  if (b.type === "string" && b.format) {
+    // @ts-expect-error
+    b.type = b.format;
+  }
+
+  // Handling string types with specific formats in Appwrite
+  if (a.type === "string" && b.type === "string") {
+    return (
+      a.key === b.key &&
+      a.format === b.format &&
+      a.array === b.array &&
+      a.required === b.required
+    );
+  }
+
+  // Fallback to false if none of the above conditions are met
+  return false;
+};
 
 export const createOrUpdateAttribute = async (
   db: Databases,
@@ -12,15 +45,19 @@ export const createOrUpdateAttribute = async (
   let foundAttribute;
   try {
     foundAttribute = await db.getAttribute(dbId, collection.$id, attribute.key);
+    foundAttribute = parseAttribute(foundAttribute);
   } catch (error) {
     foundAttribute = undefined;
   }
   let numSameAttributes = 0;
-  if (foundAttribute && foundAttribute.key === attribute.key) {
+  if (foundAttribute && attributesSame(foundAttribute, attribute)) {
     numSameAttributes++;
     return;
-  } else if (foundAttribute) {
-    action = "update";
+  } else if (foundAttribute && !attributesSame(foundAttribute, attribute)) {
+    console.log(
+      `Deleting attribute with same key ${attribute.key} -- ${foundAttribute.key} but different values, assuming update...`
+    );
+    await db.deleteAttribute(dbId, collection.$id, attribute.key);
   }
 
   // Relationship attribute logic with adjustments
