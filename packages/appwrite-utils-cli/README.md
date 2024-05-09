@@ -102,7 +102,7 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate --init
 npx --package=appwrite-utils-cli@latest appwrite-migrate --sync
 ```
 
-### OpenAPI Generation
+### OpenAPI Generation (almost done, in progress)
 
 Recently, I have also added an optional OpenAPI generation for each attribute in the schema. This is because I needed it and because I felt it would be nice to have. This is done using [this package](https://github.com/asteasolutions/zod-to-openapi), many thanks to them.
 
