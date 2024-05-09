@@ -157,13 +157,12 @@ export const createOrUpdateCollections = async (
   deletedCollections?: { collectionId: string; collectionName: string }[]
 ): Promise<void> => {
   const configCollections = config.collections;
-  for (const { attributes, indexes, ...collection } of configCollections) {
-    let collectionsFound = await database.listCollections(databaseId, [
-      Query.equal("name", collection.name),
-    ]);
+  const usedIds = new Set(); // To track IDs used in this operation
 
+  for (const { attributes, indexes, ...collection } of configCollections) {
+    // Prepare permissions for the collection
     const permissions = [];
-    if (collection.$permissions.length > 0) {
+    if (collection.$permissions && collection.$permissions.length > 0) {
       for (const permission of collection.$permissions) {
         switch (permission.permission) {
           case "read":
@@ -187,55 +186,58 @@ export const createOrUpdateCollections = async (
         }
       }
     }
+
+    // Check if the collection already exists by name
+    let collectionsFound = await database.listCollections(databaseId, [
+      Query.equal("name", collection.name),
+    ]);
+
     let collectionToUse =
       collectionsFound.total > 0 ? collectionsFound.collections[0] : null;
+
+    // Determine the correct ID for the collection
+    let collectionId;
     if (!collectionToUse) {
       console.log(`Creating collection: ${collection.name}`);
-      if (deletedCollections && deletedCollections.length > 0) {
-        const foundColl = deletedCollections.find(
-          (coll) =>
-            coll.collectionName.toLowerCase().trim().replace(" ", "") ===
-            collection.name.toLowerCase().trim().replace(" ", "")
-        );
-        if (foundColl) {
-          const collectionId = foundColl.collectionId || ID.unique();
-          console.log(
-            `Processing collection: ${collection.name} with ID: ${collectionId}`
-          );
-          collectionToUse = await database.createCollection(
-            databaseId,
-            collectionId,
-            collection.name,
-            permissions,
-            collection.documentSecurity,
-            collection.enabled
-          );
-          nameToIdMapping.set(collection.name, collectionToUse.$id);
-        } else {
-          collectionToUse = await database.createCollection(
-            databaseId,
-            ID.unique(),
-            collection.name,
-            permissions,
-            collection.documentSecurity,
-            collection.enabled
-          );
-          nameToIdMapping.set(collection.name, collectionToUse.$id);
-        }
+      const foundColl = deletedCollections?.find(
+        (coll) =>
+          coll.collectionName.toLowerCase().trim().replace(" ", "") ===
+          collection.name.toLowerCase().trim().replace(" ", "")
+      );
+
+      if (foundColl && !usedIds.has(foundColl.collectionId)) {
+        collectionId = foundColl.collectionId; // Use ID from deleted collection if not already used
+      } else if (collection.$id && !usedIds.has(collection.$id)) {
+        collectionId = collection.$id; // Use the provided $id if not already used
       } else {
+        collectionId = ID.unique(); // Generate a new unique ID
+      }
+
+      usedIds.add(collectionId); // Mark this ID as used
+
+      // Create the collection with the determined ID
+      try {
         collectionToUse = await database.createCollection(
           databaseId,
-          ID.unique(),
+          collectionId,
           collection.name,
           permissions,
           collection.documentSecurity,
           collection.enabled
         );
+        collection.$id = collectionToUse.$id;
         nameToIdMapping.set(collection.name, collectionToUse.$id);
+      } catch (error) {
+        console.error(
+          `Failed to create collection ${collection.name} with ID ${collectionId}: ${error}`
+        );
+        continue; // Skip to the next collection on failure
       }
     } else {
       console.log(`Collection ${collection.name} already exists.`);
     }
+
+    // Update attributes and indexes for the collection
     console.log("Creating Attributes");
     await createUpdateCollectionAttributes(
       database,
@@ -251,6 +253,7 @@ export const createOrUpdateCollections = async (
       indexes
     );
   }
+  // Process any remaining tasks in the queue
   await processQueue(database, databaseId);
 };
 

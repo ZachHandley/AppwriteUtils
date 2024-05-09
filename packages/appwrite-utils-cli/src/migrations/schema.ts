@@ -30,6 +30,14 @@ const stringAttributeSchema = z.object({
     .boolean()
     .optional()
     .describe("Whether the attribute is encrypted or not"),
+  format: z.string().nullish().describe("The format of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type StringAttribute = z.infer<typeof stringAttributeSchema>;
@@ -68,6 +76,13 @@ const integerAttributeSchema = z.object({
     .int()
     .nullish()
     .describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type IntegerAttribute = z.infer<typeof integerAttributeSchema>;
@@ -94,6 +109,13 @@ const floatAttributeSchema = z.object({
   min: z.number().optional().describe("The minimum value of the attribute"),
   max: z.number().optional().describe("The maximum value of the attribute"),
   xdefault: z.number().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type FloatAttribute = z.infer<typeof floatAttributeSchema>;
@@ -121,6 +143,13 @@ const booleanAttributeSchema = z.object({
     .boolean()
     .nullish()
     .describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type BooleanAttribute = z.infer<typeof booleanAttributeSchema>;
@@ -145,6 +174,13 @@ const datetimeAttributeSchema = z.object({
     .default(false)
     .describe("Whether the attribute is an array or not"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type DatetimeAttribute = z.infer<typeof datetimeAttributeSchema>;
@@ -169,6 +205,13 @@ const emailAttributeSchema = z.object({
     .default(false)
     .describe("Whether the attribute is an array or not"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type EmailAttribute = z.infer<typeof emailAttributeSchema>;
@@ -190,6 +233,13 @@ const ipAttributeSchema = z.object({
     .default(false)
     .describe("Whether the attribute is an array or not"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type IpAttribute = z.infer<typeof ipAttributeSchema>;
@@ -211,6 +261,13 @@ const urlAttributeSchema = z.object({
     .default(false)
     .describe("Whether the attribute is an array or not"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type UrlAttribute = z.infer<typeof urlAttributeSchema>;
@@ -236,6 +293,13 @@ const enumAttributeSchema = z.object({
     .describe("The elements of the enum attribute")
     .default([]),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 type EnumAttribute = z.infer<typeof enumAttributeSchema>;
@@ -291,6 +355,13 @@ const relationshipAttributeSchema = z.object({
     .describe(
       "Configuration for mapping and resolving relationships during data import"
     ),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 export type RelationshipAttribute = z.infer<typeof relationshipAttributeSchema>;
@@ -313,16 +384,18 @@ export const createRelationshipAttributes = (
   });
 };
 
-export const attributeSchema = stringAttributeSchema
-  .or(integerAttributeSchema)
-  .or(floatAttributeSchema)
-  .or(booleanAttributeSchema)
-  .or(datetimeAttributeSchema)
-  .or(emailAttributeSchema)
-  .or(ipAttributeSchema)
-  .or(urlAttributeSchema)
-  .or(enumAttributeSchema)
-  .or(relationshipAttributeSchema);
+export const attributeSchema = z.discriminatedUnion("type", [
+  stringAttributeSchema,
+  integerAttributeSchema,
+  floatAttributeSchema,
+  booleanAttributeSchema,
+  datetimeAttributeSchema,
+  emailAttributeSchema,
+  ipAttributeSchema,
+  urlAttributeSchema,
+  enumAttributeSchema,
+  relationshipAttributeSchema,
+]);
 
 export const parseAttribute = (
   attribute:
@@ -551,6 +624,12 @@ export const collectionSchema = z.object({
     .boolean()
     .default(false)
     .describe("Whether document security is enabled or not"),
+  description: z
+    .string()
+    .optional()
+    .describe(
+      "The description of the collection, if any, used to generate OpenAPI documentation"
+    ),
   $createdAt: z.string(),
   $updatedAt: z.string(),
   $permissions: z

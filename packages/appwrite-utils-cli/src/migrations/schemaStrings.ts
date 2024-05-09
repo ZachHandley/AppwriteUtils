@@ -218,15 +218,22 @@ export class SchemaGenerator {
 
   typeToZod = (attribute: Attribute) => {
     let baseSchemaCode = "";
-
-    switch (attribute.type) {
+    const finalAttribute: Attribute = (
+      attribute.type === "string" &&
+      attribute.format &&
+      attribute.format === "enum" &&
+      attribute.type === "string"
+        ? { ...attribute, type: attribute.format }
+        : attribute
+    ) as Attribute;
+    switch (finalAttribute.type) {
       case "string":
         baseSchemaCode = "z.string()";
-        if (attribute.size) {
-          baseSchemaCode += `.max(${attribute.size}, "Maximum length of ${attribute.size} characters exceeded")`;
+        if (finalAttribute.size) {
+          baseSchemaCode += `.max(${finalAttribute.size}, "Maximum length of ${finalAttribute.size} characters exceeded")`;
         }
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default("${attribute.xdefault}")`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default("${finalAttribute.xdefault}")`;
         }
         if (!attribute.required && !attribute.array) {
           baseSchemaCode += ".nullish()";
@@ -234,93 +241,93 @@ export class SchemaGenerator {
         break;
       case "integer":
         baseSchemaCode = "z.number().int()";
-        if (attribute.min !== undefined) {
-          if (BigInt(attribute.min) === BigInt(-9223372036854776000)) {
-            delete attribute.min;
+        if (finalAttribute.min !== undefined) {
+          if (BigInt(finalAttribute.min) === BigInt(-9223372036854776000)) {
+            delete finalAttribute.min;
           } else {
-            baseSchemaCode += `.min(${attribute.min}, "Minimum value of ${attribute.min} not met")`;
+            baseSchemaCode += `.min(${finalAttribute.min}, "Minimum value of ${finalAttribute.min} not met")`;
           }
         }
-        if (attribute.max !== undefined) {
-          if (BigInt(attribute.max) === BigInt(9223372036854776000)) {
-            delete attribute.max;
+        if (finalAttribute.max !== undefined) {
+          if (BigInt(finalAttribute.max) === BigInt(9223372036854776000)) {
+            delete finalAttribute.max;
           } else {
-            baseSchemaCode += `.max(${attribute.max}, "Maximum value of ${attribute.max} exceeded")`;
+            baseSchemaCode += `.max(${finalAttribute.max}, "Maximum value of ${finalAttribute.max} exceeded")`;
           }
         }
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default(${attribute.xdefault})`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default(${finalAttribute.xdefault})`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "float":
         baseSchemaCode = "z.number()";
-        if (attribute.min !== undefined) {
-          baseSchemaCode += `.min(${attribute.min}, "Minimum value of ${attribute.min} not met")`;
+        if (finalAttribute.min !== undefined) {
+          baseSchemaCode += `.min(${finalAttribute.min}, "Minimum value of ${finalAttribute.min} not met")`;
         }
-        if (attribute.max !== undefined) {
-          baseSchemaCode += `.max(${attribute.max}, "Maximum value of ${attribute.max} exceeded")`;
+        if (finalAttribute.max !== undefined) {
+          baseSchemaCode += `.max(${finalAttribute.max}, "Maximum value of ${finalAttribute.max} exceeded")`;
         }
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default(${attribute.xdefault})`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default(${finalAttribute.xdefault})`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "boolean":
         baseSchemaCode = "z.boolean()";
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default(${attribute.xdefault})`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default(${finalAttribute.xdefault})`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "datetime":
         baseSchemaCode = "z.date()";
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default(new Date("${attribute.xdefault}"))`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default(new Date("${finalAttribute.xdefault}"))`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "email":
         baseSchemaCode = "z.string().email()";
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default("${attribute.xdefault}")`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default("${finalAttribute.xdefault}")`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "ip":
         baseSchemaCode = "z.string()"; // Add custom validation as needed
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default("${attribute.xdefault}")`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default("${finalAttribute.xdefault}")`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "url":
         baseSchemaCode = "z.string().url()";
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default("${attribute.xdefault}")`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default("${finalAttribute.xdefault}")`;
         }
-        if (!attribute.required && !attribute.array) {
+        if (!finalAttribute.required && !finalAttribute.array) {
           baseSchemaCode += ".nullish()";
         }
         break;
       case "enum":
-        baseSchemaCode = `z.enum([${attribute.elements
+        baseSchemaCode = `z.enum([${finalAttribute.elements
           .map((element) => `"${element}"`)
           .join(", ")}])`;
-        if (attribute.xdefault !== undefined) {
-          baseSchemaCode += `.default("${attribute.xdefault}")`;
+        if (finalAttribute.xdefault !== undefined) {
+          baseSchemaCode += `.default("${finalAttribute.xdefault}")`;
         }
         if (!attribute.required && !attribute.array) {
           baseSchemaCode += ".nullish()";

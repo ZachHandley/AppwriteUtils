@@ -81,7 +81,18 @@ export class AppwriteToX {
           collection.$permissions
         );
         const collAttributes = attributesSchema
-          .parse(collection.attributes)
+          .parse(
+            collection.attributes.map((attr: any) => {
+              if (
+                attr.type === "string" &&
+                attr.format &&
+                attr.format.length > 0
+              ) {
+                return { ...attr, type: attr.format };
+              }
+              return attr;
+            })
+          )
           .filter((attribute) =>
             attribute.type === "relationship"
               ? attribute.side !== "child"

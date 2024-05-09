@@ -49,6 +49,9 @@ export interface SetupOptions {
   importData: boolean;
   checkDuplicates: boolean;
   shouldWriteFile: boolean;
+  endpoint?: string;
+  project?: string;
+  key?: string;
 }
 
 type CollectionConfig = AppwriteConfig["collections"];
@@ -108,14 +111,27 @@ export class UtilsController {
   //   }
   // }
 
-  async init() {
+  async init(setupOptions: SetupOptions) {
     if (!this.config) {
       console.log("Initializing appwrite client & loading config...");
       this.config = await loadConfig(this.appwriteConfigPath);
-      this.appwriteServer = new Client()
-        .setEndpoint(this.config.appwriteEndpoint)
-        .setProject(this.config.appwriteProject)
-        .setKey(this.config.appwriteKey);
+      this.appwriteServer = new Client();
+      if (setupOptions.endpoint) {
+        if (!setupOptions.project || !setupOptions.key) {
+          throw new Error(
+            "Project ID and API key required when setting endpoint"
+          );
+        }
+        this.appwriteServer
+          .setEndpoint(setupOptions.endpoint)
+          .setProject(setupOptions.project)
+          .setKey(setupOptions.key);
+      } else {
+        this.appwriteServer
+          .setEndpoint(this.config.appwriteEndpoint)
+          .setProject(this.config.appwriteProject)
+          .setKey(this.config.appwriteKey);
+      }
       this.database = new Databases(this.appwriteServer);
       this.storage = new Storage(this.appwriteServer);
       this.config.appwriteClient = this.appwriteServer;
@@ -124,7 +140,7 @@ export class UtilsController {
   }
 
   async run(options: SetupOptions) {
-    await this.init(); // Ensure initialization is done
+    await this.init(options); // Ensure initialization is done
     if (!this.database || !this.storage || !this.config) {
       throw new Error("Database or storage not initialized");
     }

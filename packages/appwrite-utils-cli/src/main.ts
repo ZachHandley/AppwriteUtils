@@ -5,7 +5,6 @@ const args = process.argv.slice(2);
 
 async function main() {
   const controller = new UtilsController();
-  await controller.init();
 
   let sync = false;
   let runProd = false;
@@ -18,6 +17,9 @@ async function main() {
   let importData = false;
   let wipeDocuments = false;
   let shouldWriteFile = false;
+  let endpoint: string | undefined;
+  let project: string | undefined;
+  let key: string | undefined;
   if (args.includes("--sync")) {
     sync = true;
   }
@@ -51,6 +53,15 @@ async function main() {
   if (args.includes("--write-data") || args.includes("--writeData")) {
     shouldWriteFile = true;
   }
+  if (args.includes("--endpoint")) {
+    endpoint = args[args.indexOf("--endpoint") + 1];
+  }
+  if (args.includes("--project")) {
+    project = args[args.indexOf("--project") + 1];
+  }
+  if (args.includes("--key")) {
+    key = args[args.indexOf("--key") + 1];
+  }
   if (args.includes("--init")) {
     await controller.run({
       sync: sync,
@@ -66,6 +77,9 @@ async function main() {
       importData: false,
       checkDuplicates: false,
       shouldWriteFile: shouldWriteFile,
+      endpoint: endpoint,
+      project: project,
+      key: key,
     });
   } else {
     await controller.run({
@@ -82,6 +96,9 @@ async function main() {
       importData: importData,
       checkDuplicates: false,
       shouldWriteFile: shouldWriteFile,
+      endpoint: endpoint,
+      project: project,
+      key: key,
     });
   }
 }

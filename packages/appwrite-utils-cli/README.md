@@ -76,6 +76,9 @@ Replace `--args` with the appropriate options:
 - `--wipe-users` or `--wipeUsers`: Wipe all user data.
 - `--write-data` or `--writeData`: Write converted imported data to file
 - `--sync`: Synchronize your project's config and generate schema for your database
+- `--endpoint`: Set a different endpoint for the migration target
+- `--project`: Set a different project ID for the migration target
+- `--key`: Set a different API key for the migration target
 
 For example, to run migrations in a development environment and import data:
 
@@ -89,16 +92,33 @@ To initialize your project, generate schemas, but not import data:
 npx --package=appwrite-utils-cli@latest appwrite-migrate --init
 ```
 
+To sync:
+
+```bash
+# If you have no appwriteConfig
+npx --package=appwrite-utils-cli@latest appwrite-migrate --init
+
+# Otherwise, you can remove everything in the config file down to the word collections, just leave your Databases, then run
+npx --package=appwrite-utils-cli@latest appwrite-migrate --sync
+```
+
+### OpenAPI Generation
+
+Recently, I have also added an optional OpenAPI generation for each attribute in the schema. This is because I needed it and because I felt it would be nice to have. This is done using [this package](https://github.com/asteasolutions/zod-to-openapi), many thanks to them.
+
+To use it, add a `description` to any attribute or collection, and it will export that schema to the `appwrite/openapi` folder
+
 This setup ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line. I also have added logging automatically for information and errors as the console can be hard to keep up with.
 
 ### Roadmap
 
-- Syncing configuration
+- Syncing configuration (DONE)
 - Better file format for config (potentially)
 - Separation of collections and import configuration from main config
 
 ### Changelog
 
+- 0.0.270: Fixed enums in `--sync`, added optional OpenAPI generation (in progress, almost done, but wanted to push other changes), added `--endpoint`, `--project`, `--key` as optional parameters to change the target destination (shoutout to [pingu24k](https://github.com/pingu2k4) for pointing out these bugs and suggesting those changes for endpoint customization)
 - 0.0.254: Added `--sync` to synchronize your Appwrite instance with your local `appwriteConfig.yaml` and generate schemas
 - 0.0.253: Added `--writeData` (or `--write-data`) to command to write the output of the import data to a file called dataLoaderOutput in your root dir
 - 0.0.23: Added batching to user deletion
