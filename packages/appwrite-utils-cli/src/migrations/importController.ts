@@ -9,29 +9,16 @@ import type {
   AppwriteConfig,
   ConfigCollection,
   ConfigDatabase,
-  ImportDef,
   AttributeMappings,
-} from "./schema.js";
+} from "appwrite-utils";
 import type { ImportDataActions } from "./importDataActions.js";
-import { checkForCollection } from "./collections.js";
-import path from "path";
-import fs from "fs";
-import { convertObjectByAttributeMappings } from "./converters.js";
 import _ from "lodash";
-import { documentExists } from "./collections.js";
 import { areCollectionNamesSame } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
-import { AuthUserCreateSchema, type AuthUserCreate } from "../types.js";
 import { UsersController } from "./users.js";
 import { logger } from "./logging.js";
-import {
-  ContextObject,
-  createOrFindAfterImportOperation,
-  getAfterImportOperations,
-  splitIntoBatches,
-  updateOperation,
-} from "./migrationHelper.js";
+import { updateOperation } from "./migrationHelper.js";
 import {
   BatchSchema,
   OperationCreateSchema,
@@ -121,6 +108,9 @@ export class ImportController {
   }
 
   async importCollections(db: ConfigDatabase, dataLoader: DataLoader) {
+    if (!this.config.collections) {
+      return;
+    }
     for (const collection of this.config.collections) {
       let isUsersCollection =
         dataLoader.getCollectionKey(this.config.usersCollectionName) ===

@@ -12,7 +12,7 @@ import {
   permissionsSchema,
   attributesSchema,
   indexesSchema,
-} from "./schema.js";
+} from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 
 export class AppwriteToX {
@@ -72,6 +72,9 @@ export class AppwriteToX {
 
       // Loop through each collection in the current database
       for (const collection of collections) {
+        if (!updatedConfig.collections) {
+          updatedConfig.collections = [];
+        }
         const existingCollectionIndex = updatedConfig.collections.findIndex(
           (c) => c.name === collection.name
         );
@@ -128,6 +131,7 @@ export class AppwriteToX {
 
         // Prepare the collection object to be added or updated
         const collToPush = collectionSchema.parse({
+          $id: collection.$id,
           name: collection.name,
           enabled: collection.enabled,
           documentSecurity: collection.documentSecurity,
@@ -161,7 +165,7 @@ export class AppwriteToX {
       this.updatedConfig,
       this.appwriteFolderPath
     );
-    generator.updateYamlSchemas();
+    generator.updateTsSchemas();
     generator.generateSchemas();
   }
 }

@@ -10,13 +10,16 @@ import {
   type Attribute,
   type Collection,
   type CollectionCreate,
-} from "./schema.js";
+} from "appwrite-utils";
 import { z } from "zod";
 import { writeFileSync } from "fs";
 
 const registry = new OpenAPIRegistry();
 
 export const generateOpenApi = async (config: AppwriteConfig) => {
+  if (!config.collections) {
+    return;
+  }
   for (const collection of config.collections) {
     // Transform and register each attribute schema
     const attributeSchemas = collection.attributes.map((attribute) => {

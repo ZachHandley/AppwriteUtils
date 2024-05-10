@@ -1,106 +1,81 @@
 #!/usr/bin/env node
+import { program } from "commander";
 import { UtilsController } from "./utilsController.js";
 
-const args = process.argv.slice(2);
+// Setup the main CLI program
+program
+  .version("1.0.0")
+  .description("Utility CLI for Appwrite configurations and operations")
+  .option("--endpoint <endpoint>", "Set the Appwrite endpoint", undefined)
+  .option("--project <project>", "Set the Appwrite project ID", undefined)
+  .option("--key <key>", "Set the Appwrite API key", undefined)
+  .option("--backup", "Perform a backup before executing the command", false)
+  .option("--dev", "Run in development environment", false)
+  .option("--prod", "Run in production environment", false)
+  .option("--staging", "Run in staging environment", false)
+  .option("--sync", "Synchronize configurations", false)
+  .option("--wipe", "Wipe databases", false)
+  .option("--wipe-docs", "Wipe documents", false)
+  .option("--wipe-users", "Wipe users", false)
+  .option("--generate", "Generate schemas", false)
+  .option("--import", "Import data", false)
+  .option("--write-data", "Write data to file", false)
+  .option("-h, --help", "Display help for command", false);
 
-async function main() {
+program.on("--help", () => {
+  console.log("");
+  console.log("Examples:");
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --sync --endpoint https://appwrite.example.com --project 123456 --key 7890"
+  );
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --sync --dev --backup"
+  );
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --wipe --wipe-docs --wipe-users --dev"
+  );
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --generate --import --write-data --dev"
+  );
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --sync --generate --import --write-data --dev --backup"
+  );
+  console.log("  $ npx appwrite-utils-cli appwrite-create");
+  console.log(
+    "For more information, visit https://github.com/zachhandley/appwrite-utils"
+  );
+  console.log("");
+});
+
+// Parse and handle options
+program.action(async (options) => {
   const controller = new UtilsController();
+  try {
+    // Convert Commander options to the format expected by UtilsController
+    const setupOptions = {
+      sync: options.sync,
+      runProd: options.prod,
+      runStaging: options.staging,
+      runDev: options.dev,
+      doBackup: options.backup,
+      wipeDatabases: options.wipe,
+      wipeDocumentStorage: options.wipeDocs,
+      wipeUsers: options.wipeUsers,
+      generateSchemas: options.generate,
+      generateMockData: false, // Assuming this needs to be set based on other conditions
+      importData: options.import,
+      checkDuplicates: false, // Assuming this needs to be set based on other conditions
+      shouldWriteFile: options.writeData,
+      endpoint: options.endpoint,
+      project: options.project,
+      key: options.key,
+    };
 
-  let sync = false;
-  let runProd = false;
-  let runStaging = false;
-  let runDev = false;
-  let doBackup = false;
-  let wipeDatabases = false;
-  let wipeUsers = false;
-  let generateSchemas = false;
-  let importData = false;
-  let wipeDocuments = false;
-  let shouldWriteFile = false;
-  let endpoint: string | undefined;
-  let project: string | undefined;
-  let key: string | undefined;
-  if (args.includes("--sync")) {
-    sync = true;
+    await controller.run(setupOptions);
+    console.log("Operation completed successfully.");
+  } catch (error) {
+    console.error("Error during operation:", error);
   }
-  if (args.includes("--prod")) {
-    runProd = true;
-  }
-  if (args.includes("--staging")) {
-    runStaging = true;
-  }
-  if (args.includes("--dev")) {
-    runDev = true;
-  }
-  if (args.includes("--wipe")) {
-    wipeDatabases = true;
-  }
-  if (args.includes("--wipe-docs") || args.includes("--wipeDocs")) {
-    wipeDocuments = true;
-  }
-  if (args.includes("--generate")) {
-    generateSchemas = true;
-  }
-  if (args.includes("--import")) {
-    importData = true;
-  }
-  if (args.includes("--backup")) {
-    doBackup = true;
-  }
-  if (args.includes("--wipe-users") || args.includes("--wipeUsers")) {
-    wipeUsers = true;
-  }
-  if (args.includes("--write-data") || args.includes("--writeData")) {
-    shouldWriteFile = true;
-  }
-  if (args.includes("--endpoint")) {
-    endpoint = args[args.indexOf("--endpoint") + 1];
-  }
-  if (args.includes("--project")) {
-    project = args[args.indexOf("--project") + 1];
-  }
-  if (args.includes("--key")) {
-    key = args[args.indexOf("--key") + 1];
-  }
-  if (args.includes("--init")) {
-    await controller.run({
-      sync: sync,
-      runProd: runProd,
-      runStaging: runStaging,
-      runDev: runDev,
-      doBackup: doBackup,
-      wipeDatabases: wipeDatabases,
-      wipeUsers: wipeUsers,
-      wipeDocumentStorage: wipeDocuments,
-      generateSchemas: true,
-      generateMockData: false,
-      importData: false,
-      checkDuplicates: false,
-      shouldWriteFile: shouldWriteFile,
-      endpoint: endpoint,
-      project: project,
-      key: key,
-    });
-  } else {
-    await controller.run({
-      sync: sync,
-      runProd: runProd,
-      runStaging: runStaging,
-      runDev: runDev,
-      doBackup: doBackup,
-      wipeDatabases: wipeDatabases,
-      wipeDocumentStorage: wipeDocuments,
-      generateSchemas: generateSchemas,
-      generateMockData: false,
-      wipeUsers: wipeUsers,
-      importData: importData,
-      checkDuplicates: false,
-      shouldWriteFile: shouldWriteFile,
-      endpoint: endpoint,
-      project: project,
-      key: key,
-    });
-  }
-}
+});
 
-main().catch(console.error);
+program.parse(process.argv);

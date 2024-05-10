@@ -13,7 +13,7 @@ import {
   initOrGetDocumentStorage,
   wipeDocumentStorage,
 } from "./storage.js";
-import { type AppwriteConfig } from "./schema.js";
+import { type AppwriteConfig } from "appwrite-utils";
 import type { SetupOptions } from "../utilsController.js";
 import { nameToIdMapping } from "./queue.js";
 import { UsersController } from "./users.js";

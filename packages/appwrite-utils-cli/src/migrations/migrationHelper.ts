@@ -1,6 +1,6 @@
 import { ID, Query, type Databases } from "node-appwrite";
 import { BatchSchema, OperationSchema, type Operation } from "./backup.js";
-import { type AttributeMappings, AttributeMappingsSchema } from "./schema.js";
+import { AttributeMappingsSchema } from "appwrite-utils";
 import { z } from "zod";
 import { logger } from "./logging.js";
 

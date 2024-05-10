@@ -1,49 +1,21 @@
 import { Query, type Databases, type Models } from "node-appwrite";
-import { parseAttribute, type Attribute } from "./schema.js";
+import {
+  attributeSchema,
+  parseAttribute,
+  type Attribute,
+} from "appwrite-utils";
 import { nameToIdMapping, enqueueOperation } from "./queue.js";
 import _ from "lodash";
 
-const attributesSame = (a: Attribute, b: Attribute) => {
-  // Direct type comparison for non-string types
-  // Also check if the type IS string and has a format for either
-  // That means the format is the type of the attribute
-  if (
-    a.type === b.type &&
-    !((a.type === "string" && a.format) || (b.type === "string" && b.format))
-  ) {
-    if (a.type === "relationship" && b.type === "relationship") {
-      return (
-        a.key === b.key &&
-        a.relationType === b.relationType &&
-        a.twoWay === b.twoWay &&
-        a.twoWayKey === b.twoWayKey &&
-        a.required === b.required
-      );
-    }
-    return a.key === b.key && a.array === b.array && a.required === b.required;
-  }
-
-  if (a.type === "string" && a.format) {
-    // @ts-expect-error
-    a.type = a.format;
-  }
-  if (b.type === "string" && b.format) {
-    // @ts-expect-error
-    b.type = b.format;
-  }
-
-  // Handling string types with specific formats in Appwrite
-  if (a.type === "string" && b.type === "string") {
-    return (
-      a.key === b.key &&
-      a.format === b.format &&
-      a.array === b.array &&
-      a.required === b.required
-    );
-  }
-
-  // Fallback to false if none of the above conditions are met
-  return false;
+const attributesSame = (
+  databaseAttribute: Attribute,
+  configAttribute: Attribute
+): boolean => {
+  return (
+    databaseAttribute.key == configAttribute.key &&
+    databaseAttribute.type == configAttribute.type &&
+    databaseAttribute.array == configAttribute.array
+  );
 };
 
 export const createOrUpdateAttribute = async (
@@ -53,36 +25,90 @@ export const createOrUpdateAttribute = async (
   attribute: Attribute
 ): Promise<void> => {
   let action = "create";
-  let foundAttribute;
+  let foundAttribute: Attribute | undefined;
+  const updateEnabled = false;
+  let finalAttribute: any = attribute;
   try {
-    foundAttribute = await db.getAttribute(dbId, collection.$id, attribute.key);
-    foundAttribute = parseAttribute(foundAttribute);
+    const collectionAttr = collection.attributes.find(
+      // @ts-expect-error
+      (attr) => attr.key === attribute.key
+    ) as unknown;
+    foundAttribute = parseAttribute(collectionAttr);
   } catch (error) {
     foundAttribute = undefined;
   }
-  let numSameAttributes = 0;
-  if (foundAttribute && attributesSame(foundAttribute, attribute)) {
-    numSameAttributes++;
-    return;
-  } else if (foundAttribute && !attributesSame(foundAttribute, attribute)) {
+
+  if (
+    foundAttribute &&
+    attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
+    // Check if mutable properties have changed and set action to "update" if necessary
+    const requiredChanged =
+      "required" in foundAttribute && "required" in attribute
+        ? foundAttribute.required !== attribute.required
+        : false;
+
+    // const xdefaultChanged =
+    //   "xdefault" in foundAttribute && "xdefault" in attribute
+    //     ? foundAttribute.xdefault !== attribute.xdefault
+    //     : false;
+
+    const onDeleteChanged =
+      foundAttribute.type === "relationship" &&
+      attribute.type === "relationship" &&
+      "onDelete" in foundAttribute &&
+      "onDelete" in attribute
+        ? foundAttribute.onDelete !== attribute.onDelete
+        : false;
+
+    if (requiredChanged || onDeleteChanged) {
+      console.log(
+        `Required changed: ${requiredChanged}\nOnDelete changed: ${onDeleteChanged}`
+      );
+      console.log(
+        `Found attribute: ${JSON.stringify(foundAttribute, null, 2)}`
+      );
+      console.log(`Attribute: ${JSON.stringify(attribute, null, 2)}`);
+      finalAttribute = {
+        ...attribute,
+        ...foundAttribute,
+      };
+      action = "update";
+    } else {
+      // If no properties that can be updated have changed, return early
+      return;
+    }
+  } else if (
+    foundAttribute &&
+    !attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
     console.log(
-      `Deleting attribute with same key ${attribute.key} -- ${
-        foundAttribute.key
-      } but different values -- ${JSON.stringify(
+      `Deleting attribute with same key ${
+        attribute.key
+      } -- but different values -- ${JSON.stringify(
         attribute,
         null,
         2
       )} -- ${JSON.stringify(foundAttribute, null, 2)}`
     );
     await db.deleteAttribute(dbId, collection.$id, attribute.key);
+    // After deletion, you might want to create the attribute anew
+    finalAttribute = attribute;
+    action = "create";
+  } else if (!updateEnabled && foundAttribute) {
+    return;
   }
 
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
   let relatedCollectionId: string | undefined;
-  if (attribute.type === "relationship") {
-    if (nameToIdMapping.has(attribute.relatedCollection)) {
-      relatedCollectionId = nameToIdMapping.get(attribute.relatedCollection);
+  if (finalAttribute.type === "relationship") {
+    if (nameToIdMapping.has(finalAttribute.relatedCollection)) {
+      relatedCollectionId = nameToIdMapping.get(
+        finalAttribute.relatedCollection
+      );
       try {
         collectionFoundViaRelatedCollection = await db.getCollection(
           dbId,
@@ -90,77 +116,104 @@ export const createOrUpdateAttribute = async (
         );
       } catch (e) {
         console.log(
-          `Collection not found: ${attribute.relatedCollection} when nameToIdMapping was set`
+          `Collection not found: ${finalAttribute.relatedCollection} when nameToIdMapping was set`
         );
         collectionFoundViaRelatedCollection = undefined;
       }
     } else {
       const collectionsPulled = await db.listCollections(dbId, [
-        Query.equal("name", attribute.relatedCollection),
+        Query.equal("name", finalAttribute.relatedCollection),
       ]);
       if (collectionsPulled.total > 0) {
         collectionFoundViaRelatedCollection = collectionsPulled.collections[0];
         relatedCollectionId = collectionFoundViaRelatedCollection.$id;
-        nameToIdMapping.set(attribute.relatedCollection, relatedCollectionId);
+        nameToIdMapping.set(
+          finalAttribute.relatedCollection,
+          relatedCollectionId
+        );
       }
     }
     if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
-      console.log(`Enqueueing operation for attribute: ${attribute.key}`);
+      console.log(`Enqueueing operation for attribute: ${finalAttribute.key}`);
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
         collection: collection,
         attribute,
-        dependencies: [attribute.relatedCollection],
+        dependencies: [finalAttribute.relatedCollection],
       });
       return;
     }
   }
-
-  switch (attribute.type) {
+  finalAttribute = attributeSchema.parse(finalAttribute);
+  switch (finalAttribute.type) {
     case "string":
       if (action === "create") {
         await db.createStringAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.size,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array,
-          attribute.encrypted
+          finalAttribute.key,
+          finalAttribute.size,
+          finalAttribute.required || false,
+          (finalAttribute.xdefault as string) || undefined,
+          finalAttribute.array || false,
+          finalAttribute.encrypted
         );
       } else {
         await db.updateStringAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          (finalAttribute.xdefault as string) || undefined
         );
       }
       break;
     case "integer":
       if (action === "create") {
+        if (
+          finalAttribute.min &&
+          BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
+        ) {
+          delete finalAttribute.min;
+        }
+        if (
+          finalAttribute.max &&
+          BigInt(finalAttribute.max) === BigInt(9223372036854776000)
+        ) {
+          delete finalAttribute.max;
+        }
         await db.createIntegerAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.min,
-          attribute.max,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.min,
+          finalAttribute.max,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
+        if (
+          finalAttribute.min &&
+          BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
+        ) {
+          delete finalAttribute.min;
+        }
+        if (
+          finalAttribute.max &&
+          BigInt(finalAttribute.max) === BigInt(9223372036854776000)
+        ) {
+          delete finalAttribute.max;
+        }
         await db.updateIntegerAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.min || 0,
-          attribute.max || 2147483647,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.min || 0,
+          finalAttribute.max || 2147483647,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -169,22 +222,22 @@ export const createOrUpdateAttribute = async (
         await db.createFloatAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.min,
-          attribute.max,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.min,
+          finalAttribute.max,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateFloatAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.min || 0,
-          attribute.max || 2147483647,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.min || 0,
+          finalAttribute.max || 2147483647,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -193,18 +246,18 @@ export const createOrUpdateAttribute = async (
         await db.createBooleanAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateBooleanAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || null
         );
       }
       break;
@@ -213,18 +266,18 @@ export const createOrUpdateAttribute = async (
         await db.createDatetimeAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateDatetimeAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -233,18 +286,18 @@ export const createOrUpdateAttribute = async (
         await db.createEmailAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateEmailAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -253,18 +306,18 @@ export const createOrUpdateAttribute = async (
         await db.createIpAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateIpAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -273,18 +326,18 @@ export const createOrUpdateAttribute = async (
         await db.createUrlAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateUrlAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -293,20 +346,20 @@ export const createOrUpdateAttribute = async (
         await db.createEnumAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.elements,
-          attribute.required,
-          attribute.xdefault || undefined,
-          attribute.array
+          finalAttribute.key,
+          finalAttribute.elements,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined,
+          finalAttribute.array
         );
       } else {
         await db.updateEnumAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.elements,
-          attribute.required,
-          attribute.xdefault || undefined
+          finalAttribute.key,
+          finalAttribute.elements,
+          finalAttribute.required || false,
+          finalAttribute.xdefault || undefined
         );
       }
       break;
@@ -316,18 +369,18 @@ export const createOrUpdateAttribute = async (
           dbId,
           collection.$id,
           relatedCollectionId!,
-          attribute.relationType,
-          attribute.twoWay,
-          attribute.key,
-          attribute.twoWayKey,
-          attribute.onDelete
+          finalAttribute.relationType,
+          finalAttribute.twoWay,
+          finalAttribute.key,
+          finalAttribute.twoWayKey,
+          finalAttribute.onDelete
         );
       } else {
         await db.updateRelationshipAttribute(
           dbId,
           collection.$id,
-          attribute.key,
-          attribute.onDelete
+          finalAttribute.key,
+          finalAttribute.onDelete
         );
       }
       break;

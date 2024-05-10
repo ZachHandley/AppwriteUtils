@@ -1,4 +1,4 @@
-import type { AppwriteConfig, ConfigCollection } from "./schema.js";
+import type { AppwriteConfig, ConfigCollection } from "appwrite-utils";
 import { Databases, ID, Query, Users, type Models } from "node-appwrite";
 import {
   AuthUserSchema,

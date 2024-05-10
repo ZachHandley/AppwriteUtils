@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "0.0.273",
+  "version": "0.0.275",
   "main": "src/main.ts",
   "type": "module",
   "repository": {
@@ -21,21 +21,28 @@
     "utility"
   ],
   "bin": {
-    "appwrite-setup": "./dist/setup.js",
+    "appwrite-init": "./dist/init.js",
     "appwrite-migrate": "./dist/main.js"
   },
   "scripts": {
     "build": "bun run tsc",
+    "init": "tsx --no-cache src/init.ts",
+    "migrate": "tsx --no-cache src/main.ts",
     "deploy": "bun run build && npm publish --access public",
     "postinstall": "echo 'This package is intended for CLI use only and should not be added as a dependency in other projects.'"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.0.0",
+    "@types/inquirer": "^9.0.7",
+    "appwrite-utils": "workspace:*",
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.20",
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
     "luxon": "^3.4.4",
     "nanostores": "^0.10.3",
     "node-appwrite": "^12.0.1",
+    "tsx": "^4.9.3",
     "winston": "^3.13.0",
     "zod": "^3.22.4"
   },

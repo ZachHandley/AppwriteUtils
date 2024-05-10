@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 export const relationshipAttributeSchema = z.object({
   key: z.string().describe("The key of the attribute"),
   type: z
@@ -7,14 +8,17 @@ export const relationshipAttributeSchema = z.object({
     .default("relationship"),
   error: z
     .string()
-    .describe("The error message if the attribute is invalid")
-    .default("Invalid Relationship Attribute Schema"),
+    .default("Invalid String Attribute Schema")
+    .optional()
+    .describe("The error message if the attribute is invalid"),
   required: z
     .boolean()
-    .describe("Whether the attribute is required or not")
-    .default(false),
+    .default(false)
+    .optional()
+    .describe("Whether the attribute is required or not"),
   array: z
     .boolean()
+    .default(false)
     .optional()
     .describe("Whether the attribute is an array or not"),
   relatedCollection: z
@@ -49,6 +53,13 @@ export const relationshipAttributeSchema = z.object({
     .optional()
     .describe(
       "Configuration for mapping and resolving relationships during data import"
+    ),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
     ),
 });
 

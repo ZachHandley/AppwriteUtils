@@ -5,21 +5,17 @@ import {
   type Databases,
   type Storage,
 } from "node-appwrite";
-import type { AppwriteConfig } from "./schema.js";
-import { validationRules, type ValidationRules } from "./validationRules.js";
+import type { AppwriteConfig } from "appwrite-utils";
 import {
-  converterFunctions,
-  convertObjectBySchema,
-  type ConverterFunctions,
-} from "./converters.js";
-import {
-  afterImportActions,
-  type AfterImportActions,
-} from "./afterImportActions.js";
+  validationRules,
+  type ValidationRules,
+  type AttributeMappings,
+} from "appwrite-utils";
+import { converterFunctions, type ConverterFunctions } from "appwrite-utils";
+import { convertObjectBySchema } from "./converters.js";
+import { type AfterImportActions } from "appwrite-utils";
+import { afterImportActions } from "./afterImportActions.js";
 import { logger } from "./logging.js";
-
-type AttributeMappings =
-  AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];
 
 export class ImportDataActions {
   private db: Databases;
@@ -48,7 +44,7 @@ export class ImportDataActions {
   runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
     const conversionSchema = attributeMappings.reduce((schema, mapping) => {
       schema[mapping.targetKey] = (originalValue: any) => {
-        return mapping.converters.reduce((value, converterName) => {
+        return mapping.converters?.reduce((value, converterName) => {
           let shouldProcessAsArray = false;
           if (
             (converterName.includes("[Arr]") ||

@@ -8,16 +8,18 @@ export const integerAttributeSchema = z.object({
     .default("integer"),
   error: z
     .string()
-    .describe("The error message if the attribute is invalid")
-    .default("Invalid Integer Attribute Schema"),
+    .default("Invalid String Attribute Schema")
+    .optional()
+    .describe("The error message if the attribute is invalid"),
   required: z
     .boolean()
-    .describe("Whether the attribute is required or not")
-    .default(false),
+    .default(false)
+    .optional()
+    .describe("Whether the attribute is required or not"),
   array: z
     .boolean()
-    .optional()
     .default(false)
+    .optional()
     .describe("Whether the attribute is an array or not"),
   min: z
     .number()
@@ -34,6 +36,13 @@ export const integerAttributeSchema = z.object({
     .int()
     .nullish()
     .describe("The default value of the attribute"),
+  description: z
+    .string()
+    .or(z.record(z.string()))
+    .nullish()
+    .describe(
+      "The description of the attribute, also used for OpenApi Generation"
+    ),
 });
 
 export type IntegerAttribute = z.infer<typeof integerAttributeSchema>;

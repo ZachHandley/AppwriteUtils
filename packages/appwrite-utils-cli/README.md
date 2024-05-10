@@ -6,7 +6,7 @@
 
 ## Features
 
-- **Easy Configuration**: Initialize your Appwrite project configurations and setup directly from the command line.
+- **Easy Configuration**: Initialize your Appwrite project configurations interactively directly from the command line.
 - **Database Migrations**: Control the migration process with options to target production, staging, or development environments.
 - **Schema Generation**: Generate and manage TypeScript schemas directly from your Appwrite database schemas.
 - **Data Import**: Facilitate the import of data into your Appwrite databases with comprehensive command-line support.
@@ -35,25 +35,11 @@ After installation, you can access the tool directly from your command line usin
 
 ### Initialization
 
-Set up your Appwrite project with necessary configurations:
+Interactively set up your Appwrite project with necessary configurations:
 
 ```bash
-npx --package=appwrite-utils-cli@latest appwrite-setup
+npx --package=appwrite-utils-cli@latest appwrite-init
 ```
-
-To generate an example configuration file:
-
-```bash
-appwrite-setup --example
-```
-
-To synchronize your `appwriteConfig.yaml` with your Appwrite Database, first you must run the setup command and enter your Appwrite instances details in the `projectId`, `endpoint`, and `apiKey`, then run the following
-
-```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate -- --sync
-```
-
-This will initialize your config and generate schemas for your database using ZOD to `src/appwrite/schemas`
 
 ### Running Migrations and Tasks
 
@@ -80,28 +66,6 @@ Replace `--args` with the appropriate options:
 - `--project`: Set a different project ID for the migration target
 - `--key`: Set a different API key for the migration target
 
-For example, to run migrations in a development environment and import data:
-
-```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate --dev --import
-```
-
-To initialize your project, generate schemas, but not import data:
-
-```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate --init
-```
-
-To sync:
-
-```bash
-# If you have no appwriteConfig
-npx --package=appwrite-utils-cli@latest appwrite-migrate --init
-
-# Otherwise, you can remove everything in the config file down to the word collections, just leave your Databases, then run
-npx --package=appwrite-utils-cli@latest appwrite-migrate --sync
-```
-
 ### OpenAPI Generation (almost done, in progress)
 
 Recently, I have also added an optional OpenAPI generation for each attribute in the schema. This is because I needed it and because I felt it would be nice to have. This is done using [this package](https://github.com/asteasolutions/zod-to-openapi), many thanks to them.
@@ -118,6 +82,8 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.275: THINGS ARE NOW IN TYPESCRIPT WOOHOO. No but for reaal, super happy to report that everything has been converted to TypeScript, just way too many changes, I hope you enjoy it!
+- 0.0.274: Small improvement for attribute handling, rather than getting it every attribute, I check the collections attributes
 - 0.0.273: Small fix for relationship attribute comparisons
 - 0.0.272: That's what I get for not testing lmao, also updated logic for checking for existing attributes to take the `format` into consideration from the database (URL's are not of `type: "url"`, they are of `format: "url"`)
 - 0.0.271: Small change to update attributes that are different from each other by deleting the attribute and recreating, as we cannot update most things

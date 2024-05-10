@@ -69,3 +69,11 @@ console.log(anyToString(1234));  // Output: "1234"
 ```
 
 This setup ensures that your interactions with Appwrite are more robust, less error-prone, and significantly more manageable.
+
+### Changelog
+
+- 0.1.21: Changed `ID.unique()` to `ulid()` for random ID generation, refactored `schema.ts` into multiple files
+- 0.1.20: Forgot type ValidationRules, type ConverterFunctions, and type AfterImportActions
+- 0.1.19: Forgot Indexes oopsie
+- 0.1.18: Added Attribute type to exports (union of all types)
+- 0.1.17: Fixed package in general, removed redundancies in appwrite-utils-cli as it now depends on this package

@@ -4,7 +4,7 @@ import type {
   AppwriteConfig,
   Attribute,
   RelationshipAttribute,
-} from "./schema.js";
+} from "appwrite-utils";
 import { logger } from "./logging.js";
 
 /**
@@ -12,6 +12,9 @@ import { logger } from "./logging.js";
  */
 export const findCollectionsWithRelationships = (config: AppwriteConfig) => {
   const toReturn = new Map<string, RelationshipAttribute[]>();
+  if (!config.collections) {
+    return toReturn;
+  }
   for (const collection of config.collections) {
     if (collection.attributes) {
       for (const attribute of collection.attributes) {

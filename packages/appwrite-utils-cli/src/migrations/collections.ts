@@ -1,19 +1,10 @@
 import { Databases, ID, Permission, Query, type Models } from "node-appwrite";
-import type { AppwriteConfig, CollectionCreate } from "./schema.js";
+import type { AppwriteConfig, CollectionCreate } from "appwrite-utils";
 import { nameToIdMapping, processQueue } from "./queue.js";
 import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
-import {
-  ensureDirectoryExistence,
-  toCamelCase,
-  toPascalCase,
-  writeFileSync,
-} from "../utils/index.js";
 import _ from "lodash";
 import { SchemaGenerator } from "./schemaStrings.js";
-import path from "path";
-
-const { join } = _;
 
 export const documentExists = async (
   db: Databases,
@@ -157,6 +148,9 @@ export const createOrUpdateCollections = async (
   deletedCollections?: { collectionId: string; collectionName: string }[]
 ): Promise<void> => {
   const configCollections = config.collections;
+  if (!configCollections) {
+    return;
+  }
   const usedIds = new Set(); // To track IDs used in this operation
 
   for (const { attributes, indexes, ...collection } of configCollections) {
@@ -234,7 +228,7 @@ export const createOrUpdateCollections = async (
         continue; // Skip to the next collection on failure
       }
     } else {
-      console.log(`Collection ${collection.name} already exists.`);
+      console.log(`Collection ${collection.name} exists, using it`);
     }
 
     // Update attributes and indexes for the collection
@@ -250,7 +244,7 @@ export const createOrUpdateCollections = async (
       databaseId,
       database,
       collectionToUse.$id,
-      indexes
+      indexes ?? []
     );
   }
   // Process any remaining tasks in the queue

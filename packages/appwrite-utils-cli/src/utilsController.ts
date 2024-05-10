@@ -1,39 +1,35 @@
 import { Client, Databases, Storage } from "node-appwrite";
 import { startSetup } from "./migrations/setupDatabase.js";
-import {
-  type AppwriteConfig,
-  AppwriteConfigSchema,
-} from "./migrations/schema.js";
 import path from "path";
 import fs from "fs";
 import { load } from "js-yaml";
 import { ImportDataActions } from "./migrations/importDataActions.js";
-import {
-  converterFunctions,
-  type ConverterFunctions,
-} from "./migrations/converters.js";
 import { readFileSync } from "./utils/helperFunctions.js";
+import { afterImportActions } from "./migrations/afterImportActions.js";
 import {
-  afterImportActions,
   type AfterImportActions,
-} from "./migrations/afterImportActions.js";
-import {
+  type ConverterFunctions,
+  converterFunctions,
   validationRules,
   type ValidationRules,
-} from "./migrations/validationRules.js";
+  type AppwriteConfig,
+  AppwriteConfigSchema,
+} from "appwrite-utils";
 import { ImportController } from "./migrations/importController.js";
 import _ from "lodash";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
+import { loadConfig as loadTsConfig } from "./utils/loadConfigs.js";
+import { findAppwriteConfig } from "./utils/loadConfigs.js";
 
-async function loadConfig(configPath: string) {
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`Configuration file not found at ${configPath}`);
-  }
-  const configModule = await load(readFileSync(configPath), {
-    json: true,
-  });
-  return AppwriteConfigSchema.parse(configModule);
-}
+// async function loadConfig(configPath: string) {
+//   if (!fs.existsSync(configPath)) {
+//     throw new Error(`Configuration file not found at ${configPath}`);
+//   }
+//   const configModule = await load(readFileSync(configPath), {
+//     json: true,
+//   });
+//   return AppwriteConfigSchema.parse(configModule);
+// }
 
 export interface SetupOptions {
   sync: boolean;
@@ -54,12 +50,6 @@ export interface SetupOptions {
   key?: string;
 }
 
-type CollectionConfig = AppwriteConfig["collections"];
-type ImportDef = CollectionConfig[number]["importDefs"][number];
-type AttributeMappings = ImportDef["attributeMappings"];
-type AfterImportAction = AttributeMappings[number]["postImportActions"][number];
-type ValidityRule = AttributeMappings[number]["validationActions"][number];
-
 export class UtilsController {
   private appwriteFolderPath: string;
   private appwriteConfigPath: string;
@@ -73,13 +63,12 @@ export class UtilsController {
 
   constructor() {
     const basePath = process.cwd(); // Gets the current working directory
-    const appwriteFolderPath = path.join(basePath, "src", "appwrite");
-    const appwriteConfigPath = path.join(
-      appwriteFolderPath,
-      "appwriteConfig.yaml"
-    );
-    this.appwriteFolderPath = appwriteFolderPath;
-    this.appwriteConfigPath = appwriteConfigPath;
+    const appwriteConfigFound = findAppwriteConfig(basePath);
+    if (!appwriteConfigFound) {
+      throw new Error("Failed to find appwriteConfig.ts");
+    }
+    this.appwriteConfigPath = appwriteConfigFound;
+    this.appwriteFolderPath = path.dirname(appwriteConfigFound);
   }
 
   // async loadCustomDefinitions(): Promise<void> {
@@ -114,7 +103,10 @@ export class UtilsController {
   async init(setupOptions: SetupOptions) {
     if (!this.config) {
       console.log("Initializing appwrite client & loading config...");
-      this.config = await loadConfig(this.appwriteConfigPath);
+      this.config = await loadTsConfig(this.appwriteFolderPath);
+      if (!this.config) {
+        throw new Error("Failed to load config");
+      }
       this.appwriteServer = new Client();
       if (setupOptions.endpoint) {
         if (!setupOptions.project || !setupOptions.key) {

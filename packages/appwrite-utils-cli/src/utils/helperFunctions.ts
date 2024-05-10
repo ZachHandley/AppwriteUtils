@@ -1,9 +1,8 @@
-import type { AppwriteConfig } from "../types.js";
 import type { Models, Storage } from "node-appwrite";
 import fs from "node:fs";
 import path from "node:path";
-import type { CollectionImportData } from "src/migrations/dataLoader.js";
-import type { ConfigCollection } from "src/migrations/schema.js";
+import type { CollectionImportData } from "../migrations/dataLoader.js";
+import type { ConfigCollection } from "appwrite-utils";
 
 export const toPascalCase = (str: string): string => {
   return (

@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils",
   "module": "src/index.ts",
-  "version": "0.1.16",
+  "version": "0.1.21",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -29,6 +29,8 @@
   "dependencies": {
     "@types/luxon": "^3.4.2",
     "appwrite": "^14.0.1",
-    "luxon": "^3.4.4"
+    "luxon": "^3.4.4",
+    "ulid": "^2.3.0",
+    "zod": "^3.23.8"
   }
 }

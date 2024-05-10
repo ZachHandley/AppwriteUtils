@@ -47,6 +47,8 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate --args
 
 Replace `--args` with the appropriate options for your task.
 
+**I highly recommend reading the actual readme for that inside `packages/appwrite-utils-cli/`**
+
 ### Key Features
 
 - **Database Migrations and Schema Generation**: Control migration processes and generate TypeScript schemas from your Appwrite database schemas.

@@ -1,5 +1,5 @@
 import { Query, type Databases, type Models } from "node-appwrite";
-import type { Attribute } from "./schema.js";
+import type { Attribute } from "appwrite-utils";
 import { createOrUpdateAttribute } from "./attributes.js";
 import _ from "lodash";
 import { fetchAndCacheCollectionByName } from "./collections.js";

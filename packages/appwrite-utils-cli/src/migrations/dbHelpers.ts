@@ -2,7 +2,7 @@ import type {
   AppwriteConfig,
   Attribute,
   RelationshipAttribute,
-} from "./schema.js";
+} from "appwrite-utils";
 
 // Helper function to categorize collections based on relationship sides
 export const categorizeCollectionByRelationshipSide = (
@@ -40,6 +40,9 @@ export const getDependencies = (attributes: Attribute[]): string[] => {
 export const sortCollections = (
   configCollections: AppwriteConfig["collections"]
 ): AppwriteConfig["collections"] => {
+  if (!configCollections) {
+    return [];
+  }
   // Categorize collections based on their relationship sides
   const parentCollections = configCollections.filter(
     ({ attributes }) =>

@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import _ from "lodash";
-import type { AppwriteConfig } from "./schema.js";
+import type { AttributeMappings } from "../schemas/attributeMappings";
 
 const { cloneDeep, isObject } = _;
 
@@ -534,9 +534,6 @@ export const convertObjectBySchema = (
     return acc;
   }, {});
 };
-
-type AttributeMappings =
-  AppwriteConfig["collections"][number]["importDefs"][number]["attributeMappings"];
 
 /**
  * Converts the keys of an object based on a provided attributeMappings.

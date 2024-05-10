@@ -3,7 +3,7 @@ import type {
   AppwriteConfig,
   Attribute,
   RelationshipAttribute,
-} from "./schema.js";
+} from "appwrite-utils";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
@@ -30,17 +30,111 @@ export class SchemaGenerator {
     this.extractRelationships();
   }
 
-  public updateYamlSchemas(): void {
-    // Output this.config to a YAML file at appwriteFolderPath/appwriteConfig.yaml
-    let finalConfig = this.config;
-    finalConfig.appwriteClient = null;
-    const yamlConfig = finalConfig;
-    const yamlPath = path.join(this.appwriteFolderPath, "appwriteConfig.yaml");
-    fs.writeFileSync(yamlPath, dump(yamlConfig), { encoding: "utf-8" });
-    console.log(`YAML written to ${yamlPath}`);
+  public updateTsSchemas(): void {
+    const collections = this.config.collections;
+    delete this.config.collections;
+
+    const configPath = path.join(this.appwriteFolderPath, "appwriteConfig.ts");
+    const configContent = `import { AppwriteConfig } from "appwrite-utils";
+  
+  const appwriteConfig: AppwriteConfig = {
+    appwriteEndpoint: "${this.config.appwriteEndpoint}",
+    appwriteProject: "${this.config.appwriteProject}",
+    appwriteKey: "${this.config.appwriteKey}",
+    enableDevDatabase: ${this.config.enableDevDatabase},
+    enableBackups: ${this.config.enableBackups},
+    backupInterval: ${this.config.backupInterval},
+    backupRetention: ${this.config.backupRetention},
+    enableBackupCleanup: ${this.config.enableBackupCleanup},
+    enableMockData: ${this.config.enableMockData},
+    enableWipeOtherDatabases: ${this.config.enableWipeOtherDatabases},
+    documentBucketId: "${this.config.documentBucketId}",
+    usersCollectionName: "${this.config.usersCollectionName}",
+    databases: ${JSON.stringify(this.config.databases)}
+  };
+  
+  export default appwriteConfig;
+  `;
+    fs.writeFileSync(configPath, configContent, { encoding: "utf-8" });
+
+    const collectionsFolderPath = path.join(
+      this.appwriteFolderPath,
+      "collections"
+    );
+    if (!fs.existsSync(collectionsFolderPath)) {
+      fs.mkdirSync(collectionsFolderPath, { recursive: true });
+    }
+
+    collections?.forEach((collection) => {
+      const { databaseId, ...collectionWithoutDbId } = collection; // Destructure to exclude databaseId
+      const collectionFilePath = path.join(
+        collectionsFolderPath,
+        `${collection.name}.ts`
+      );
+      const collectionContent = `import { CollectionCreate } from "appwrite-utils";
+  
+  const ${collection.name}Config: Partial<CollectionCreate> = {
+    name: "${collection.name}",
+    $id: "${collection.$id}",
+    enabled: ${collection.enabled},
+    documentSecurity: ${collection.documentSecurity},
+    $permissions: [
+      ${collection.$permissions
+        .map(
+          (permission) =>
+            `{ permission: "${permission.permission}", target: "${permission.target}" }`
+        )
+        .join(",\n    ")}
+    ],
+    attributes: [
+      ${collection.attributes
+        .map((attr) => {
+          return `{ ${Object.entries(attr)
+            .map(([key, value]) => {
+              // Check the type of the value and format it accordingly
+              if (typeof value === "string") {
+                // If the value is a string, wrap it in quotes
+                return `${key}: "${value.replace(/"/g, '\\"')}"`; // Escape existing quotes in the string
+              } else if (Array.isArray(value)) {
+                // If the value is an array, join it with commas
+                return `${key}: [${value
+                  .map((item) => `"${item}"`)
+                  .join(", ")}]`;
+              } else {
+                // If the value is not a string (e.g., boolean or number), output it directly
+                return `${key}: ${value}`;
+              }
+            })
+            .join(", ")} }`;
+        })
+        .join(",\n    ")}
+    ],
+    indexes: [
+      ${(
+        collection.indexes?.map((index) => {
+          // Map each attribute to ensure it is properly quoted
+          const formattedAttributes = index.attributes
+            .map((attr) => `"${attr}"`)
+            .join(", ");
+          return `{ key: "${index.key}", type: "${index.type}", attributes: [${formattedAttributes}] }`;
+        }) ?? []
+      ).join(",\n    ")}
+    ]
+  };
+  
+  export default ${collection.name}Config;
+  `;
+      fs.writeFileSync(collectionFilePath, collectionContent, {
+        encoding: "utf-8",
+      });
+      console.log(`Collection schema written to ${collectionFilePath}`);
+    });
   }
 
   private extractRelationships(): void {
+    if (!this.config.collections) {
+      return;
+    }
     this.config.collections.forEach((collection) => {
       collection.attributes.forEach((attr) => {
         if (attr.type === "relationship" && attr.twoWay && attr.twoWayKey) {
@@ -115,6 +209,9 @@ export class SchemaGenerator {
   }
 
   public generateSchemas(): void {
+    if (!this.config.collections) {
+      return;
+    }
     this.config.collections.forEach((collection) => {
       const schemaString = this.createSchemaString(
         collection.name,

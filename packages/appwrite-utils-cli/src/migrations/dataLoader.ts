@@ -11,7 +11,7 @@ import {
   type ImportDef,
   type ImportDefs,
   type RelationshipAttribute,
-} from "./schema.js";
+} from "appwrite-utils";
 import path from "path";
 import fs from "fs";
 import { convertObjectByAttributeMappings } from "./converters.js";
@@ -216,6 +216,9 @@ export class DataLoader {
       if (db.$id !== dbId) {
         continue;
       }
+      if (!this.config.collections) {
+        continue;
+      }
       for (let index = 0; index < this.config.collections.length; index++) {
         const collectionConfig = this.config.collections[index];
         let collection = CollectionCreateSchema.parse(collectionConfig);
@@ -285,6 +288,9 @@ export class DataLoader {
       if (db.$id !== dbId) {
         continue;
       }
+      if (!this.config.collections) {
+        continue;
+      }
       // Iterate over the configured collections to process each
       for (const collectionConfig of this.config.collections) {
         const collection = collectionConfig;
@@ -345,7 +351,9 @@ export class DataLoader {
       this.config.usersCollectionName
     );
     const usersCollectionPrimaryKeyFields = new Set();
-
+    if (!this.config.collections) {
+      return;
+    }
     // Collect primary key fields from the users collection definitions
     this.config.collections.forEach((collection) => {
       if (this.getCollectionKey(collection.name) === usersCollectionKey) {
@@ -390,6 +398,9 @@ export class DataLoader {
   }
 
   async updateOldReferencesForNew() {
+    if (!this.config.collections) {
+      return;
+    }
     for (const collectionConfig of this.config.collections) {
       const collectionKey = this.getCollectionKey(collectionConfig.name);
       const collectionData = this.importMap.get(collectionKey);
@@ -472,6 +483,9 @@ export class DataLoader {
   }
 
   async updateReferencesInRelatedCollections() {
+    if (!this.config.collections) {
+      return;
+    }
     // Iterate over each collection configuration
     for (const collectionConfig of this.config.collections) {
       const collectionKey = this.getCollectionKey(collectionConfig.name);
@@ -1174,6 +1188,9 @@ export class DataLoader {
   }
 
   private updateReferencesBasedOnAttributeMappings() {
+    if (!this.config.collections) {
+      return;
+    }
     this.config.collections.forEach((collectionConfig) => {
       const collectionName = collectionConfig.name;
       const collectionData = this.importMap.get(

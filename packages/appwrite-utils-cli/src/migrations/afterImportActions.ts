@@ -7,11 +7,11 @@ import {
   type Models,
   Client,
 } from "node-appwrite";
-import type { AppwriteConfig } from "./schema.js";
 import path from "path";
 import fs from "fs";
 import os from "os";
 import { logger } from "./logging.js";
+import { type AfterImportActions, type AppwriteConfig } from "appwrite-utils";
 
 export const getDatabaseFromConfig = (config: AppwriteConfig) => {
   if (!config.appwriteClient) {
@@ -32,10 +32,6 @@ export const getStorageFromConfig = (config: AppwriteConfig) => {
   }
   return new Storage(config.appwriteClient!);
 };
-
-export interface AfterImportActions {
-  [key: string]: (config: AppwriteConfig, ...args: any[]) => Promise<any>;
-}
 
 export const afterImportActions = {
   updateCreatedDocument: async (

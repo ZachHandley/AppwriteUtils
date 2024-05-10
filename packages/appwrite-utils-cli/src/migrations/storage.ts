@@ -9,7 +9,7 @@ import {
 } from "node-appwrite";
 import { type OperationCreate, type BackupCreate } from "./backup.js";
 import { splitIntoBatches } from "./migrationHelper.js";
-import type { AppwriteConfig } from "./schema.js";
+import type { AppwriteConfig } from "appwrite-utils";
 
 export const logOperation = async (
   db: Databases,
