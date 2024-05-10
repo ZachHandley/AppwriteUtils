@@ -143,7 +143,7 @@ export const setupDirsFiles = async (example: boolean = false) => {
     if (example) {
       writeFileSync(appwriteConfigFile, configFileExample);
     } else {
-      const baseConfigContent = `import { AppwriteConfig } from "appwrite-utils";
+      const baseConfigContent = `import { type AppwriteConfig } from "appwrite-utils";
 
 const appwriteConfig: AppwriteConfig = ${JSON.stringify(baseConfig, null, 2)};
 
