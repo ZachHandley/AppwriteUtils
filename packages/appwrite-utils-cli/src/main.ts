@@ -49,7 +49,8 @@ program.on("--help", () => {
 
 // Parse and handle options
 program.action(async (options) => {
-  const controller = new UtilsController();
+  const currentUserDir = process.cwd();
+  const controller = new UtilsController(currentUserDir);
   try {
     // Convert Commander options to the format expected by UtilsController
     const setupOptions = {
@@ -70,6 +71,7 @@ program.action(async (options) => {
       project: options.project,
       key: options.key,
     };
+    console.log("Running operation...", setupOptions);
 
     await controller.run(setupOptions);
     console.log("Operation completed successfully.");

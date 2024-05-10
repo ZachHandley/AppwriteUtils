@@ -9,10 +9,13 @@ import { register } from "tsx/esm/api"; // Import the register function
  * @returns The path to the file if found, or null if not found.
  */
 export const findAppwriteConfig = (dir: string): string | null => {
+  if (dir === "node_modules") {
+    return null;
+  }
   const files = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const file of files) {
-    if (file.isDirectory()) {
+    if (file.isDirectory() && file.name !== "node_modules") {
       const result = findAppwriteConfig(path.join(dir, file.name));
       if (result) return result;
     } else if (file.name === "appwriteConfig.ts") {
@@ -35,6 +38,7 @@ export const loadConfig = async (
 
   try {
     const configPath = path.resolve(configDir, "appwriteConfig.ts");
+    console.log(`Loading config from: ${configPath}`);
     const config = (await import(configPath)).default as AppwriteConfig;
 
     const collectionsDir = path.resolve(configDir, "collections");

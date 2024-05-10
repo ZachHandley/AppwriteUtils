@@ -61,14 +61,17 @@ export class UtilsController {
   public validityRuleDefinitions: ValidationRules = validationRules;
   public afterImportActionsDefinitions: AfterImportActions = afterImportActions;
 
-  constructor() {
-    const basePath = process.cwd(); // Gets the current working directory
+  constructor(currentUserDir: string) {
+    const basePath = currentUserDir; // Gets the current working directory
     const appwriteConfigFound = findAppwriteConfig(basePath);
     if (!appwriteConfigFound) {
       throw new Error("Failed to find appwriteConfig.ts");
     }
     this.appwriteConfigPath = appwriteConfigFound;
     this.appwriteFolderPath = path.dirname(appwriteConfigFound);
+    if (!this.appwriteFolderPath) {
+      throw new Error("Failed to get appwriteFolderPath");
+    }
   }
 
   // async loadCustomDefinitions(): Promise<void> {

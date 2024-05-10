@@ -24,7 +24,7 @@ npm install -g appwrite-utils-cli
 However, due to the nature of the speed at which I am developing this project, I would recommend the following command:
 
 ```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate -- --arg1 --arg2 --arg3
+npx --package=appwrite-utils-cli@latest appwrite-migrate --arg1 --arg2 --arg3
 ```
 
 **DO NOT INSTALL THIS LOCALLY INTO YOUR PROJECT, IT IS MEANT TO BE USED AS A COMMAND LINE TOOL ONLY**
