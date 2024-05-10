@@ -35,7 +35,7 @@ export class SchemaGenerator {
     delete this.config.collections;
 
     const configPath = path.join(this.appwriteFolderPath, "appwriteConfig.ts");
-    const configContent = `import { AppwriteConfig } from "appwrite-utils";
+    const configContent = `import { type AppwriteConfig } from "appwrite-utils";
   
   const appwriteConfig: AppwriteConfig = {
     appwriteEndpoint: "${this.config.appwriteEndpoint}",
@@ -71,7 +71,7 @@ export class SchemaGenerator {
         collectionsFolderPath,
         `${collection.name}.ts`
       );
-      const collectionContent = `import { CollectionCreate } from "appwrite-utils";
+      const collectionContent = `import { type CollectionCreate } from "appwrite-utils";
   
   const ${collection.name}Config: Partial<CollectionCreate> = {
     name: "${collection.name}",
