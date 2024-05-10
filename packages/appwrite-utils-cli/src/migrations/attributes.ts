@@ -32,7 +32,7 @@ export const createOrUpdateAttribute = async (
     const collectionAttr = collection.attributes.find(
       // @ts-expect-error
       (attr) => attr.key === attribute.key
-    ) as unknown;
+    ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
   } catch (error) {
     foundAttribute = undefined;

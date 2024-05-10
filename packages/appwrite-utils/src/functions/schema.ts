@@ -1,16 +1,16 @@
 import { ID, IndexType, Permission } from "node-appwrite";
 import { z } from "zod";
-import { type Attribute, attributeSchema } from "../schemas/attribute";
-import { stringAttributeSchema } from "../schemas/stringAttribute";
-import { integerAttributeSchema } from "../schemas/integerAttribute";
-import { floatAttributeSchema } from "../schemas/floatAttribute";
-import { booleanAttributeSchema } from "../schemas/booleanAttribute";
-import { datetimeAttributeSchema } from "../schemas/datetimeAttribute";
-import { emailAttributeSchema } from "../schemas/emailAttribute";
-import { ipAttributeSchema } from "../schemas/ipAttribute";
-import { urlAttributeSchema } from "../schemas/urlAttribute";
-import { enumAttributeSchema } from "../schemas/enumAttribute";
-import { relationshipAttributeSchema } from "../schemas/relationshipAttribute";
+import { type Attribute, attributeSchema } from "../schemas/attribute.js";
+import { stringAttributeSchema } from "../schemas/stringAttribute.js";
+import { integerAttributeSchema } from "../schemas/integerAttribute.js";
+import { floatAttributeSchema } from "../schemas/floatAttribute.js";
+import { booleanAttributeSchema } from "../schemas/booleanAttribute.js";
+import { datetimeAttributeSchema } from "../schemas/datetimeAttribute.js";
+import { emailAttributeSchema } from "../schemas/emailAttribute.js";
+import { ipAttributeSchema } from "../schemas/ipAttribute.js";
+import { urlAttributeSchema } from "../schemas/urlAttribute.js";
+import { enumAttributeSchema } from "../schemas/enumAttribute.js";
+import { relationshipAttributeSchema } from "../schemas/relationshipAttribute.js";
 
 export const parseAttribute = (
   attribute: Attribute & {

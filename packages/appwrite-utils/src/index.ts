@@ -57,7 +57,7 @@ export {
 export {
   type CollectionCreate,
   CollectionCreateSchema,
-  collectionSchema,
+  CollectionSchema,
   type Collection,
   type Collections,
 } from "./schemas/collection.js";

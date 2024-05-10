@@ -5,7 +5,7 @@ import {
   importDefSchema,
   type AppwriteConfig,
   type AttributeMappings,
-  type ConfigCollection,
+  type CollectionCreate,
   type ConfigDatabase,
   type IdMapping,
   type ImportDef,
@@ -171,7 +171,7 @@ export class DataLoader {
   // Method to create a context object for data transformation
   createContext(
     db: ConfigDatabase,
-    collection: ConfigCollection,
+    collection: CollectionCreate,
     item: any,
     docId: string
   ) {
@@ -739,7 +739,7 @@ export class DataLoader {
    */
   async prepareUserCollectionCreateData(
     db: ConfigDatabase,
-    collection: ConfigCollection,
+    collection: CollectionCreate,
     importDef: ImportDef
   ): Promise<void> {
     // Load the raw data based on the import definition
@@ -924,7 +924,7 @@ export class DataLoader {
    */
   async prepareCreateData(
     db: ConfigDatabase,
-    collection: ConfigCollection,
+    collection: CollectionCreate,
     importDef: ImportDef
   ): Promise<void> {
     // Load the raw data based on the import definition
@@ -1037,7 +1037,7 @@ export class DataLoader {
    */
   async prepareUpdateData(
     db: ConfigDatabase,
-    collection: ConfigCollection,
+    collection: CollectionCreate,
     importDef: ImportDef
   ) {
     // Retrieve the current collection data and old-to-new ID map from the import map

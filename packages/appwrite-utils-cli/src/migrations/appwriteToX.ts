@@ -3,7 +3,7 @@ import { Databases, Query, type Models, type Permission } from "node-appwrite";
 import { fetchAllCollections } from "./collections.js";
 import { fetchAllDatabases } from "./databases.js";
 import {
-  collectionSchema,
+  CollectionSchema,
   attributeSchema,
   type AppwriteConfig,
   AppwriteConfigSchema,
@@ -130,7 +130,7 @@ export class AppwriteToX {
         const collIndexes = indexesSchema.parse(collection.indexes);
 
         // Prepare the collection object to be added or updated
-        const collToPush = collectionSchema.parse({
+        const collToPush = CollectionSchema.parse({
           $id: collection.$id,
           name: collection.name,
           enabled: collection.enabled,

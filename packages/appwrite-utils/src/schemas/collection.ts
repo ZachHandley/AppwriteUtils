@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { ulid } from "ulid";
-import { importDefSchemas } from "./importDef";
-import { attributeSchema } from "./attribute";
-import { indexSchema } from "./index";
+import { importDefSchemas } from "./importDef.js";
+import { attributeSchema } from "./attribute.js";
+import { indexSchema } from "./index.js";
 
-export const collectionSchema = z.object({
+export const CollectionSchema = z.object({
   name: z.string().describe("The name of the collection"),
   $id: z
     .string()
@@ -55,15 +55,15 @@ export const collectionSchema = z.object({
     .describe("The ID of the database the collection belongs to"),
 });
 
-export const CollectionCreateSchema = collectionSchema.omit({
+export const CollectionCreateSchema = CollectionSchema.omit({
   $createdAt: true,
   $updatedAt: true,
 });
 
 export const CollectionsSchema = z
-  .array(collectionSchema)
+  .array(CollectionCreateSchema)
   .describe("An array of collections to create");
 
-export type Collection = z.infer<typeof collectionSchema>;
+export type Collection = z.infer<typeof CollectionSchema>;
 export type Collections = z.infer<typeof CollectionsSchema>;
 export type CollectionCreate = z.infer<typeof CollectionCreateSchema>;

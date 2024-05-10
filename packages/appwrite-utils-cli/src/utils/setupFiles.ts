@@ -1,6 +1,5 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import configSchema from "./configSchema.json" assert { type: "json" };
 import type { AppwriteConfig } from "appwrite-utils";
 import { findAppwriteConfig } from "./loadConfigs.js";
 
@@ -178,7 +177,6 @@ export default appwriteConfig;
     appwriteHiddenFolder,
     "appwriteUtilsConfigSchema.json"
   );
-  writeFileSync(schemaFilePath, JSON.stringify(configSchema, undefined, 2));
 
   console.log("Created config and setup files/directories successfully.");
 };

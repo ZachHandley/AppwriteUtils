@@ -5,7 +5,7 @@ import {
 } from "@asteasolutions/zod-to-openapi";
 import {
   attributeSchema,
-  collectionSchema,
+  CollectionSchema,
   type AppwriteConfig,
   type Attribute,
   type Collection,
@@ -27,12 +27,10 @@ export const generateOpenApi = async (config: AppwriteConfig) => {
     });
 
     // Create and register the collection schema with descriptions
-    const updatedCollectionSchema = collectionSchema
-      .extend({
-        // @ts-ignore
-        attributes: z.array(z.union(attributeSchemas)),
-      })
-      .openapi(collection.description ?? "No description");
+    const updatedCollectionSchema = CollectionSchema.extend({
+      // @ts-ignore
+      attributes: z.array(z.union(attributeSchemas)),
+    }).openapi(collection.description ?? "No description");
 
     // Register the updated collection schema under the collection name
     registry.register(collection.name, updatedCollectionSchema);

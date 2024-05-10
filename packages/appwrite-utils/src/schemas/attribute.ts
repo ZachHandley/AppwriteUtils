@@ -2,37 +2,40 @@ import { z } from "zod";
 import {
   stringAttributeSchema,
   type StringAttribute,
-} from "../schemas/stringAttribute";
+} from "../schemas/stringAttribute.js";
 import {
   integerAttributeSchema,
   type IntegerAttribute,
-} from "../schemas/integerAttribute";
+} from "../schemas/integerAttribute.js";
 import {
   floatAttributeSchema,
   type FloatAttribute,
-} from "../schemas/floatAttribute";
+} from "../schemas/floatAttribute.js";
 import {
   booleanAttributeSchema,
   type BooleanAttribute,
-} from "../schemas/booleanAttribute";
+} from "../schemas/booleanAttribute.js";
 import {
   datetimeAttributeSchema,
   type DatetimeAttribute,
-} from "../schemas/datetimeAttribute";
+} from "../schemas/datetimeAttribute.js";
 import {
   emailAttributeSchema,
   type EmailAttribute,
-} from "../schemas/emailAttribute";
-import { ipAttributeSchema, type IpAttribute } from "../schemas/ipAttribute";
-import { urlAttributeSchema, type UrlAttribute } from "../schemas/urlAttribute";
+} from "../schemas/emailAttribute.js";
+import { ipAttributeSchema, type IpAttribute } from "../schemas/ipAttribute.js";
+import {
+  urlAttributeSchema,
+  type UrlAttribute,
+} from "../schemas/urlAttribute.js";
 import {
   enumAttributeSchema,
   type EnumAttribute,
-} from "../schemas/enumAttribute";
+} from "../schemas/enumAttribute.js";
 import {
   relationshipAttributeSchema,
   type RelationshipAttribute,
-} from "../schemas/relationshipAttribute";
+} from "../schemas/relationshipAttribute.js";
 
 export const attributeSchema = z.discriminatedUnion("type", [
   stringAttributeSchema,

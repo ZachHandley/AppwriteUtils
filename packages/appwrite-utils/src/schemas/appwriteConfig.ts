@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { CollectionCreateSchema, Collections } from "./collection";
+import {
+  CollectionCreateSchema,
+  type Collections,
+  type Collection,
+} from "./collection.js";
 
 export const AppwriteConfigSchema = z.object({
   appwriteEndpoint: z.string().default("https://cloud.appwrite.io/v1"),
@@ -66,7 +70,7 @@ export const AppwriteConfigSchema = z.object({
 });
 
 export type AppwriteConfig = z.infer<typeof AppwriteConfigSchema>;
-export type ConfigCollections = AppwriteConfig["collections"];
-export type ConfigCollection = Collections;
+export type ConfigCollections = Collections;
+export type ConfigCollection = Collection;
 export type ConfigDatabases = AppwriteConfig["databases"];
 export type ConfigDatabase = ConfigDatabases[number];
