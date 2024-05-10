@@ -97,9 +97,13 @@ export class SchemaGenerator {
                 return `${key}: "${value.replace(/"/g, '\\"')}"`; // Escape existing quotes in the string
               } else if (Array.isArray(value)) {
                 // If the value is an array, join it with commas
-                return `${key}: [${value
-                  .map((item) => `"${item}"`)
-                  .join(", ")}]`;
+                if (value.length > 0) {
+                  return `${key}: [${value
+                    .map((item) => `"${item}"`)
+                    .join(", ")}]`;
+                } else {
+                  return `${key}: []`;
+                }
               } else {
                 // If the value is not a string (e.g., boolean or number), output it directly
                 return `${key}: ${value}`;
@@ -116,7 +120,14 @@ export class SchemaGenerator {
           const formattedAttributes = index.attributes
             .map((attr) => `"${attr}"`)
             .join(", ");
-          return `{ key: "${index.key}", type: "${index.type}", attributes: [${formattedAttributes}] }`;
+          return `{ key: "${index.key}", type: "${
+            index.type
+          }", attributes: [${formattedAttributes}], orders: [${
+            index.orders
+              ?.filter((order) => order !== null)
+              .map((order) => `"${order}"`)
+              .join(", ") ?? ""
+          }] }`;
         }) ?? []
       ).join(",\n    ")}
     ]

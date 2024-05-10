@@ -12,6 +12,7 @@ import {
   permissionsSchema,
   attributesSchema,
   indexesSchema,
+  parseAttribute,
 } from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 
@@ -41,6 +42,9 @@ export class AppwriteToX {
 
   // Function to parse an array of permission strings
   parsePermissionsArray = (permissions: string[]) => {
+    if (permissions.length === 0) {
+      return [];
+    }
     const parsedPermissions = permissionsSchema.parse(permissions);
     // Validate the parsed permissions using Zod
     return parsedPermissions ?? [];
@@ -71,31 +75,22 @@ export class AppwriteToX {
       const collections = await fetchAllCollections(database.$id, db);
 
       // Loop through each collection in the current database
+      if (!updatedConfig.collections) {
+        updatedConfig.collections = [];
+      }
       for (const collection of collections) {
-        if (!updatedConfig.collections) {
-          updatedConfig.collections = [];
-        }
+        console.log(`Processing collection: ${collection.name}`);
         const existingCollectionIndex = updatedConfig.collections.findIndex(
           (c) => c.name === collection.name
         );
-
         // Parse the collection permissions and attributes
         const collPermissions = this.parsePermissionsArray(
           collection.$permissions
         );
-        const collAttributes = attributesSchema
-          .parse(
-            collection.attributes.map((attr: any) => {
-              if (
-                attr.type === "string" &&
-                attr.format &&
-                attr.format.length > 0
-              ) {
-                return { ...attr, type: attr.format };
-              }
-              return attr;
-            })
-          )
+        const collAttributes = collection.attributes
+          .map((attr: any) => {
+            return parseAttribute(attr);
+          })
           .filter((attribute) =>
             attribute.type === "relationship"
               ? attribute.side !== "child"
@@ -127,7 +122,15 @@ export class AppwriteToX {
           }
         }
         this.collToAttributeMap.set(collection.name, collAttributes);
-        const collIndexes = indexesSchema.parse(collection.indexes);
+        const finalIndexes = collection.indexes.map((index) => {
+          return {
+            ...index,
+            orders: index.orders?.filter((order) => {
+              return order !== null && order;
+            }),
+          };
+        });
+        const collIndexes = indexesSchema.parse(finalIndexes) ?? [];
 
         // Prepare the collection object to be added or updated
         const collToPush = CollectionSchema.parse({

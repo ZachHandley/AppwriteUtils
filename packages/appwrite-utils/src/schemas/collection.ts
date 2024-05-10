@@ -45,9 +45,20 @@ export const CollectionSchema = z.object({
     .describe("The attributes of the collection"),
   indexes: z
     .array(indexSchema)
-    .default([])
     .optional()
-    .describe("The indexes of the collection"),
+    .default([])
+    .describe("The indexes of the collection")
+    .transform((value) => {
+      return value.map((index) => {
+        if (index.orders) {
+          return {
+            ...index,
+            orders: index.orders.filter((order) => order !== null),
+          };
+        }
+        return index;
+      });
+    }),
   importDefs: importDefSchemas.optional().default([]),
   databaseId: z
     .string()

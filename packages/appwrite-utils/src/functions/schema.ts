@@ -21,8 +21,12 @@ export const parseAttribute = (
 
   // Check if 'default' is provided and set it as 'xdefault'
   if (attribute.default !== undefined) {
-    attributeToParse.xdefault = attribute.default;
-    delete attributeToParse.default;
+    if (attribute.default !== null) {
+      attributeToParse.xdefault = attribute.default;
+      delete attributeToParse.default;
+    } else {
+      delete attributeToParse.default;
+    }
   }
 
   if (
@@ -32,6 +36,10 @@ export const parseAttribute = (
   ) {
     attributeToParse.type = attributeToParse.format.toLowerCase();
     delete attributeToParse.format;
+  }
+
+  if (attributeToParse.type === "double") {
+    attributeToParse.type = "float";
   }
 
   switch (attributeToParse.type) {
