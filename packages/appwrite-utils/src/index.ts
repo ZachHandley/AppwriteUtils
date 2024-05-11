@@ -98,3 +98,4 @@ export {
   importDefSchemas,
 } from "./schemas/importDef.js";
 export { parseAttribute } from "./functions/schema.js";
+export { type AuthUser, AuthUserSchema } from "./schemas/authUser.js";
