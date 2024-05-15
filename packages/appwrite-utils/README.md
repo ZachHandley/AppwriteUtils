@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.2.3: Added OpenAPI descriptions to AuthUserSchema, which also allows one to use the openapi package itself (`@asteasolutions/zod-to-openapi`) with the AuthUserSchema
 - 0.2.2: Lots of updates, moved schemas and stuff here, fixed package, added export of AuthUser which got removed accidentally
 - 0.1.21: Changed `ID.unique()` to `ulid()` for random ID generation, refactored `schema.ts` into multiple files
 - 0.1.20: Forgot type ValidationRules, type ConverterFunctions, and type AfterImportActions

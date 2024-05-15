@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "0.0.286",
+  "version": "0.0.30",
   "main": "src/main.ts",
   "type": "module",
   "repository": {
@@ -32,9 +32,8 @@
     "postinstall": "echo 'This package is intended for CLI use only and should not be added as a dependency in other projects.'"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "^7.0.0",
     "@types/inquirer": "^9.0.7",
-    "appwrite-utils": "^0.2.2",
+    "appwrite-utils": "^0.2.4",
     "commander": "^12.0.0",
     "inquirer": "^9.2.20",
     "js-yaml": "^4.1.0",

@@ -51,3 +51,5 @@ const Dogs: Partial<CollectionCreate> = {
     },
   ],
 };
+
+export default Dogs;

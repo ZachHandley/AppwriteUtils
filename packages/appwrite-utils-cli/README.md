@@ -82,6 +82,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.29: If you use the `description` variable in an attribute and collection, it'll add that description to the generated schemas. This assumes you have `zod-to-openpi`
 - 0.0.275: THINGS ARE NOW IN TYPESCRIPT WOOHOO. No but for reaal, super happy to report that everything has been converted to TypeScript, just way too many changes, I hope you enjoy it!
 - 0.0.274: Small improvement for attribute handling, rather than getting it every attribute, I check the collections attributes
 - 0.0.273: Small fix for relationship attribute comparisons

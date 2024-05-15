@@ -117,9 +117,8 @@ export class SchemaGenerator {
       ${(
         collection.indexes?.map((index) => {
           // Map each attribute to ensure it is properly quoted
-          const formattedAttributes = index.attributes
-            .map((attr) => `"${attr}"`)
-            .join(", ");
+          const formattedAttributes =
+            index.attributes.map((attr) => `"${attr}"`).join(", ") ?? "";
           return `{ key: "${index.key}", type: "${
             index.type
           }", attributes: [${formattedAttributes}], orders: [${
@@ -453,6 +452,15 @@ export class SchemaGenerator {
     }
     if (attribute.array && !attribute.required) {
       baseSchemaCode += ".nullish()";
+    }
+    if (attribute.description) {
+      if (typeof attribute.description === "string") {
+        baseSchemaCode += `.openapi({ description: "${attribute.description}" })`;
+      } else {
+        baseSchemaCode += `.openapi(${Object.entries(attribute.description)
+          .map(([key, value]) => `"${key}": ${value}`)
+          .join(", ")})`;
+      }
     }
 
     return baseSchemaCode;

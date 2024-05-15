@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export { areCollectionNamesSame } from "./functions/collections.js";
 export {
   converterFunctions,

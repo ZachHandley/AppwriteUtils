@@ -23,13 +23,13 @@ export const generateOpenApi = async (config: AppwriteConfig) => {
   for (const collection of config.collections) {
     // Transform and register each attribute schema
     const attributeSchemas = collection.attributes.map((attribute) => {
-      return transformTypeToOpenApi(attributeSchema);
+      return transformTypeToOpenApi(attributeSchema, attribute.description);
     });
 
     // Create and register the collection schema with descriptions
     const updatedCollectionSchema = CollectionSchema.extend({
       // @ts-ignore
-      attributes: z.array(z.union(attributeSchemas)),
+      attributes: attributeSchemas,
     }).openapi(collection.description ?? "No description");
 
     // Register the updated collection schema under the collection name
@@ -37,8 +37,8 @@ export const generateOpenApi = async (config: AppwriteConfig) => {
   }
 
   // Convert the registry to OpenAPI JSON
-  // @ts-ignore
-  const openApiSpec = registry.toOpenAPI();
+  const generator = new OpenApiGeneratorV31(registry.definitions);
+  const openApiSpec = generator.generateComponents();
 
   // Output the OpenAPI spec to a file
   writeFileSync(
@@ -48,23 +48,36 @@ export const generateOpenApi = async (config: AppwriteConfig) => {
 };
 
 export function transformTypeToOpenApi<T extends z.ZodTypeAny>(
-  schema: T
-): z.infer<T> {
-  return schema.transform((data) => {
-    let finalData = data;
-    if (data._def.attributes) {
-      finalData._def.attributes = data._def.attributes.map(
-        (attribute: typeof attributeSchema) => {
-          if (attribute.description) {
-            return attribute.openapi(attribute.description);
-          }
-          return attribute;
+  schema: T,
+  description?: string | Record<string, any> | null | undefined
+): T {
+  // Check if description is an object (OpenAPI properties) or a string
+  let updatedSchema: z.infer<T>;
+  if (!description) {
+    return schema;
+  }
+  if (typeof description === "string") {
+    updatedSchema = schema.openapi(description);
+  } else if (typeof description === "object") {
+    updatedSchema = schema.openapi(description);
+  } else {
+    updatedSchema = schema;
+  }
+
+  // Check and transform attributes if they exist
+  if ((schema as any)._def && (schema as any)._def.shape) {
+    const shape = (schema as any)._def.shape();
+    for (const key in shape) {
+      const attributeDesc = shape[key].description;
+      if (attributeDesc) {
+        if (typeof attributeDesc === "string") {
+          shape[key] = shape[key].openapi(attributeDesc);
+        } else if (typeof attributeDesc === "object") {
+          shape[key] = shape[key].openapi(attributeDesc);
         }
-      );
+      }
     }
-    if (schema.description) {
-      finalData.openapi(schema.description);
-    }
-    return finalData;
-  });
+  }
+
+  return updatedSchema;
 }

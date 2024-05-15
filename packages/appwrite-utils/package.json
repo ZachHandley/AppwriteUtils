@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils",
   "module": "dist/index.js",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -27,6 +27,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.0.0",
     "@types/luxon": "^3.4.2",
     "appwrite": "^14.0.1",
     "luxon": "^3.4.4",
