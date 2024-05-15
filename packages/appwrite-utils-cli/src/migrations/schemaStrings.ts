@@ -241,6 +241,11 @@ export class SchemaGenerator {
   createSchemaString = (name: string, attributes: Attribute[]): string => {
     const pascalName = toPascalCase(name);
     let imports = `import { z } from "zod";\n`;
+    const hasDescription = attributes.some((attr) => attr.description);
+    if (hasDescription) {
+      imports += `import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";\n`;
+      imports += `extendZodWithOpenApi(z);\n`;
+    }
 
     // Use the relationshipMap to find related collections
     const relationshipDetails = this.relationshipMap.get(name) || [];
