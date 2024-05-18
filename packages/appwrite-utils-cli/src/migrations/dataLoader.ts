@@ -485,9 +485,20 @@ export class DataLoader {
 
                 needsUpdate = true;
 
+                const getCurrentDataFiltered = (currentData: any) => {
+                  if (Array.isArray(currentData.finalData[fieldToSetKey])) {
+                    return currentData.finalData[fieldToSetKey].filter(
+                      (data: any) => `${data}` !== `${valueToMatch}`
+                    );
+                  }
+                  return currentData.finalData[fieldToSetKey];
+                };
+
                 // Get the current data to be updated
-                const currentData =
-                  collectionData.data[i].finalData[fieldToSetKey];
+                const currentDataFiltered = getCurrentDataFiltered(
+                  collectionData.data[i]
+                );
+
                 // Extract the new data to set
                 const newData = foundData.map(
                   (data) => data.context[idMapping.targetField]
@@ -495,38 +506,33 @@ export class DataLoader {
 
                 // Handle cases where current data is an array
                 if (isFieldToSetArray) {
-                  if (!currentData) {
+                  if (!currentDataFiltered) {
                     // Set new data if current data is undefined
                     collectionData.data[i].finalData[fieldToSetKey] =
                       Array.isArray(newData) ? newData : [newData];
-                  } else if (Array.isArray(newData) && newData.length > 0) {
-                    // Merge arrays if new data is non-empty array
+                  } else {
+                    // Merge arrays if new data is non-empty array and filter for uniqueness
                     collectionData.data[i].finalData[fieldToSetKey] = [
-                      ...currentData,
-                      ...newData,
-                    ];
-                  } else if (!Array.isArray(newData) && newData !== undefined) {
-                    // Append new data if it is not an array and defined
-                    collectionData.data[i].finalData[fieldToSetKey] = [
-                      ...currentData,
-                      newData,
+                      ...new Set(
+                        [...currentDataFiltered, ...newData].filter(
+                          (value: any) => `${value}` !== `${valueToMatch}`
+                        )
+                      ),
                     ];
                   }
                 } else {
-                  if (!currentData) {
+                  if (!currentDataFiltered) {
                     // Set new data if current data is undefined
                     collectionData.data[i].finalData[fieldToSetKey] =
                       Array.isArray(newData) ? newData : [newData];
-                  } else if (Array.isArray(newData) && newData.length === 0) {
-                    // Convert current data to array if new data is empty array
-                    collectionData.data[i].finalData[fieldToSetKey] = [
-                      currentData,
-                    ];
                   } else if (Array.isArray(newData) && newData.length > 0) {
-                    // Convert current data to array and merge if new data is non-empty array
+                    // Convert current data to array and merge if new data is non-empty array, then filter for uniqueness
                     collectionData.data[i].finalData[fieldToSetKey] = [
-                      currentData,
-                      ...newData,
+                      ...new Set(
+                        [currentDataFiltered, ...newData].filter(
+                          (value: any) => `${value}` !== `${valueToMatch}`
+                        )
+                      ),
                     ];
                   } else if (!Array.isArray(newData) && newData !== undefined) {
                     // Simply update the field if new data is not an array and defined
