@@ -10,12 +10,18 @@ export const idMappingSchema = z.object({
     .string()
     .optional()
     .describe(
-      "The field to set in the target collection, if different from sourceField"
+      "The field to set in the source collection, if different from sourceField"
+    ),
+  targetFieldToMatch: z
+    .string()
+    .optional()
+    .describe(
+      "The field in the target collection to match with sourceField that will then be updated"
     ),
   targetField: z
     .string()
     .describe(
-      "The field in the target collection to match with sourceField that will then be updated"
+      "The field in the target collection that, if targetFieldToMatch or this field matches, will be taken to update the sourceField/fieldToSet"
     ),
   targetCollection: z.string().describe("The collection to search"),
 });

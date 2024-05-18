@@ -298,6 +298,10 @@ export class DataLoader {
         let isUsersCollection =
           this.getCollectionKey(this.config.usersCollectionName) ===
           this.getCollectionKey(collection.name);
+        const collectionDefs = collection.importDefs;
+        if (!collectionDefs || !collectionDefs.length) {
+          continue;
+        }
         // Process create and update definitions for the collection
         const createDefs = collection.importDefs.filter(
           (def: ImportDef) => def.type === "create" || !def.type
@@ -331,8 +335,8 @@ export class DataLoader {
         }
       }
       console.log("Running update references");
-      await this.dealWithMergedUsers();
-      await this.updateOldReferencesForNew();
+      this.dealWithMergedUsers();
+      this.updateOldReferencesForNew();
       console.log("Done running update references");
     }
     // for (const collection of this.config.collections) {
@@ -346,7 +350,7 @@ export class DataLoader {
     }
   }
 
-  async dealWithMergedUsers() {
+  dealWithMergedUsers() {
     const usersCollectionKey = this.getCollectionKey(
       this.config.usersCollectionName
     );
@@ -357,7 +361,11 @@ export class DataLoader {
     // Collect primary key fields from the users collection definitions
     this.config.collections.forEach((collection) => {
       if (this.getCollectionKey(collection.name) === usersCollectionKey) {
-        collection.importDefs.forEach((importDef) => {
+        const collectionImportDefs = collection.importDefs;
+        if (!collectionImportDefs || !collectionImportDefs.length) {
+          return;
+        }
+        collectionImportDefs.forEach((importDef) => {
           if (importDef.primaryKeyField) {
             usersCollectionPrimaryKeyFields.add(importDef.primaryKeyField);
           }
@@ -371,14 +379,19 @@ export class DataLoader {
         this.getCollectionKey(collection.name)
       );
       if (!collectionData || !collectionData.data) return;
-
-      collection.importDefs.forEach((importDef) => {
+      const collectionImportDefs = collection.importDefs;
+      if (!collectionImportDefs || !collectionImportDefs.length) {
+        return;
+      }
+      collectionImportDefs.forEach((importDef) => {
         importDef.idMappings?.forEach((idMapping) => {
           if (
             this.getCollectionKey(idMapping.targetCollection) ===
             usersCollectionKey
           ) {
-            if (usersCollectionPrimaryKeyFields.has(idMapping.targetField)) {
+            const targetFieldKey =
+              idMapping.targetFieldToMatch || idMapping.targetField;
+            if (usersCollectionPrimaryKeyFields.has(targetFieldKey)) {
               // Process each item in the collection
               collectionData.data.forEach((item) => {
                 const oldId = item.context[idMapping.sourceField];
@@ -386,8 +399,7 @@ export class DataLoader {
 
                 if (newId) {
                   // Update context to use new user ID
-                  item.context[idMapping.fieldToSet || idMapping.targetField] =
-                    newId;
+                  item.context[idMapping.fieldToSet || targetFieldKey] = newId;
                 }
               });
             }
@@ -401,6 +413,7 @@ export class DataLoader {
     if (!this.config.collections) {
       return;
     }
+
     for (const collectionConfig of this.config.collections) {
       const collectionKey = this.getCollectionKey(collectionConfig.name);
       const collectionData = this.importMap.get(collectionKey);
@@ -424,29 +437,41 @@ export class DataLoader {
                 );
                 const fieldToSetKey =
                   idMapping.fieldToSet || idMapping.sourceField;
+                const targetFieldKey =
+                  idMapping.targetFieldToMatch || idMapping.targetField;
                 const valueToMatch =
                   collectionData.data[i].context[idMapping.sourceField];
 
+                // Skip if value to match is missing or empty
                 if (!valueToMatch || _.isEmpty(valueToMatch)) continue;
+
+                const isFieldToSetArray = collectionConfig.attributes.find(
+                  (attribute) => attribute.key === fieldToSetKey
+                )?.array;
 
                 const targetCollectionData =
                   this.importMap.get(targetCollectionKey);
                 if (!targetCollectionData || !targetCollectionData.data)
                   continue;
 
-                const foundData = targetCollectionData.data.filter((data) => {
-                  const targetValue = data.context[idMapping.targetField];
-                  const isMatch = `${targetValue}` === `${valueToMatch}`;
-                  // Debugging output to understand what's being compared
-                  logger.warn(
-                    `Comparing target: ${targetValue} with match: ${valueToMatch} - Result: ${isMatch}`
-                  );
-                  return isMatch;
-                });
+                // Find matching data in the target collection
+                const foundData = targetCollectionData.data.filter(
+                  ({ context }) => {
+                    const targetValue = context[targetFieldKey];
+                    const isMatch = `${targetValue}` === `${valueToMatch}`;
+                    // Ensure the targetValue is defined and not null
+                    return (
+                      isMatch &&
+                      targetValue !== undefined &&
+                      targetValue !== null
+                    );
+                  }
+                );
 
+                // Log and skip if no matching data found
                 if (!foundData.length) {
                   console.log(
-                    `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey}`
+                    `No data found for collection ${collectionConfig.name}:\nTarget collection: ${targetCollectionKey}\nValue to match: ${valueToMatch}\nField to set: ${fieldToSetKey}\nTarget field to match: ${targetFieldKey}\nTarget field value: ${idMapping.targetField}`
                   );
                   logger.error(
                     `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey} -- idMapping: ${JSON.stringify(
@@ -460,15 +485,53 @@ export class DataLoader {
 
                 needsUpdate = true;
 
-                // Properly handle arrays and non-arrays
-                if (
-                  Array.isArray(collectionData.data[i].finalData[fieldToSetKey])
-                ) {
-                  collectionData.data[i].finalData[fieldToSetKey] =
-                    foundData.map((data) => data.finalData);
+                // Get the current data to be updated
+                const currentData =
+                  collectionData.data[i].finalData[fieldToSetKey];
+                // Extract the new data to set
+                const newData = foundData.map(
+                  (data) => data.context[idMapping.targetField]
+                );
+
+                // Handle cases where current data is an array
+                if (isFieldToSetArray) {
+                  if (!currentData) {
+                    // Set new data if current data is undefined
+                    collectionData.data[i].finalData[fieldToSetKey] =
+                      Array.isArray(newData) ? newData : [newData];
+                  } else if (Array.isArray(newData) && newData.length > 0) {
+                    // Merge arrays if new data is non-empty array
+                    collectionData.data[i].finalData[fieldToSetKey] = [
+                      ...currentData,
+                      ...newData,
+                    ];
+                  } else if (!Array.isArray(newData) && newData !== undefined) {
+                    // Append new data if it is not an array and defined
+                    collectionData.data[i].finalData[fieldToSetKey] = [
+                      ...currentData,
+                      newData,
+                    ];
+                  }
                 } else {
-                  collectionData.data[i].finalData[fieldToSetKey] =
-                    foundData[0].finalData;
+                  if (!currentData) {
+                    // Set new data if current data is undefined
+                    collectionData.data[i].finalData[fieldToSetKey] =
+                      Array.isArray(newData) ? newData : [newData];
+                  } else if (Array.isArray(newData) && newData.length === 0) {
+                    // Convert current data to array if new data is empty array
+                    collectionData.data[i].finalData[fieldToSetKey] = [
+                      currentData,
+                    ];
+                  } else if (Array.isArray(newData) && newData.length > 0) {
+                    // Convert current data to array and merge if new data is non-empty array
+                    collectionData.data[i].finalData[fieldToSetKey] = [
+                      currentData,
+                      ...newData,
+                    ];
+                  } else if (!Array.isArray(newData) && newData !== undefined) {
+                    // Simply update the field if new data is not an array and defined
+                    collectionData.data[i].finalData[fieldToSetKey] = newData;
+                  }
                 }
               }
             }
@@ -476,127 +539,11 @@ export class DataLoader {
         }
       }
 
+      // Update the import map if any changes were made
       if (needsUpdate) {
         this.importMap.set(collectionKey, collectionData);
       }
     }
-  }
-
-  async updateReferencesInRelatedCollections() {
-    if (!this.config.collections) {
-      return;
-    }
-    // Iterate over each collection configuration
-    for (const collectionConfig of this.config.collections) {
-      const collectionKey = this.getCollectionKey(collectionConfig.name);
-      const collectionData = this.importMap.get(collectionKey);
-
-      if (!collectionData || !collectionData.data) continue;
-
-      console.log(
-        `Updating references for collection: ${collectionConfig.name}`
-      );
-
-      // Iterate over each data item in the current collection
-      for (const item of collectionData.data) {
-        let needsUpdate = false;
-
-        // Check if the current collection has import definitions with idMappings
-        if (collectionConfig.importDefs) {
-          for (const importDef of collectionConfig.importDefs) {
-            if (importDef.idMappings) {
-              // Iterate over each idMapping defined for the current import definition
-              for (const idMapping of importDef.idMappings) {
-                const oldIds = Array.isArray(
-                  item.context[idMapping.sourceField]
-                )
-                  ? item.context[idMapping.sourceField]
-                  : [item.context[idMapping.sourceField]];
-                const resolvedNewIds: string[] = [];
-
-                oldIds.forEach((oldId: any) => {
-                  // Attempt to find a new ID for the old ID
-                  let newIdForOldId = this.findNewIdForOldId(
-                    oldId,
-                    idMapping,
-                    importDef
-                  );
-
-                  if (
-                    newIdForOldId &&
-                    !resolvedNewIds.includes(newIdForOldId)
-                  ) {
-                    resolvedNewIds.push(newIdForOldId);
-                  } else {
-                    logger.error(
-                      `No new ID found for old ID ${oldId} in collection ${collectionConfig.name}`
-                    );
-                  }
-                });
-
-                if (resolvedNewIds.length) {
-                  const targetField =
-                    idMapping.fieldToSet || idMapping.targetField;
-                  const isArray = collectionConfig.attributes.some(
-                    (attribute) =>
-                      attribute.key === targetField && attribute.array
-                  );
-
-                  // Set the target field based on whether it's an array or single value
-                  item.finalData[targetField] = isArray
-                    ? resolvedNewIds
-                    : resolvedNewIds[0];
-                  needsUpdate = true;
-                }
-              }
-            }
-          }
-        }
-
-        // Update the importMap if changes were made to the item
-        if (needsUpdate) {
-          this.importMap.set(collectionKey, collectionData);
-          logger.info(
-            `Updated item: ${JSON.stringify(item.finalData, undefined, 2)}`
-          );
-        }
-      }
-    }
-  }
-
-  findNewIdForOldId(oldId: string, idMapping: IdMapping, importDef: ImportDef) {
-    // First, check if this ID mapping is related to the users collection.
-    const targetCollectionKey = this.getCollectionKey(
-      idMapping.targetCollection
-    );
-    const isUsersCollection =
-      targetCollectionKey ===
-      this.getCollectionKey(this.config.usersCollectionName);
-
-    // If handling users, check the mergedUserMap for any existing new ID.
-    if (isUsersCollection) {
-      for (const [newUserId, oldIds] of this.mergedUserMap.entries()) {
-        if (oldIds.includes(oldId)) {
-          return newUserId;
-        }
-      }
-    }
-
-    // If not a user or no merged ID found, check the regular ID mapping from old to new.
-    const targetCollectionData = this.importMap.get(targetCollectionKey);
-    if (targetCollectionData) {
-      const foundEntry = targetCollectionData.data.find(
-        (entry) => entry.context[importDef.primaryKeyField] === oldId
-      );
-      if (foundEntry) {
-        return foundEntry.context.docId; // Assuming `docId` stores the new ID after import
-      }
-    }
-
-    logger.error(
-      `No corresponding new ID found for ${oldId} in ${targetCollectionKey}`
-    );
-    return null; // Return null if no new ID is found
   }
 
   private writeMapsToJsonFile() {
@@ -808,14 +755,14 @@ export class DataLoader {
       if (!existingId) {
         // No existing user ID, generate a new unique ID
         existingId = this.getTrueUniqueId(this.getCollectionKey("users"));
-        transformedItem.userId = existingId; // Assign the new ID to the transformed data's userId field
+        transformedItem.docId = existingId; // Assign the new ID to the transformed data's docId field
       }
 
       // Create a context object for the item, including the new ID
       let context = this.createContext(db, collection, item, existingId);
 
       // Merge the transformed data into the context
-      context = { ...context, ...transformedItem };
+      context = { ...context, ...transformedItem, ...userData.finalData };
 
       // If a primary key field is defined, handle the ID mapping and check for duplicates
       if (importDef.primaryKeyField) {

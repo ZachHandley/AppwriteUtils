@@ -78,6 +78,9 @@ export class UsersController {
   async getAllUsers() {
     const allUsers: Models.User<Models.Preferences>[] = [];
     const users = await this.users.list([Query.limit(200)]);
+    if (users.users.length === 0) {
+      return [];
+    }
     if (users.users.length === 200) {
       let lastDocumentId = users.users[users.users.length - 1].$id;
       allUsers.push(...users.users);
