@@ -216,8 +216,8 @@ export const createOrUpdateCollections = async (
           collectionId,
           collection.name,
           permissions,
-          collection.documentSecurity,
-          collection.enabled
+          collection.documentSecurity ?? false,
+          collection.enabled ?? true
         );
         collection.$id = collectionToUse.$id;
         nameToIdMapping.set(collection.name, collectionToUse.$id);
@@ -228,7 +228,15 @@ export const createOrUpdateCollections = async (
         continue; // Skip to the next collection on failure
       }
     } else {
-      console.log(`Collection ${collection.name} exists, using it`);
+      console.log(`Collection ${collection.name} exists, updating it`);
+      await database.updateCollection(
+        databaseId,
+        collectionToUse.$id,
+        collection.name,
+        permissions,
+        collection.documentSecurity ?? false,
+        collection.enabled ?? true
+      );
     }
 
     // Update attributes and indexes for the collection

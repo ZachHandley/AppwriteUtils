@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "0.0.33",
+  "version": "0.0.36",
   "main": "src/main.ts",
   "type": "module",
   "repository": {
@@ -22,7 +22,7 @@
   ],
   "bin": {
     "appwrite-init": "./dist/init.js",
-    "appwrite-migrate": "node --max-old-space-size=16384 ./dist/main.js"
+    "appwrite-migrate": "./dist/main.js"
   },
   "scripts": {
     "build": "bun run tsc",

@@ -55,16 +55,20 @@ Replace `--args` with the appropriate options:
 - `--staging`: Run tasks in the staging environment.
 - `--dev`: Run tasks in the development environment.
 - `--wipe`: Wipe all databases.
-- `--wipe-docs` or `--wipeDocs`: Wipe all documents in the databases.
+- `--wipe-docs`: Wipe all documents in the databases.
 - `--generate`: Generate TypeScript schemas from database schemas.
 - `--import`: Import data into your databases.
 - `--backup`: Perform a backup of your databases.
-- `--wipe-users` or `--wipeUsers`: Wipe all user data.
-- `--write-data` or `--writeData`: Write converted imported data to file
+- `--wipe-users`: Wipe all user data.
+- `--write-data`: Write converted imported data to file
 - `--sync`: Synchronize your project's config and generate schema for your database
 - `--endpoint`: Set a different endpoint for the migration target
 - `--project`: Set a different project ID for the migration target
 - `--key`: Set a different API key for the migration target
+
+## If you run out of RAM
+
+This happens because Node only allocates 4 GB, it'll only happen if you're importing a ton of data, but you can use `export NODE_OPTIONS="--max-old-space-size=16384"` or the relevant command for your system if that doesn't work, and it'll set the env var to whatever. That's 16 GB, I would recommend `8192` for most.
 
 ### OpenAPI Generation (almost done, in progress)
 
@@ -82,6 +86,9 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.36: Made it update collections by default, sometimes you gotta do what you gotta do
+- 0.0.35: Added update collection if it exists and permissions or such are different (`documentSecurity` and `enabled`), also added a check for `fetch failed` errors to retry them with recursion, not sure how well that will work out, but we're gonna try it! It will still fail after 5 tries, but hopefully that gives Appwrite some time to figure it's stuff out
+- 0.0.34: Fixed the `bin` section of the package.json, apparently you can't use `node` to run it
 - 0.0.33: Fixed `idMappings`, if you are importing data and use the `idMappings` functionality, you can set a `fieldToSet` based on the value of a `sourceField` in the current imported items data (whether it's in the final data or the original), in order to match another field in another collection. So if you had a store, and it had items and the items have a Region ID for instance. You can then, in your regionId of the items, setup an `idMapping` that will allow you to map the value of the `targetField` based on the value of the `targetFieldToMatch` in the `targetCollection`. Sounds complex, but it's very useful. Like psuedo-relationship resolution, without the relationships.
 - 0.0.29: If you use the `description` variable in an attribute and collection, it'll add that description to the generated schemas. This assumes you have `zod-to-openpi`
 - 0.0.275: THINGS ARE NOW IN TYPESCRIPT WOOHOO. No but for reaal, super happy to report that everything has been converted to TypeScript, just way too many changes, I hope you enjoy it!

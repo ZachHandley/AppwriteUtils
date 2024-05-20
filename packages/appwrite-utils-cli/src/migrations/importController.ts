@@ -137,53 +137,62 @@ export class ImportController {
         const usersData = usersDataMap?.data;
         const usersController = new UsersController(this.config, this.database);
         if (usersData) {
-          console.log("Found users data");
-          const userBatchesAll = createBatches(usersData);
-          console.log(`${userBatchesAll.length} user batches`);
-          for (let i = 0; i < userBatchesAll.length; i++) {
-            const userBatches = userBatchesAll[i];
-            console.log(
-              `Processing user batch ${i + 1} of ${userBatchesAll.length}`
-            );
-            const userBatchPromises = userBatches
-              .map((userBatch) => {
-                if (userBatch.finalData && userBatch.finalData.length > 0) {
-                  const userId = userBatch.finalData.userId;
-                  if (dataLoader.userExistsMap.has(userId)) {
-                    // We only are storing the existing user ID's as true, so we need to check for that
-                    if (!(dataLoader.userExistsMap.get(userId) === true)) {
-                      const userId =
-                        userBatch.finalData.userId ||
-                        userBatch.context.userId ||
-                        userBatch.context.docId;
-                      if (!userBatch.finalData.userId) {
-                        userBatch.finalData.userId = userId;
-                      }
-                      return usersController
-                        .createUserAndReturn(userBatch.finalData)
-                        .then(() => console.log("Created user"))
-                        .catch((error) => {
-                          logger.error(
-                            "Error creating user:",
-                            error,
-                            "\nUser data is ",
-                            userBatch.finalData
-                          );
-                        });
-                    } else {
-                      console.log("Skipped existing user: ", userId);
-                      return Promise.resolve();
-                    }
-                  }
+          console.log("Found users data", usersData.length);
+          const userDataBatches = createBatches(usersData);
+          for (const batch of userDataBatches) {
+            console.log("Importing users batch", batch.length);
+            const userBatchPromises = batch
+              .filter((item) => {
+                let itemId: string | undefined;
+                if (item.finalData.userId) {
+                  itemId = item.finalData.userId;
+                } else if (item.finalData.docId) {
+                  itemId = item.finalData.docId;
                 }
+                if (!itemId) {
+                  return false;
+                }
+                return (
+                  item &&
+                  item.finalData &&
+                  !dataLoader.userExistsMap.has(itemId)
+                );
               })
-              .flat();
-            // Wait for all promises in the current user batch to resolve
-            await Promise.allSettled(userBatchPromises);
-            console.log(
-              `Completed user batch ${i + 1} of ${userBatchesAll.length}`
-            );
+              .map((item) => {
+                return usersController.createUserAndReturn(item.finalData);
+              });
+            await Promise.all(userBatchPromises);
+            for (const item of batch) {
+              if (item && item.finalData) {
+                dataLoader.userExistsMap.set(
+                  item.finalData.userId ||
+                    item.finalData.docId ||
+                    item.context.userId ||
+                    item.context.docId,
+                  true
+                );
+              }
+            }
+            console.log("Finished importing users batch", batch.length);
           }
+          // for (let i = 0; i < usersData.length; i++) {
+          //   const user = usersData[i];
+          //   if (user.finalData) {
+          //     const userId =
+          //       user.finalData.userId ||
+          //       user.context.userId ||
+          //       user.context.docId;
+          //     if (!dataLoader.userExistsMap.has(userId)) {
+          //       if (!user.finalData.userId) {
+          //         user.finalData.userId = userId;
+          //       }
+          //       await usersController.createUserAndReturn(user.finalData);
+          //       dataLoader.userExistsMap.set(userId, true);
+          //     } else {
+          //       console.log("Skipped existing user: ", userId);
+          //     }
+          //   }
+          // }
           console.log("Finished importing users");
         }
       }
@@ -216,10 +225,10 @@ export class ImportController {
         console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
         const batchPromises = batches.map((item) => {
           const id =
-            item.context.docId ||
-            item.context.userId ||
             item.finalData.docId ||
-            item.finalData.userId;
+            item.finalData.userId ||
+            item.context.docId ||
+            item.context.userId;
           if (item.finalData.hasOwnProperty("userId")) {
             delete item.finalData.userId;
           }
@@ -229,22 +238,12 @@ export class ImportController {
           if (!item.finalData) {
             return Promise.resolve();
           }
-          return this.database
-            .createDocument(db.$id, collection.$id, id, item.finalData)
-            .then(() => {
-              processedItems++;
-              console.log("Created item");
-            })
-            .catch((error) => {
-              console.error(
-                `Error creating item in ${collection.name}:`,
-                error,
-                "\nItem data is ",
-                item.finalData
-              );
-              throw error;
-              // Optionally, log the failed item for retry or review
-            });
+          return this.database.createDocument(
+            db.$id,
+            collection.$id,
+            id,
+            item.finalData
+          );
         });
         // Wait for all promises in the current batch to resolve
         await Promise.allSettled(batchPromises);

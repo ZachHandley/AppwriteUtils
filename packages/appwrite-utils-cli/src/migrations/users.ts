@@ -1,5 +1,12 @@
 import type { AppwriteConfig, ConfigCollection } from "appwrite-utils";
-import { Databases, ID, Query, Users, type Models } from "node-appwrite";
+import {
+  AppwriteException,
+  Databases,
+  ID,
+  Query,
+  Users,
+  type Models,
+} from "node-appwrite";
 import {
   AuthUserSchema,
   type AuthUser,
@@ -108,7 +115,7 @@ export class UsersController {
     return users;
   }
 
-  async createUserAndReturn(item: AuthUserCreate) {
+  async createUserAndReturn(item: AuthUserCreate, numAttempts?: number) {
     try {
       const user = await this.users.create(
         item.userId || ID.unique(),
@@ -129,9 +136,21 @@ export class UsersController {
       }
       return user;
     } catch (e) {
+      if (e instanceof AppwriteException) {
+        if (e.message.includes("fetch failed")) {
+          const numberOfAttempts = numAttempts || 0;
+          if (numberOfAttempts > 5) {
+            throw e;
+          }
+          const user: Models.User<Models.Preferences> =
+            await this.createUserAndReturn(item, numberOfAttempts + 1);
+          return user;
+        }
+      }
       if (e instanceof Error) {
         logger.error("FAILED CREATING USER: ", e.message);
       }
+      console.log("FAILED CREATING USER: ", e);
       throw e;
     }
   }

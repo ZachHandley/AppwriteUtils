@@ -124,7 +124,7 @@ export class DataLoader {
         result[key] = updateValue;
       }
       // If the update value is nullish, keep the original value unless it doesn't exist
-      else if (sourceValue === undefined) {
+      else if (sourceValue === undefined || sourceValue === null) {
         result[key] = updateValue;
       }
     });
@@ -395,11 +395,13 @@ export class DataLoader {
               // Process each item in the collection
               collectionData.data.forEach((item) => {
                 const oldId = item.context[idMapping.sourceField];
-                const newId = this.mergedUserMap.get(oldId);
+                const newId = this.mergedUserMap.get(`${oldId}`);
 
                 if (newId) {
                   // Update context to use new user ID
-                  item.context[idMapping.fieldToSet || targetFieldKey] = newId;
+                  item.finalData[
+                    idMapping.fieldToSet || idMapping.sourceField
+                  ] = newId;
                 }
               });
             }
@@ -524,16 +526,17 @@ export class DataLoader {
                   if (!currentDataFiltered) {
                     // Set new data if current data is undefined
                     collectionData.data[i].finalData[fieldToSetKey] =
-                      Array.isArray(newData) ? newData : [newData];
+                      Array.isArray(newData) ? newData[0] : newData;
                   } else if (Array.isArray(newData) && newData.length > 0) {
                     // Convert current data to array and merge if new data is non-empty array, then filter for uniqueness
+                    // and take the first value, because it's an array and the attribute is not an array
                     collectionData.data[i].finalData[fieldToSetKey] = [
                       ...new Set(
                         [currentDataFiltered, ...newData].filter(
                           (value: any) => `${value}` !== `${valueToMatch}`
                         )
                       ),
-                    ];
+                    ].slice(0, 1)[0];
                   } else if (!Array.isArray(newData) && newData !== undefined) {
                     // Simply update the field if new data is not an array and defined
                     collectionData.data[i].finalData[fieldToSetKey] = newData;
@@ -615,7 +618,6 @@ export class DataLoader {
     primaryKeyField: string,
     newId: string
   ): Promise<any> {
-    // Transform the item data based on the attribute mappings
     let transformedItem = this.transformData(item, attributeMappings);
     const userData = AuthUserCreateSchema.safeParse(transformedItem);
     if (!userData.success) {
@@ -632,48 +634,64 @@ export class DataLoader {
     const phone = userData.data.phone;
     let existingId: string | undefined;
 
-    // Check for duplicate email and add to emailToUserIdMap if not found
-    if (email && email.length > 0) {
-      if (this.emailToUserIdMap.has(email)) {
-        existingId = this.emailToUserIdMap.get(email);
-      } else {
-        this.emailToUserIdMap.set(email, newId);
-      }
+    // Check for duplicate email and phone
+    if (email && this.emailToUserIdMap.has(email)) {
+      existingId = this.emailToUserIdMap.get(email);
+    } else if (phone && this.phoneToUserIdMap.has(phone)) {
+      existingId = this.phoneToUserIdMap.get(phone);
+    } else {
+      if (email) this.emailToUserIdMap.set(email, newId);
+      if (phone) this.phoneToUserIdMap.set(phone, newId);
     }
 
-    // Check for duplicate phone and add to phoneToUserIdMap if not found
-    if (phone && phone.length > 0) {
-      if (this.phoneToUserIdMap.has(phone)) {
-        existingId = this.phoneToUserIdMap.get(phone);
-      } else {
-        this.phoneToUserIdMap.set(phone, newId);
-      }
-    }
-    if (!existingId) {
-      existingId = newId;
-    }
-
-    // If existingId is found, add to mergedUserMap
     if (existingId) {
       userData.data.userId = existingId;
       const mergedUsers = this.mergedUserMap.get(existingId) || [];
       mergedUsers.push(`${item[primaryKeyField]}`);
       this.mergedUserMap.set(existingId, mergedUsers);
+      const userFound = this.importMap
+        .get(this.getCollectionKey("users"))
+        ?.data.find((userDataExisting) => {
+          let userIdToMatch: string | undefined;
+          if (userDataExisting?.finalData?.userId) {
+            userIdToMatch = userDataExisting?.finalData?.userId;
+          } else if (userDataExisting?.finalData?.docId) {
+            userIdToMatch = userDataExisting?.finalData?.docId;
+          } else if (userDataExisting?.context?.userId) {
+            userIdToMatch = userDataExisting.context.userId;
+          } else if (userDataExisting?.context?.docId) {
+            userIdToMatch = userDataExisting.context.docId;
+          }
+          return userIdToMatch === existingId;
+        });
+      if (userFound) {
+        userFound.finalData.userId = existingId;
+      }
+      return [
+        transformedItem,
+        existingId,
+        {
+          rawData: userFound?.rawData,
+          finalData: userFound?.finalData,
+        },
+      ];
+    } else {
+      existingId = newId;
+      userData.data.userId = existingId;
     }
 
-    // Remove user-specific keys from the transformed item
     const userKeys = ["email", "phone", "name", "labels", "prefs"];
     userKeys.forEach((key) => {
       if (transformedItem.hasOwnProperty(key)) {
         delete transformedItem[key];
       }
     });
+
     const usersMap = this.importMap.get(this.getCollectionKey("users"));
     const userDataToAdd = {
       rawData: item,
       finalData: userData.data,
     };
-    // Directly update the importMap with the new user data, without pushing to usersMap.data first
     this.importMap.set(this.getCollectionKey("users"), {
       data: [...(usersMap?.data || []), userDataToAdd],
     });
