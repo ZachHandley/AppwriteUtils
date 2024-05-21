@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { AppwriteConfig } from "appwrite-utils";
 import { findAppwriteConfig } from "./loadConfigs.js";
+import { ID } from "node-appwrite";
 
 // Example base configuration using types from appwrite-utils
 const baseConfig: AppwriteConfig = {
@@ -74,6 +75,9 @@ export const createEmptyCollection = (collectionName: string) => {
   const emptyCollection = `import type { CollectionCreate } from "appwrite-utils";
 
 const ${collectionName}: Partial<CollectionCreate> = {
+  $id: '${ID.unique()}',
+  documentSecurity: false,
+  enabled: true,
   name: '${collectionName}',
   $permissions: [
     { permission: 'read', target: 'any' },

@@ -666,6 +666,7 @@ export class DataLoader {
         });
       if (userFound) {
         userFound.finalData.userId = existingId;
+        this.userExistsMap.set(existingId, true);
       }
       return [
         transformedItem,

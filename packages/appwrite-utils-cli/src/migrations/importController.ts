@@ -161,7 +161,14 @@ export class ImportController {
               .map((item) => {
                 return usersController.createUserAndReturn(item.finalData);
               });
-            await Promise.all(userBatchPromises);
+            const promiseResults = await Promise.allSettled(userBatchPromises);
+            for (const result of promiseResults) {
+              if (result.status === "fulfilled") {
+                dataLoader.userExistsMap.set(result.value.$id, true);
+              } else {
+                console.log("Failed to import user", result.reason);
+              }
+            }
             for (const item of batch) {
               if (item && item.finalData) {
                 dataLoader.userExistsMap.set(

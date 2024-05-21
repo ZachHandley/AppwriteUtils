@@ -86,6 +86,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.37: Added `documentSecurity`, `enabled`, and `$id` to the `init` collection
 - 0.0.36: Made it update collections by default, sometimes you gotta do what you gotta do
 - 0.0.35: Added update collection if it exists and permissions or such are different (`documentSecurity` and `enabled`), also added a check for `fetch failed` errors to retry them with recursion, not sure how well that will work out, but we're gonna try it! It will still fail after 5 tries, but hopefully that gives Appwrite some time to figure it's stuff out
 - 0.0.34: Fixed the `bin` section of the package.json, apparently you can't use `node` to run it
