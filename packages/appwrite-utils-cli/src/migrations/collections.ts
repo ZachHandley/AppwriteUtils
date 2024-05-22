@@ -5,6 +5,7 @@ import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
 import _ from "lodash";
 import { SchemaGenerator } from "./schemaStrings.js";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const documentExists = async (
   db: Databases,
@@ -69,9 +70,10 @@ export const checkForCollection = async (
 ): Promise<Models.Collection | null> => {
   try {
     console.log(`Checking for collection with name: ${collection.name}`);
-    const response = await db.listCollections(dbId, [
-      Query.equal("name", collection.name!),
-    ]);
+    const response = await tryAwaitWithRetry(
+      async () =>
+        await db.listCollections(dbId, [Query.equal("name", collection.name!)])
+    );
     if (response.collections.length > 0) {
       console.log(`Collection found: ${response.collections[0].$id}`);
       return { ...collection, ...response.collections[0] };
@@ -94,12 +96,15 @@ export const fetchAndCacheCollectionByName = async (
   if (nameToIdMapping.has(collectionName)) {
     const collectionId = nameToIdMapping.get(collectionName);
     console.log(`\tCollection found in cache: ${collectionId}`);
-    return await db.getCollection(dbId, collectionId!);
+    return await tryAwaitWithRetry(
+      async () => await db.getCollection(dbId, collectionId!)
+    );
   } else {
     console.log(`\tFetching collection by name: ${collectionName}`);
-    const collectionsPulled = await db.listCollections(dbId, [
-      Query.equal("name", collectionName),
-    ]);
+    const collectionsPulled = await tryAwaitWithRetry(
+      async () =>
+        await db.listCollections(dbId, [Query.equal("name", collectionName)])
+    );
     if (collectionsPulled.total > 0) {
       const collection = collectionsPulled.collections[0];
       console.log(`\tCollection found: ${collection.$id}`);
@@ -117,8 +122,8 @@ export const wipeDatabase = async (
   databaseId: string
 ): Promise<{ collectionId: string; collectionName: string }[]> => {
   console.log(`Wiping database: ${databaseId}`);
-  const { collections: existingCollections } = await database.listCollections(
-    databaseId
+  const { collections: existingCollections } = await tryAwaitWithRetry(
+    async () => await database.listCollections(databaseId)
   );
   let collectionsDeleted: { collectionId: string; collectionName: string }[] =
     [];
@@ -155,7 +160,7 @@ export const createOrUpdateCollections = async (
 
   for (const { attributes, indexes, ...collection } of configCollections) {
     // Prepare permissions for the collection
-    const permissions = [];
+    const permissions: string[] = [];
     if (collection.$permissions && collection.$permissions.length > 0) {
       for (const permission of collection.$permissions) {
         switch (permission.permission) {
@@ -182,15 +187,18 @@ export const createOrUpdateCollections = async (
     }
 
     // Check if the collection already exists by name
-    let collectionsFound = await database.listCollections(databaseId, [
-      Query.equal("name", collection.name),
-    ]);
+    let collectionsFound = await tryAwaitWithRetry(
+      async () =>
+        await database.listCollections(databaseId, [
+          Query.equal("name", collection.name),
+        ])
+    );
 
     let collectionToUse =
       collectionsFound.total > 0 ? collectionsFound.collections[0] : null;
 
     // Determine the correct ID for the collection
-    let collectionId;
+    let collectionId: string;
     if (!collectionToUse) {
       console.log(`Creating collection: ${collection.name}`);
       const foundColl = deletedCollections?.find(
@@ -211,16 +219,19 @@ export const createOrUpdateCollections = async (
 
       // Create the collection with the determined ID
       try {
-        collectionToUse = await database.createCollection(
-          databaseId,
-          collectionId,
-          collection.name,
-          permissions,
-          collection.documentSecurity ?? false,
-          collection.enabled ?? true
+        collectionToUse = await tryAwaitWithRetry(
+          async () =>
+            await database.createCollection(
+              databaseId,
+              collectionId,
+              collection.name,
+              permissions,
+              collection.documentSecurity ?? false,
+              collection.enabled ?? true
+            )
         );
-        collection.$id = collectionToUse.$id;
-        nameToIdMapping.set(collection.name, collectionToUse.$id);
+        collection.$id = collectionToUse!.$id;
+        nameToIdMapping.set(collection.name, collectionToUse!.$id);
       } catch (error) {
         console.error(
           `Failed to create collection ${collection.name} with ID ${collectionId}: ${error}`
@@ -229,13 +240,16 @@ export const createOrUpdateCollections = async (
       }
     } else {
       console.log(`Collection ${collection.name} exists, updating it`);
-      await database.updateCollection(
-        databaseId,
-        collectionToUse.$id,
-        collection.name,
-        permissions,
-        collection.documentSecurity ?? false,
-        collection.enabled ?? true
+      await tryAwaitWithRetry(
+        async () =>
+          await database.updateCollection(
+            databaseId,
+            collectionToUse!.$id,
+            collection.name,
+            permissions,
+            collection.documentSecurity ?? false,
+            collection.enabled ?? true
+          )
       );
     }
 
@@ -244,14 +258,14 @@ export const createOrUpdateCollections = async (
     await createUpdateCollectionAttributes(
       database,
       databaseId,
-      collectionToUse,
+      collectionToUse!,
       attributes
     );
     console.log("Creating Indexes");
     await createOrUpdateIndexes(
       databaseId,
       database,
-      collectionToUse.$id,
+      collectionToUse!.$id,
       indexes ?? []
     );
   }
@@ -294,7 +308,9 @@ export const fetchAllCollections = async (
     if (lastCollectionId) {
       queries.push(Query.cursorAfter(lastCollectionId));
     }
-    const response = await database.listCollections(dbId, queries);
+    const response = await tryAwaitWithRetry(
+      async () => await database.listCollections(dbId, queries)
+    );
     collections = collections.concat(response.collections);
     moreCollections = response.collections.length === 500;
     if (moreCollections) {

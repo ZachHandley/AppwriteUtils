@@ -108,7 +108,13 @@ export const convertObjectByAttributeMappings = (
       const values = mapping.oldKeys
         .map((oldKey) => resolveValue(obj, oldKey))
         .flat(Infinity);
-      result[mapping.targetKey] = values.filter((value) => value !== undefined);
+      if (values.length > 0) {
+        result[mapping.targetKey] = values.filter(
+          (value) => value !== undefined
+        );
+      } else {
+        result[mapping.targetKey] = null;
+      }
     } else if (mapping.oldKey) {
       // Resolve single oldKey
       const value = resolveValue(obj, mapping.oldKey);
@@ -116,9 +122,12 @@ export const convertObjectByAttributeMappings = (
         result[mapping.targetKey] = Array.isArray(value)
           ? value.flat(Infinity)
           : value;
+      } else {
+        result[mapping.targetKey] = value ? value : null;
       }
     }
   }
+
   return result;
 };
 

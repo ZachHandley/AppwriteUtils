@@ -100,4 +100,10 @@ export {
   importDefSchemas,
 } from "./schemas/importDef.js";
 export { parseAttribute } from "./functions/schema.js";
-export { type AuthUser, AuthUserSchema } from "./schemas/authUser.js";
+export {
+  type AuthUser,
+  AuthUserSchema,
+  AuthUserCreateSchema,
+  type AuthUserCreate,
+} from "./schemas/authUser.js";
+export { tryAwaitWithRetry } from "./functions/helpers.js";

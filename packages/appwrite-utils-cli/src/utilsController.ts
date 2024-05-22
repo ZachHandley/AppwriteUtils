@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { load } from "js-yaml";
 import { ImportDataActions } from "./migrations/importDataActions.js";
-import { readFileSync } from "./utils/helperFunctions.js";
+import { numTimesFailedTotal } from "./utils/helperFunctions.js";
 import { afterImportActions } from "./migrations/afterImportActions.js";
 import {
   type AfterImportActions,
@@ -186,6 +186,8 @@ export class UtilsController {
       await importController.run();
       console.log("Import data complete.");
     }
+
+    console.log("Total number of times Fetch failed: ", numTimesFailedTotal);
 
     // if (options.checkDuplicates) {
     //   await this.checkDuplicates();

@@ -6,6 +6,7 @@ import {
 } from "appwrite-utils";
 import { nameToIdMapping, enqueueOperation } from "./queue.js";
 import _ from "lodash";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 const attributesSame = (
   databaseAttribute: Attribute,
@@ -149,23 +150,29 @@ export const createOrUpdateAttribute = async (
   switch (finalAttribute.type) {
     case "string":
       if (action === "create") {
-        await db.createStringAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.size,
-          finalAttribute.required || false,
-          (finalAttribute.xdefault as string) || undefined,
-          finalAttribute.array || false,
-          finalAttribute.encrypted
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createStringAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.size,
+              finalAttribute.required || false,
+              (finalAttribute.xdefault as string) || undefined,
+              finalAttribute.array || false,
+              finalAttribute.encrypted
+            )
         );
       } else {
-        await db.updateStringAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          (finalAttribute.xdefault as string) || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateStringAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              (finalAttribute.xdefault as string) || undefined
+            )
         );
       }
       break;
@@ -183,15 +190,18 @@ export const createOrUpdateAttribute = async (
         ) {
           delete finalAttribute.max;
         }
-        await db.createIntegerAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.min,
-          finalAttribute.max,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createIntegerAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.min,
+              finalAttribute.max,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
         if (
@@ -206,181 +216,232 @@ export const createOrUpdateAttribute = async (
         ) {
           delete finalAttribute.max;
         }
-        await db.updateIntegerAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.min || 0,
-          finalAttribute.max || 2147483647,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateIntegerAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.min || 0,
+              finalAttribute.max || 2147483647,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "float":
       if (action === "create") {
-        await db.createFloatAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.min,
-          finalAttribute.max,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createFloatAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.min,
+              finalAttribute.max,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateFloatAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.min || 0,
-          finalAttribute.max || 2147483647,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateFloatAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.min || 0,
+              finalAttribute.max || 2147483647,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "boolean":
       if (action === "create") {
-        await db.createBooleanAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createBooleanAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateBooleanAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || null
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateBooleanAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || null
+            )
         );
       }
       break;
     case "datetime":
       if (action === "create") {
-        await db.createDatetimeAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createDatetimeAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateDatetimeAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDatetimeAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "email":
       if (action === "create") {
-        await db.createEmailAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createEmailAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateEmailAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateEmailAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "ip":
       if (action === "create") {
-        await db.createIpAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createIpAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateIpAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateIpAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "url":
       if (action === "create") {
-        await db.createUrlAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createUrlAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateUrlAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateUrlAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "enum":
       if (action === "create") {
-        await db.createEnumAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.elements,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined,
-          finalAttribute.array
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createEnumAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.elements,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined,
+              finalAttribute.array
+            )
         );
       } else {
-        await db.updateEnumAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.elements,
-          finalAttribute.required || false,
-          finalAttribute.xdefault || undefined
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateEnumAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.elements,
+              finalAttribute.required || false,
+              finalAttribute.xdefault || undefined
+            )
         );
       }
       break;
     case "relationship":
       if (action === "create") {
-        await db.createRelationshipAttribute(
-          dbId,
-          collection.$id,
-          relatedCollectionId!,
-          finalAttribute.relationType,
-          finalAttribute.twoWay,
-          finalAttribute.key,
-          finalAttribute.twoWayKey,
-          finalAttribute.onDelete
+        await tryAwaitWithRetry(
+          async () =>
+            await db.createRelationshipAttribute(
+              dbId,
+              collection.$id,
+              relatedCollectionId!,
+              finalAttribute.relationType,
+              finalAttribute.twoWay,
+              finalAttribute.key,
+              finalAttribute.twoWayKey,
+              finalAttribute.onDelete
+            )
         );
       } else {
-        await db.updateRelationshipAttribute(
-          dbId,
-          collection.$id,
-          finalAttribute.key,
-          finalAttribute.onDelete
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateRelationshipAttribute(
+              dbId,
+              collection.$id,
+              finalAttribute.key,
+              finalAttribute.onDelete
+            )
         );
       }
       break;

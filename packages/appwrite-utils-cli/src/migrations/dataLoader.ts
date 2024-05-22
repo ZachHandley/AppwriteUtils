@@ -93,6 +93,7 @@ export class DataLoader {
    * It iterates through the target object's keys and updates the source object if:
    * - The source object has the key.
    * - The target object's value for that key is not null, undefined, or an empty string.
+   * - If the target object has an array value, it concatenates the values and removes duplicates.
    *
    * @param source - The source object to be updated.
    * @param target - The target object with values to update the source object.
@@ -102,32 +103,53 @@ export class DataLoader {
     // Create a new object to hold the merged result
     const result = { ...source };
 
-    Object.keys(update).forEach((key) => {
-      const sourceValue = source[key];
-      const updateValue = update[key];
-
-      // If the update value is an array, concatenate and remove duplicates
-      if (Array.isArray(updateValue)) {
-        const sourceArray = Array.isArray(sourceValue) ? sourceValue : [];
-        result[key] = [...new Set([...sourceArray, ...updateValue])];
+    // Loop through the keys of the object we care about
+    for (const [key, value] of Object.entries(source)) {
+      // Check if the key exists in the target object
+      if (!Object.hasOwn(update, key)) {
+        // If the key doesn't exist, we can just skip it like bad cheese
+        continue;
       }
-      // If the update value is an object, recursively merge
-      else if (
-        updateValue !== null &&
-        typeof updateValue === "object" &&
-        !(updateValue instanceof Date)
-      ) {
-        result[key] = this.mergeObjects(sourceValue, updateValue);
+      if (update[key] === value) {
+        continue;
       }
-      // If the update value is not nullish, overwrite the source value
-      else if (updateValue !== null && updateValue !== undefined) {
-        result[key] = updateValue;
+      // If the value ain't here, we can just do whatever man
+      if (value === undefined || value === null || value === "") {
+        // If the update key is defined
+        if (
+          update[key] !== undefined &&
+          update[key] !== null &&
+          update[key] !== ""
+        ) {
+          // might as well use it eh?
+          result[key] = update[key];
+        }
+        // ELSE if the value is an array, because it would then not be === to those things above
+      } else if (Array.isArray(value)) {
+        // Get the update value
+        const updateValue = update[key];
+        // If the update value is an array, concatenate and remove duplicates
+        // and poopy data
+        if (Array.isArray(updateValue)) {
+          result[key] = [...new Set([...value, ...updateValue])].filter(
+            (item) => item !== null && item !== undefined && item !== ""
+          );
+        } else {
+          // If the update value is not an array, just use it
+          result[key] = [...value, updateValue].filter(
+            (item) => item !== null && item !== undefined && item !== ""
+          );
+        }
+      } else if (typeof value === "object") {
+        // If the value is an object, we need to merge it
+        if (typeof update[key] === "object") {
+          result[key] = this.mergeObjects(value, update[key]);
+        }
+      } else {
+        // Finally, the source value is defined, and not an array, so we don't care about the update value
+        continue;
       }
-      // If the update value is nullish, keep the original value unless it doesn't exist
-      else if (sourceValue === undefined || sourceValue === null) {
-        result[key] = updateValue;
-      }
-    });
+    }
 
     return result;
   }
@@ -162,8 +184,26 @@ export class DataLoader {
   // Method to generate a unique ID that doesn't conflict with existing IDs
   getTrueUniqueId(collectionName: string) {
     let newId = ID.unique();
-    while (this.checkMapValuesForId(newId, collectionName)) {
+    let condition =
+      this.checkMapValuesForId(newId, collectionName) ||
+      this.userExistsMap.has(newId) ||
+      this.importMap
+        .get(this.getCollectionKey("users"))
+        ?.data.some(
+          (user) =>
+            user.finalData.docId === newId || user.finalData.userId === newId
+        );
+    while (condition) {
       newId = ID.unique();
+      condition =
+        this.checkMapValuesForId(newId, collectionName) ||
+        this.userExistsMap.has(newId) ||
+        this.importMap
+          .get(this.getCollectionKey("users"))
+          ?.data.some(
+            (user) =>
+              user.finalData.docId === newId || user.finalData.userId === newId
+          );
     }
     return newId;
   }
@@ -200,6 +240,9 @@ export class DataLoader {
       item,
       attributeMappings
     );
+    if (item["region"]) {
+      logger.info(`Converted item: ${JSON.stringify(convertedItem, null, 2)}`);
+    }
     // Run additional converter functions on the converted item, if any
     return this.importDataActions.runConverterFunctions(
       convertedItem,
@@ -271,6 +314,21 @@ export class DataLoader {
         this.phoneToUserIdMap.set(user.phone, user.$id);
       }
       this.userExistsMap.set(user.$id, true);
+      let importData = this.importMap.get(this.getCollectionKey("users"));
+      if (!importData) {
+        importData = {
+          data: [],
+        };
+      }
+      importData.data.push({
+        finalData: {
+          ...user,
+          userId: user.$id,
+          docId: user.$id,
+        },
+        rawData: user,
+      });
+      this.importMap.set(this.getCollectionKey("users"), importData);
     }
     return allUsers;
   }
@@ -331,11 +389,11 @@ export class DataLoader {
             continue;
           }
           // Prepare the update data for the collection
-          await this.prepareUpdateData(db, collection, updateDef);
+          this.prepareUpdateData(db, collection, updateDef);
         }
       }
       console.log("Running update references");
-      this.dealWithMergedUsers();
+      // this.dealWithMergedUsers();
       this.updateOldReferencesForNew();
       console.log("Done running update references");
     }
@@ -355,9 +413,15 @@ export class DataLoader {
       this.config.usersCollectionName
     );
     const usersCollectionPrimaryKeyFields = new Set();
+
     if (!this.config.collections) {
+      console.log("No collections found in configuration.");
       return;
     }
+
+    let needsUpdate = false;
+    let numUpdates = 0;
+
     // Collect primary key fields from the users collection definitions
     this.config.collections.forEach((collection) => {
       if (this.getCollectionKey(collection.name) === usersCollectionKey) {
@@ -373,45 +437,95 @@ export class DataLoader {
       }
     });
 
+    console.log(
+      `Primary key fields collected for users collection: ${[
+        ...usersCollectionPrimaryKeyFields,
+      ]}`
+    );
+
     // Iterate over all collections to update references based on merged users
     this.config.collections.forEach((collection) => {
       const collectionData = this.importMap.get(
         this.getCollectionKey(collection.name)
       );
-      if (!collectionData || !collectionData.data) return;
-      const collectionImportDefs = collection.importDefs;
-      if (!collectionImportDefs || !collectionImportDefs.length) {
+
+      if (!collectionData || !collectionData.data) {
+        console.log(`No data found for collection ${collection.name}`);
         return;
       }
+
+      const collectionImportDefs = collection.importDefs;
+      if (!collectionImportDefs || !collectionImportDefs.length) {
+        console.log(
+          `No import definitions found for collection ${collection.name}`
+        );
+        return;
+      }
+
       collectionImportDefs.forEach((importDef) => {
         importDef.idMappings?.forEach((idMapping) => {
           if (
             this.getCollectionKey(idMapping.targetCollection) ===
             usersCollectionKey
           ) {
+            const fieldToSetKey = idMapping.fieldToSet || idMapping.sourceField;
             const targetFieldKey =
               idMapping.targetFieldToMatch || idMapping.targetField;
+
             if (usersCollectionPrimaryKeyFields.has(targetFieldKey)) {
+              console.log(
+                `Processing collection ${collection.name} with target field ${targetFieldKey}`
+              );
+
               // Process each item in the collection
               collectionData.data.forEach((item) => {
-                const oldId = item.context[idMapping.sourceField];
+                const oldId =
+                  item.finalData[idMapping.sourceField] ||
+                  item.context[idMapping.sourceField];
+
+                if (oldId === undefined || oldId === null) {
+                  console.log(
+                    `Skipping item with undefined or null oldId in collection ${collection.name}`
+                  );
+                  return;
+                }
+
                 const newId = this.mergedUserMap.get(`${oldId}`);
 
                 if (newId) {
+                  needsUpdate = true;
+                  numUpdates++;
+                  console.log(
+                    `Updating old ID ${oldId} to new ID ${newId} in collection ${collection.name}`
+                  );
+
                   // Update context to use new user ID
-                  item.finalData[
-                    idMapping.fieldToSet || idMapping.sourceField
-                  ] = newId;
+                  item.finalData[fieldToSetKey] = newId;
+                  item.context[fieldToSetKey] = newId;
+                } else {
+                  console.log(
+                    `No new ID found for old ID ${oldId} in mergedUserMap.`
+                  );
                 }
               });
             }
           }
         });
       });
+
+      if (needsUpdate) {
+        console.log(
+          `Updated ${numUpdates} references for collection ${collection.name}`
+        );
+        this.importMap.set(
+          this.getCollectionKey(collection.name),
+          collectionData
+        );
+      }
     });
   }
 
-  async updateOldReferencesForNew() {
+  updateOldReferencesForNew() {
     if (!this.config.collections) {
       return;
     }
@@ -445,7 +559,12 @@ export class DataLoader {
                   collectionData.data[i].context[idMapping.sourceField];
 
                 // Skip if value to match is missing or empty
-                if (!valueToMatch || _.isEmpty(valueToMatch)) continue;
+                if (
+                  !valueToMatch ||
+                  _.isEmpty(valueToMatch) ||
+                  valueToMatch === null
+                )
+                  continue;
 
                 const isFieldToSetArray = collectionConfig.attributes.find(
                   (attribute) => attribute.key === fieldToSetKey
@@ -612,12 +731,19 @@ export class DataLoader {
    * @param attributeMappings - The attribute mappings for the item.
    * @returns The transformed item with user-specific keys removed.
    */
-  async prepareUserData(
+  prepareUserData(
     item: any,
     attributeMappings: AttributeMappings,
     primaryKeyField: string,
     newId: string
-  ): Promise<any> {
+  ): {
+    transformedItem: any;
+    existingId: string | undefined;
+    userData: {
+      rawData: any;
+      finalData: z.infer<typeof AuthUserCreateSchema>;
+    };
+  } {
     let transformedItem = this.transformData(item, attributeMappings);
     const userData = AuthUserCreateSchema.safeParse(transformedItem);
     if (!userData.success) {
@@ -666,16 +792,24 @@ export class DataLoader {
         });
       if (userFound) {
         userFound.finalData.userId = existingId;
+        userFound.finalData.docId = existingId;
         this.userExistsMap.set(existingId, true);
       }
-      return [
+
+      const userKeys = ["email", "phone", "name", "labels", "prefs"];
+      userKeys.forEach((key) => {
+        if (transformedItem.hasOwnProperty(key)) {
+          delete transformedItem[key];
+        }
+      });
+      return {
         transformedItem,
         existingId,
-        {
+        userData: {
           rawData: userFound?.rawData,
           finalData: userFound?.finalData,
         },
-      ];
+      };
     } else {
       existingId = newId;
       userData.data.userId = existingId;
@@ -697,7 +831,11 @@ export class DataLoader {
       data: [...(usersMap?.data || []), userDataToAdd],
     });
 
-    return [transformedItem, existingId, userDataToAdd];
+    return {
+      transformedItem,
+      existingId,
+      userData: userDataToAdd,
+    };
   }
 
   /**
@@ -761,7 +899,7 @@ export class DataLoader {
     // Iterate through each item in the raw data
     for (const item of rawData) {
       // Prepare user data, check for duplicates, and remove user-specific keys
-      let [transformedItem, existingId, userData] = await this.prepareUserData(
+      let { transformedItem, existingId, userData } = this.prepareUserData(
         item,
         importDef.attributeMappings,
         importDef.primaryKeyField,
@@ -816,21 +954,30 @@ export class DataLoader {
           collectionOldIdToNewIdMap?.set(`${oldId}`, `${existingId}`);
         }
       }
-      // Merge the final user data into the context
-      context = { ...context, ...userData.finalData };
 
       // Handle merging for currentUserData
       for (let i = 0; i < currentUserData.data.length; i++) {
+        const currentUserDataItem = currentUserData.data[i];
+        const samePhones =
+          currentUserDataItem.finalData.phone &&
+          transformedItem.phone &&
+          currentUserDataItem.finalData.phone === transformedItem.phone;
+        const sameEmails =
+          currentUserDataItem.finalData.email &&
+          transformedItem.email &&
+          currentUserDataItem.finalData.email === transformedItem.email;
         if (
-          (currentUserData.data[i].finalData.docId === existingId ||
-            currentUserData.data[i].finalData.userId === existingId) &&
-          !_.isEqual(currentUserData.data[i], userData)
+          (currentUserDataItem.finalData.docId === existingId ||
+            currentUserDataItem.finalData.userId === existingId) &&
+          (samePhones || sameEmails) &&
+          currentUserDataItem.finalData &&
+          userData.finalData
         ) {
-          this.mergeObjects(
+          const userDataMerged = this.mergeObjects(
             currentUserData.data[i].finalData,
             userData.finalData
           );
-          console.log("Merging user data", currentUserData.data[i].finalData);
+          currentUserData.data[i].finalData = userDataMerged;
           this.importMap.set(this.getCollectionKey("users"), currentUserData);
         }
       }
@@ -926,12 +1073,16 @@ export class DataLoader {
     console.log(
       `${collection.name} -- collectionOldIdToNewIdMap: ${collectionOldIdToNewIdMap}`
     );
+    const isRegions = collection.name.toLowerCase() === "regions";
     // Iterate through each item in the raw data
     for (const item of rawData) {
       // Generate a new unique ID for the item
       const itemIdNew = this.getTrueUniqueId(
         this.getCollectionKey(collection.name)
       );
+      if (isRegions) {
+        logger.info(`Creating region: ${JSON.stringify(item, null, 2)}`);
+      }
       // Retrieve the current collection data from the import map
       const currentData = this.importMap.get(
         this.getCollectionKey(collection.name)
@@ -943,6 +1094,11 @@ export class DataLoader {
         item,
         importDef.attributeMappings
       );
+      if (isRegions) {
+        logger.info(
+          `Transformed region: ${JSON.stringify(transformedData, null, 2)}`
+        );
+      }
       // If a primary key field is defined, handle the ID mapping and check for duplicates
       if (importDef.primaryKeyField) {
         const oldId = item[importDef.primaryKeyField];
@@ -957,7 +1113,7 @@ export class DataLoader {
       // Merge the transformed data into the context
       context = { ...context, ...transformedData };
       // Validate the item before proceeding
-      const isValid = await this.importDataActions.validateItem(
+      const isValid = this.importDataActions.validateItem(
         transformedData,
         importDef.attributeMappings,
         context
@@ -997,6 +1153,7 @@ export class DataLoader {
       }
     }
   }
+
   /**
    * Prepares the data for updating documents within a collection.
    * This method loads the raw data based on the import definition, transforms it according to the attribute mappings,
@@ -1007,7 +1164,7 @@ export class DataLoader {
    * @param collection - The collection configuration.
    * @param importDef - The import definition containing the attribute mappings and other relevant info.
    */
-  async prepareUpdateData(
+  prepareUpdateData(
     db: ConfigDatabase,
     collection: CollectionCreate,
     importDef: ImportDef
@@ -1048,11 +1205,7 @@ export class DataLoader {
       let newId: string | undefined;
       let oldId: string | undefined;
       // Determine the new ID for the item based on the primary key field or update mapping
-      if (importDef.primaryKeyField) {
-        oldId = item[importDef.primaryKeyField];
-      } else if (importDef.updateMapping) {
-        oldId = item[importDef.updateMapping.originalIdField];
-      }
+      oldId = item[importDef.primaryKeyField];
       if (oldId) {
         newId = oldIdToNewIdMap?.get(`${oldId}`);
         if (
@@ -1075,8 +1228,13 @@ export class DataLoader {
         );
         continue;
       }
+      const itemDataToUpdate = this.importMap
+        .get(this.getCollectionKey(collection.name))
+        ?.data.find(
+          (data) => `${data.context[importDef.primaryKeyField]}` === `${oldId}`
+        );
       // Log an error and continue to the next item if no new ID is found
-      if (!newId) {
+      if (!newId && !itemDataToUpdate) {
         logger.error(
           `No new id found for collection ${
             collection.name
@@ -1087,15 +1245,24 @@ export class DataLoader {
           )} but it says it's supposed to have one...`
         );
         continue;
+      } else if (itemDataToUpdate) {
+        newId = itemDataToUpdate.finalData.docId;
+        if (!newId) {
+          logger.error(
+            `No new id found for collection ${
+              collection.name
+            } for updateDef ${JSON.stringify(
+              item,
+              null,
+              2
+            )} but it says it's supposed to have one...`
+          );
+          continue;
+        }
       }
-      const itemDataToUpdate = this.importMap
-        .get(this.getCollectionKey(collection.name))
-        ?.data.find(
-          (data) => data.rawData[importDef.primaryKeyField] === oldId
-        );
-      if (!itemDataToUpdate) {
+      if (!itemDataToUpdate || !newId) {
         logger.error(
-          `No data found for collection ${
+          `No data or ID (docId) found for collection ${
             collection.name
           } for updateDef ${JSON.stringify(
             item,
@@ -1111,9 +1278,9 @@ export class DataLoader {
       );
       // Create a context object for the item, including the new ID and transformed data
       let context = this.createContext(db, collection, item, newId);
-      context = this.mergeObjects(context, transformedData);
+      context = { ...context, ...transformedData };
       // Validate the item before proceeding
-      const isValid = await this.importDataActions.validateItem(
+      const isValid = this.importDataActions.validateItem(
         item,
         importDef.attributeMappings,
         context
@@ -1145,6 +1312,7 @@ export class DataLoader {
         );
         itemDataToUpdate.context = context;
         itemDataToUpdate.importDef = newImportDef;
+        currentData!.data.push(itemDataToUpdate);
       } else {
         // If no existing item matches, then add the new item
         currentData!.data.push({

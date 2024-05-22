@@ -16,6 +16,7 @@ import { convertObjectBySchema } from "./converters.js";
 import { type AfterImportActions } from "appwrite-utils";
 import { afterImportActions } from "./afterImportActions.js";
 import { logger } from "./logging.js";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export class ImportDataActions {
   private db: Databases;
@@ -41,9 +42,19 @@ export class ImportDataActions {
     this.afterImportActionsDefinitions = afterImportActionsDefinitions;
   }
 
+  /**
+   * Runs converter functions on the item based on the provided attribute mappings.
+   *
+   * @param item - The item to be transformed.
+   * @param attributeMappings - The mappings that define how each attribute should be transformed.
+   * @returns The transformed item.
+   */
   runConverterFunctions(item: any, attributeMappings: AttributeMappings) {
     const conversionSchema = attributeMappings.reduce((schema, mapping) => {
       schema[mapping.targetKey] = (originalValue: any) => {
+        if (!mapping.converters) {
+          return originalValue;
+        }
         return mapping.converters?.reduce((value, converterName) => {
           let shouldProcessAsArray = false;
           if (
@@ -94,14 +105,15 @@ export class ImportDataActions {
   /**
    * Validates a single data item based on defined validation rules.
    * @param item The data item to validate.
+   * @param attributeMap The attribute mappings for the data item.
    * @param context The context for resolving templated parameters in validation rules.
    * @returns A promise that resolves to true if the item is valid, false otherwise.
    */
-  async validateItem(
+  validateItem(
     item: any,
     attributeMap: AttributeMappings,
     context: { [key: string]: any }
-  ): Promise<boolean> {
+  ): boolean {
     for (const mapping of attributeMap) {
       const { validationActions } = mapping;
       if (
@@ -167,7 +179,9 @@ export class ImportDataActions {
           }' with params ${params.join(", ")}...`
         );
         try {
-          await this.executeAction(action, params, context, item);
+          await tryAwaitWithRetry(
+            async () => await this.executeAction(action, params, context, item)
+          );
         } catch (error) {
           logger.error(
             `Failed to execute post-import action '${action}' for attribute '${mapping.targetKey}':`,

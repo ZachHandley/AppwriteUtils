@@ -1,4 +1,5 @@
 import {
+  AppwriteException,
   ID,
   Query,
   type Databases,
@@ -13,7 +14,7 @@ import type {
 } from "appwrite-utils";
 import type { ImportDataActions } from "./importDataActions.js";
 import _ from "lodash";
-import { areCollectionNamesSame } from "../utils/index.js";
+import { areCollectionNamesSame, tryAwaitWithRetry } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
 import { UsersController } from "./users.js";
@@ -35,6 +36,7 @@ export class ImportController {
   private setupOptions: SetupOptions;
   private documentCache: Map<string, any>;
   private batchLimit: number = 25; // Define batch size limit
+  private hasImportedUsers = false;
   private postImportActionsQueue: {
     context: any;
     finalItem: any;
@@ -70,7 +72,7 @@ export class ImportController {
             this.setupOptions.runDev)
       )
       .map((db) => db.name);
-
+    let dataLoader: DataLoader | undefined;
     for (let db of this.config.databases) {
       if (
         db.name.toLowerCase().trim().replace(" ", "") === "migrations" ||
@@ -90,14 +92,18 @@ export class ImportController {
       console.log(`Starting import data for database: ${db.name}`);
       console.log(`---------------------------------`);
       // await this.importCollections(db);
-      const dataLoader = new DataLoader(
-        this.appwriteFolderPath,
-        this.importDataActions,
-        this.database,
-        this.config,
-        this.setupOptions.shouldWriteFile
-      );
-      await dataLoader.start(db.$id);
+      if (!dataLoader) {
+        dataLoader = new DataLoader(
+          this.appwriteFolderPath,
+          this.importDataActions,
+          this.database,
+          this.config,
+          this.setupOptions.shouldWriteFile
+        );
+        await dataLoader.start(db.$id);
+      } else {
+        console.log(`Using data from previous import run`);
+      }
       await this.importCollections(db, dataLoader);
       await resolveAndUpdateRelationships(db.$id, this.database, this.config);
       await this.executePostImportActions(db.$id, dataLoader);
@@ -119,7 +125,7 @@ export class ImportController {
         dataLoader.getCollectionKey(collection.name)
       );
       const createBatches = (finalData: CollectionImportData["data"]) => {
-        let maxBatchLength = 50;
+        let maxBatchLength = 25;
         const finalBatches: CollectionImportData["data"][] = [];
         for (let i = 0; i < finalData.length; i++) {
           if (i % maxBatchLength === 0) {
@@ -130,7 +136,7 @@ export class ImportController {
         return finalBatches;
       };
 
-      if (isUsersCollection) {
+      if (isUsersCollection && !this.hasImportedUsers) {
         const usersDataMap = dataLoader.importMap.get(
           dataLoader.getCollectionKey("users")
         );
@@ -159,16 +165,16 @@ export class ImportController {
                 );
               })
               .map((item) => {
+                dataLoader.userExistsMap.set(
+                  item.finalData.userId ||
+                    item.finalData.docId ||
+                    item.context.userId ||
+                    item.context.docId,
+                  true
+                );
                 return usersController.createUserAndReturn(item.finalData);
               });
             const promiseResults = await Promise.allSettled(userBatchPromises);
-            for (const result of promiseResults) {
-              if (result.status === "fulfilled") {
-                dataLoader.userExistsMap.set(result.value.$id, true);
-              } else {
-                console.log("Failed to import user", result.reason);
-              }
-            }
             for (const item of batch) {
               if (item && item.finalData) {
                 dataLoader.userExistsMap.set(
@@ -180,26 +186,9 @@ export class ImportController {
                 );
               }
             }
-            console.log("Finished importing users batch", batch.length);
+            console.log("Finished importing users batch");
           }
-          // for (let i = 0; i < usersData.length; i++) {
-          //   const user = usersData[i];
-          //   if (user.finalData) {
-          //     const userId =
-          //       user.finalData.userId ||
-          //       user.context.userId ||
-          //       user.context.docId;
-          //     if (!dataLoader.userExistsMap.has(userId)) {
-          //       if (!user.finalData.userId) {
-          //         user.finalData.userId = userId;
-          //       }
-          //       await usersController.createUserAndReturn(user.finalData);
-          //       dataLoader.userExistsMap.set(userId, true);
-          //     } else {
-          //       console.log("Skipped existing user: ", userId);
-          //     }
-          //   }
-          // }
+          this.hasImportedUsers = true;
           console.log("Finished importing users");
         }
       }
@@ -231,29 +220,37 @@ export class ImportController {
         const batches = dataSplit[i];
         console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
         const batchPromises = batches.map((item) => {
-          const id =
-            item.finalData.docId ||
-            item.finalData.userId ||
-            item.context.docId ||
-            item.context.userId;
-          if (item.finalData.hasOwnProperty("userId")) {
-            delete item.finalData.userId;
-          }
-          if (item.finalData.hasOwnProperty("docId")) {
-            delete item.finalData.docId;
-          }
-          if (!item.finalData) {
+          try {
+            const id =
+              item.finalData.docId ||
+              item.finalData.userId ||
+              item.context.docId ||
+              item.context.userId;
+            if (item.finalData.hasOwnProperty("userId")) {
+              delete item.finalData.userId;
+            }
+            if (item.finalData.hasOwnProperty("docId")) {
+              delete item.finalData.docId;
+            }
+            if (!item.finalData) {
+              return Promise.resolve();
+            }
+            return tryAwaitWithRetry(
+              async () =>
+                await this.database.createDocument(
+                  db.$id,
+                  collection.$id,
+                  id,
+                  item.finalData
+                )
+            );
+          } catch (error) {
+            console.error(error);
             return Promise.resolve();
           }
-          return this.database.createDocument(
-            db.$id,
-            collection.$id,
-            id,
-            item.finalData
-          );
         });
         // Wait for all promises in the current batch to resolve
-        await Promise.allSettled(batchPromises);
+        await Promise.all(batchPromises);
         console.log(`Completed batch ${i + 1} of ${dataSplit.length}`);
         await updateOperation(this.database, importOperation.$id, {
           progress: processedItems,

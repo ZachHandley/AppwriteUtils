@@ -3,6 +3,7 @@ import { BatchSchema, OperationSchema, type Operation } from "./backup.js";
 import { AttributeMappingsSchema } from "appwrite-utils";
 import { z } from "zod";
 import { logger } from "./logging.js";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 /**
  * Object that contains the context for an action that needs to be executed after import
@@ -148,11 +149,14 @@ export const updateOperation = async (
   operationId: string,
   updateFields: any
 ) => {
-  await database.updateDocument(
-    "migrations",
-    "currentOperations",
-    operationId,
-    updateFields
+  await tryAwaitWithRetry(
+    async () =>
+      await database.updateDocument(
+        "migrations",
+        "currentOperations",
+        operationId,
+        updateFields
+      )
   );
 };
 

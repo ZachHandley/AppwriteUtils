@@ -10,6 +10,7 @@ import {
 import { type OperationCreate, type BackupCreate } from "./backup.js";
 import { splitIntoBatches } from "./migrationHelper.js";
 import type { AppwriteConfig } from "appwrite-utils";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const logOperation = async (
   db: Databases,
@@ -21,11 +22,14 @@ export const logOperation = async (
     let operation;
     if (operationId) {
       // Update existing operation log
-      operation = await db.updateDocument(
-        "migrations",
-        "currentOperations",
-        operationId,
-        operationDetails
+      operation = await tryAwaitWithRetry(
+        async () =>
+          await db.updateDocument(
+            "migrations",
+            "currentOperations",
+            operationId,
+            operationDetails
+          )
       );
     } else {
       // Create new operation log
@@ -46,14 +50,15 @@ export const logOperation = async (
 
 export const initOrGetBackupStorage = async (storage: Storage) => {
   try {
-    const backupStorage = await storage.getBucket("backupStorage");
+    const backupStorage = await tryAwaitWithRetry(
+      async () => await storage.getBucket("backupStorage")
+    );
     return backupStorage;
   } catch (e) {
     // ID backupStorage
     // Name Backups Storage
-    const backupStorage = await storage.createBucket(
-      "backupStorage",
-      "Backups Storage"
+    const backupStorage = await tryAwaitWithRetry(
+      async () => await storage.createBucket("backupStorage", "Backups Storage")
     );
     return backupStorage;
   }
@@ -65,21 +70,27 @@ export const initOrGetDocumentStorage = async (
   dbName: string
 ) => {
   try {
-    await storage.getBucket(
-      `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`
+    await tryAwaitWithRetry(
+      async () =>
+        await storage.getBucket(
+          `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`
+        )
     );
   } catch (e) {
     // ID documentStorage
     // Name Document Storage
-    const documentStorage = await storage.createBucket(
-      `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`,
-      `Document Storage ${dbName}`,
-      [
-        Permission.read("any"),
-        Permission.create("users"),
-        Permission.update("users"),
-        Permission.delete("users"),
-      ]
+    const documentStorage = await tryAwaitWithRetry(
+      async () =>
+        await storage.createBucket(
+          `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`,
+          `Document Storage ${dbName}`,
+          [
+            Permission.read("any"),
+            Permission.create("users"),
+            Permission.update("users"),
+            Permission.delete("users"),
+          ]
+        )
     );
     return documentStorage;
   }
@@ -102,7 +113,9 @@ export const wipeDocumentStorage = async (
     if (lastFileId) {
       queries.push(Query.cursorAfter(lastFileId));
     }
-    const filesPulled = await storage.listFiles(bucketId, queries);
+    const filesPulled = await tryAwaitWithRetry(
+      async () => await storage.listFiles(bucketId, queries)
+    );
     if (filesPulled.files.length === 0) {
       console.log("No files found, done!");
       moreFiles = false;
@@ -119,7 +132,9 @@ export const wipeDocumentStorage = async (
 
   for (const fileId of allFiles) {
     console.log(`Deleting file: ${fileId}`);
-    await storage.deleteFile(bucketId, fileId);
+    await tryAwaitWithRetry(
+      async () => await storage.deleteFile(bucketId, fileId)
+    );
   }
   console.log(`All files in bucket ${bucketId} have been deleted.`);
 };
@@ -177,7 +192,7 @@ export const backupDatabase = async (
   // Fetch and backup the database details
   let db: Models.Database;
   try {
-    db = await database.get(databaseId);
+    db = await tryAwaitWithRetry(async () => await database.get(databaseId));
   } catch (e) {
     console.error(`Error fetching database: ${e}`);
     await logOperation(
@@ -205,10 +220,13 @@ export const backupDatabase = async (
   let total = 0; // Initialize total to 0, will be updated dynamically
 
   while (moreCollections) {
-    const collectionResponse = await database.listCollections(databaseId, [
-      Query.limit(500), // Adjust the limit as needed
-      ...(lastCollectionId ? [Query.cursorAfter(lastCollectionId)] : []),
-    ]);
+    const collectionResponse = await tryAwaitWithRetry(
+      async () =>
+        await database.listCollections(databaseId, [
+          Query.limit(500), // Adjust the limit as needed
+          ...(lastCollectionId ? [Query.cursorAfter(lastCollectionId)] : []),
+        ])
+    );
 
     total += collectionResponse.collections.length; // Update total with number of collections
 
@@ -218,9 +236,8 @@ export const backupDatabase = async (
     } of collectionResponse.collections) {
       let collectionDocumentCount = 0; // Initialize document count for the current collection
       try {
-        const collection = await database.getCollection(
-          databaseId,
-          collectionId
+        const collection = await tryAwaitWithRetry(
+          async () => await database.getCollection(databaseId, collectionId)
         );
         progress++;
         data.collections.push(JSON.stringify(collection));
@@ -230,13 +247,12 @@ export const backupDatabase = async (
         let moreDocuments = true;
 
         while (moreDocuments) {
-          const documentResponse = await database.listDocuments(
-            databaseId,
-            collectionId,
-            [
-              Query.limit(500), // Adjust the limit as needed
-              ...(lastDocumentId ? [Query.cursorAfter(lastDocumentId)] : []),
-            ]
+          const documentResponse = await tryAwaitWithRetry(
+            async () =>
+              await database.listDocuments(databaseId, collectionId, [
+                Query.limit(500), // Adjust the limit as needed
+                ...(lastDocumentId ? [Query.cursorAfter(lastDocumentId)] : []),
+              ])
           );
 
           total += documentResponse.documents.length; // Update total with number of documents

@@ -15,6 +15,7 @@ import {
 import _ from "lodash";
 import { logger } from "./logging.js";
 import { splitIntoBatches } from "./migrationHelper.js";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export class UsersController {
   private config: AppwriteConfig;
@@ -37,54 +38,39 @@ export class UsersController {
   }
 
   async wipeUsers() {
-    const users = await this.users.list([Query.limit(200)]);
-    const allUsers = users.users;
-    let lastDocumentId: string | undefined;
-    if (users.users.length >= 200) {
-      lastDocumentId = users.users[users.users.length - 1].$id;
-    }
-    while (lastDocumentId) {
-      const moreUsers = await this.users.list([
-        Query.limit(200),
-        Query.cursorAfter(lastDocumentId),
-      ]);
-      allUsers.push(...moreUsers.users);
-      if (moreUsers.users.length < 200) {
-        break;
-      }
-      lastDocumentId = moreUsers.users[moreUsers.users.length - 1].$id;
-    }
+    const allUsers = await this.getAllUsers();
     console.log("Deleting all users...");
-    const createBatches = (finalData: any[]) => {
-      let maxBatchLength = 5;
+
+    const createBatches = (finalData: any[], batchSize: number) => {
       const finalBatches: any[][] = [];
-      for (let i = 0; i < finalData.length; i++) {
-        if (i % maxBatchLength === 0) {
-          finalBatches.push([]);
-        }
-        finalBatches[finalBatches.length - 1].push(finalData[i]);
+      for (let i = 0; i < finalData.length; i += batchSize) {
+        finalBatches.push(finalData.slice(i, i + batchSize));
       }
       return finalBatches;
     };
-    // const userPromises: Promise<string>[] = [];
+
     let usersDeleted = 0;
-    for (const user of allUsers) {
-      await this.users.delete(user.$id);
-      usersDeleted++;
+    const batchedUserPromises = createBatches(allUsers, 50); // Batch size of 10
+
+    for (const batch of batchedUserPromises) {
+      console.log(`Deleting ${batch.length} users...`);
+      await Promise.all(
+        batch.map((user) =>
+          tryAwaitWithRetry(async () => await this.users.delete(user.$id))
+        )
+      );
+      usersDeleted += batch.length;
       if (usersDeleted % 100 === 0) {
         console.log(`Deleted ${usersDeleted} users...`);
       }
     }
-    // const batchedUserPromises = createBatches(userPromises);
-    // for (const batch of batchedUserPromises) {
-    //   console.log(`Deleting ${batch.length} users...`);
-    //   await Promise.all(batch);
-    // }
   }
 
   async getAllUsers() {
     const allUsers: Models.User<Models.Preferences>[] = [];
-    const users = await this.users.list([Query.limit(200)]);
+    const users = await tryAwaitWithRetry(
+      async () => await this.users.list([Query.limit(200)])
+    );
     if (users.users.length === 0) {
       return [];
     }
@@ -92,10 +78,13 @@ export class UsersController {
       let lastDocumentId = users.users[users.users.length - 1].$id;
       allUsers.push(...users.users);
       while (lastDocumentId) {
-        const moreUsers = await this.users.list([
-          Query.limit(200),
-          Query.cursorAfter(lastDocumentId),
-        ]);
+        const moreUsers = await tryAwaitWithRetry(
+          async () =>
+            await this.users.list([
+              Query.limit(200),
+              Query.cursorAfter(lastDocumentId),
+            ])
+        );
         allUsers.push(...moreUsers.users);
         lastDocumentId = moreUsers.users[moreUsers.users.length - 1].$id;
         if (moreUsers.users.length < 200) {
@@ -123,9 +112,7 @@ export class UsersController {
         item.phone && item.phone.length < 15 && item.phone.startsWith("+")
           ? item.phone
           : undefined,
-        item.password?.toLowerCase() ||
-          `changeMe${item.email?.toLowerCase()}` ||
-          `changeMePlease`,
+        `changeMe${item.email?.toLowerCase()}` || `changeMePlease`,
         item.name || undefined
       );
       if (item.labels) {
@@ -137,7 +124,10 @@ export class UsersController {
       return user;
     } catch (e) {
       if (e instanceof AppwriteException) {
-        if (e.message.includes("fetch failed")) {
+        if (
+          e.message.toLowerCase().includes("fetch failed") ||
+          e.message.toLowerCase().includes("server error")
+        ) {
           const numberOfAttempts = numAttempts || 0;
           if (numberOfAttempts > 5) {
             throw e;

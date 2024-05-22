@@ -1,9 +1,12 @@
 import { Databases, Query, type Models } from "node-appwrite";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const fetchAllDatabases = async (
   database: Databases
 ): Promise<Models.Database[]> => {
-  const databases = await database.list([Query.limit(25)]);
+  const databases = await tryAwaitWithRetry(
+    async () => await database.list([Query.limit(25)])
+  );
   const allDatabases = databases.databases;
   let lastDatabaseId = allDatabases[allDatabases.length - 1].$id;
   if (databases.databases.length < 25) {

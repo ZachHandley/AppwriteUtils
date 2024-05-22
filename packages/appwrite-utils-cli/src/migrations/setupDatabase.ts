@@ -6,7 +6,11 @@ import {
   wipeDatabase,
 } from "./collections.js";
 import { getMigrationCollectionSchemas } from "./backup.js";
-import { areCollectionNamesSame, toCamelCase } from "../utils/index.js";
+import {
+  areCollectionNamesSame,
+  toCamelCase,
+  tryAwaitWithRetry,
+} from "../utils/index.js";
 import {
   backupDatabase,
   initOrGetBackupStorage,
@@ -28,16 +32,18 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   const dbCollections: Models.Collection[] = [];
   const migrationCollectionsSetup = getMigrationCollectionSchemas();
   try {
-    db = await database.get("migrations");
+    db = await tryAwaitWithRetry(async () => await database.get("migrations"));
     console.log("Migrations database found");
   } catch (e) {
-    db = await database.create("migrations", "Migrations", true);
+    db = await tryAwaitWithRetry(
+      async () => await database.create("migrations", "Migrations", true)
+    );
     console.log("Migrations database created");
   }
   if (db) {
-    const collectionsPulled = await database.listCollections(db.$id, [
-      Query.limit(25),
-    ]);
+    const collectionsPulled = await tryAwaitWithRetry(
+      async () => await database.listCollections(db.$id, [Query.limit(25)])
+    );
     dbCollections.push(...collectionsPulled.collections);
   }
   console.log(`Collections in migrations database: ${dbCollections.length}`);
@@ -49,19 +55,24 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
     const collectionId = toCamelCase(collectionName); // Convert name to toCamelCase for the ID
     let collectionFound: Models.Collection | null = null;
     try {
-      collectionFound = await database.getCollection(db.$id, collectionId);
+      collectionFound = await tryAwaitWithRetry(
+        async () => await database.getCollection(db.$id, collectionId)
+      );
     } catch (e) {
       console.log(`Collection not found: ${collectionId}`);
     }
     if (!collectionFound) {
       // Create the collection with the provided configuration
-      collectionFound = await database.createCollection(
-        db.$id,
-        collectionId,
-        collectionName,
-        undefined,
-        collection.documentSecurity,
-        collection.enabled
+      collectionFound = await tryAwaitWithRetry(
+        async () =>
+          await database.createCollection(
+            db.$id,
+            collectionId,
+            collectionName,
+            undefined,
+            collection.documentSecurity,
+            collection.enabled
+          )
       );
     }
     for (const attribute of attributes) {
@@ -87,11 +98,15 @@ export const ensureDatabasesExist = async (config: AppwriteConfig) => {
   });
   const dbNames = databasesToEnsure.map((db) => db.name);
 
-  const existingDatabases = await database.list([Query.equal("name", dbNames)]);
+  const existingDatabases = await tryAwaitWithRetry(
+    async () => await database.list([Query.equal("name", dbNames)])
+  );
 
   for (const db of databasesToEnsure) {
     if (!existingDatabases.databases.some((d) => d.name === db.name)) {
-      await database.create(db.$id || ID.unique(), db.name, true);
+      await tryAwaitWithRetry(
+        async () => await database.create(db.$id || ID.unique(), db.name, true)
+      );
       console.log(`${db.name} database created`);
     }
   }
@@ -106,12 +121,14 @@ export const wipeOtherDatabases = async (
   );
   databasesToKeep.push("migrations");
   console.log(`Databases to keep: ${databasesToKeep.join(", ")}`);
-  const allDatabases = await database.list([Query.limit(500)]);
+  const allDatabases = await tryAwaitWithRetry(
+    async () => await database.list([Query.limit(500)])
+  );
   for (const db of allDatabases.databases) {
     if (
       !databasesToKeep.includes(db.name.toLowerCase().trim().replace(" ", ""))
     ) {
-      await database.delete(db.$id);
+      await tryAwaitWithRetry(async () => await database.delete(db.$id));
       console.log(`Deleted database: ${db.name}`);
     }
   }

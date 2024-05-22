@@ -3,6 +3,7 @@ import type { Attribute } from "appwrite-utils";
 import { createOrUpdateAttribute } from "./attributes.js";
 import _ from "lodash";
 import { fetchAndCacheCollectionByName } from "./collections.js";
+import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export interface QueuedOperation {
   type: "attribute";
@@ -37,9 +38,8 @@ export const processQueue = async (db: Databases, dbId: string) => {
         if (operation.collectionId) {
           console.log(`\tFetching collection by ID: ${operation.collectionId}`);
           try {
-            collectionFound = await db.getCollection(
-              dbId,
-              operation.collectionId
+            collectionFound = await tryAwaitWithRetry(
+              async () => await db.getCollection(dbId, operation.collectionId!)
             );
           } catch (e) {
             console.log(
@@ -70,9 +70,8 @@ export const processQueue = async (db: Databases, dbId: string) => {
         // Handle non-relationship operations with a specified collectionId
         console.log(`\tFetching collection by ID: ${operation.collectionId}`);
         try {
-          collectionFound = await db.getCollection(
-            dbId,
-            operation.collectionId
+          collectionFound = await tryAwaitWithRetry(
+            async () => await db.getCollection(dbId, operation.collectionId!)
           );
         } catch (e) {
           console.log(
