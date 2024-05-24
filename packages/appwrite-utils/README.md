@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.2.7: Removed need for `lodash`
 - 0.2.6: Added `tryAwaitWithRetry` which will retry the given (used for Appwrite calls mostly) function up to 5 times if the error includes `fetch failed` or `server error` (all lowercased) because there's a weird bug sometimes with the server SDK
 - 0.2.5: Added `targetFieldToMatch` to the `idMappings` configuration which should allow more concise mapping of after-import fields
 - 0.2.3: Added OpenAPI descriptions to AuthUserSchema, which also allows one to use the openapi package itself (`@asteasolutions/zod-to-openapi`) with the AuthUserSchema

@@ -150,6 +150,26 @@ export class DataLoader {
         continue;
       }
     }
+    // Because the objects should technically always be validated FIRST, we can assume the update keys are also defined on the source object
+    for (const [key, value] of Object.entries(update)) {
+      if (value === undefined || value === null || value === "") {
+        continue;
+      } else if (!Object.hasOwn(source, key)) {
+        result[key] = value;
+      } else if (typeof source[key] === "object" && typeof value === "object") {
+        result[key] = this.mergeObjects(source[key], value);
+      } else if (Array.isArray(source[key]) && Array.isArray(value)) {
+        result[key] = [...new Set([...source[key], ...value])].filter(
+          (item) => item !== null && item !== undefined && item !== ""
+        );
+      } else if (
+        source[key] === undefined ||
+        source[key] === null ||
+        source[key] === ""
+      ) {
+        result[key] = value;
+      }
+    }
 
     return result;
   }
@@ -393,7 +413,7 @@ export class DataLoader {
         }
       }
       console.log("Running update references");
-      // this.dealWithMergedUsers();
+      this.dealWithMergedUsers();
       this.updateOldReferencesForNew();
       console.log("Done running update references");
     }
@@ -1164,19 +1184,18 @@ export class DataLoader {
    * @param collection - The collection configuration.
    * @param importDef - The import definition containing the attribute mappings and other relevant info.
    */
-  prepareUpdateData(
+  async prepareUpdateData(
     db: ConfigDatabase,
     collection: CollectionCreate,
     importDef: ImportDef
   ) {
-    // Retrieve the current collection data and old-to-new ID map from the import map
     const currentData = this.importMap.get(
       this.getCollectionKey(collection.name)
     );
     const oldIdToNewIdMap = this.oldIdToNewIdPerCollectionMap.get(
       this.getCollectionKey(collection.name)
     );
-    // Log an error and return if no current data is found for the collection
+
     if (
       !(currentData?.data && currentData?.data.length > 0) &&
       !oldIdToNewIdMap
@@ -1186,7 +1205,7 @@ export class DataLoader {
       );
       return;
     }
-    // Load the raw data based on the import definition
+
     const rawData = this.loadData(importDef);
     const operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
@@ -1196,31 +1215,75 @@ export class DataLoader {
         `No import operation found for collection ${collection.name}`
       );
     }
+
     for (const item of rawData) {
-      // Transform the item data based on the attribute mappings
       let transformedData = this.transformData(
         item,
         importDef.attributeMappings
       );
       let newId: string | undefined;
       let oldId: string | undefined;
-      // Determine the new ID for the item based on the primary key field or update mapping
-      oldId = item[importDef.primaryKeyField];
-      if (oldId) {
-        newId = oldIdToNewIdMap?.get(`${oldId}`);
-        if (
-          !newId &&
-          this.getCollectionKey(this.config.usersCollectionName) ===
-            this.getCollectionKey(collection.name)
-        ) {
-          for (const [key, value] of this.mergedUserMap.entries()) {
-            if (value.includes(`${oldId}`)) {
-              newId = key;
-              break;
+      let itemDataToUpdate: CollectionImportData["data"][number] | undefined;
+
+      // Try to find itemDataToUpdate using updateMapping
+      if (importDef.updateMapping) {
+        console.log(importDef.updateMapping);
+        oldId =
+          item[importDef.updateMapping.originalIdField] ||
+          transformedData[importDef.updateMapping.originalIdField];
+        if (oldId) {
+          itemDataToUpdate = currentData?.data.find(
+            ({ context, rawData, finalData }) => {
+              const targetField =
+                importDef.updateMapping!.targetField ??
+                importDef.updateMapping!.originalIdField;
+
+              return (
+                `${context[targetField]}` === `${oldId}` ||
+                `${rawData[targetField]}` === `${oldId}` ||
+                `${finalData[targetField]}` === `${oldId}`
+              );
+            }
+          );
+
+          if (itemDataToUpdate) {
+            newId =
+              itemDataToUpdate.finalData.docId ||
+              itemDataToUpdate.context.docId;
+          }
+        }
+      }
+
+      // If updateMapping is not defined or did not find the item, use primaryKeyField
+      if (!itemDataToUpdate && importDef.primaryKeyField) {
+        oldId =
+          item[importDef.primaryKeyField] ||
+          transformedData[importDef.primaryKeyField];
+        if (oldId) {
+          newId = oldIdToNewIdMap?.get(`${oldId}`);
+          if (
+            !newId &&
+            this.getCollectionKey(this.config.usersCollectionName) ===
+              this.getCollectionKey(collection.name)
+          ) {
+            for (const [key, value] of this.mergedUserMap.entries()) {
+              if (value.includes(`${oldId}`)) {
+                newId = key;
+                break;
+              }
             }
           }
         }
-      } else {
+
+        if (oldId && !itemDataToUpdate) {
+          itemDataToUpdate = currentData?.data.find(
+            (data) =>
+              `${data.context[importDef.primaryKeyField]}` === `${oldId}`
+          );
+        }
+      }
+
+      if (!oldId) {
         logger.error(
           `No old ID found (to update another document with) in prepareUpdateData for ${
             collection.name
@@ -1228,15 +1291,10 @@ export class DataLoader {
         );
         continue;
       }
-      const itemDataToUpdate = this.importMap
-        .get(this.getCollectionKey(collection.name))
-        ?.data.find(
-          (data) => `${data.context[importDef.primaryKeyField]}` === `${oldId}`
-        );
-      // Log an error and continue to the next item if no new ID is found
+
       if (!newId && !itemDataToUpdate) {
         logger.error(
-          `No new id found for collection ${
+          `No new id && no data found for collection ${
             collection.name
           } for updateDef ${JSON.stringify(
             item,
@@ -1246,7 +1304,8 @@ export class DataLoader {
         );
         continue;
       } else if (itemDataToUpdate) {
-        newId = itemDataToUpdate.finalData.docId;
+        newId =
+          itemDataToUpdate.finalData.docId || itemDataToUpdate.context.docId;
         if (!newId) {
           logger.error(
             `No new id found for collection ${
@@ -1255,11 +1314,16 @@ export class DataLoader {
               item,
               null,
               2
+            )} but has itemDataToUpdate ${JSON.stringify(
+              itemDataToUpdate,
+              null,
+              2
             )} but it says it's supposed to have one...`
           );
           continue;
         }
       }
+
       if (!itemDataToUpdate || !newId) {
         logger.error(
           `No data or ID (docId) found for collection ${
@@ -1272,49 +1336,51 @@ export class DataLoader {
         );
         continue;
       }
+
       transformedData = this.mergeObjects(
         itemDataToUpdate.finalData,
         transformedData
       );
+
       // Create a context object for the item, including the new ID and transformed data
       let context = this.createContext(db, collection, item, newId);
-      context = { ...context, ...transformedData };
+      context = this.mergeObjects(context, transformedData);
+
       // Validate the item before proceeding
-      const isValid = this.importDataActions.validateItem(
+      const isValid = await this.importDataActions.validateItem(
         item,
         importDef.attributeMappings,
         context
       );
-      // Log info and continue to the next item if it's invalid
+
       if (!isValid) {
         logger.info(
           `Skipping item: ${JSON.stringify(item, null, 2)} because it's invalid`
         );
         continue;
       }
+
       // Update the attribute mappings with any actions that need to be performed post-import
       const mappingsWithActions = this.getAttributeMappingsWithActions(
         importDef.attributeMappings,
         context,
         transformedData
       );
+
       // Update the import definition with the new attribute mappings
       const newImportDef = {
         ...importDef,
         attributeMappings: mappingsWithActions,
       };
-      // Add the item with its context and final data to the current collection data
+
       if (itemDataToUpdate) {
-        // Update the existing item's finalData and context in place
         itemDataToUpdate.finalData = this.mergeObjects(
           itemDataToUpdate.finalData,
           transformedData
         );
         itemDataToUpdate.context = context;
         itemDataToUpdate.importDef = newImportDef;
-        currentData!.data.push(itemDataToUpdate);
       } else {
-        // If no existing item matches, then add the new item
         currentData!.data.push({
           rawData: item,
           context: context,
@@ -1322,6 +1388,7 @@ export class DataLoader {
           finalData: transformedData,
         });
       }
+
       // Since we're modifying currentData in place, we ensure no duplicates are added
       this.importMap.set(this.getCollectionKey(collection.name), currentData!);
     }

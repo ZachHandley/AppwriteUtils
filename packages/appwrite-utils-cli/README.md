@@ -12,6 +12,7 @@
 - **Data Import**: Facilitate the import of data into your Appwrite databases with comprehensive command-line support.
 - **Backup Management**: Create backups of your Appwrite databases to ensure data integrity and safety.
 - **Flexible Database Management**: Includes commands to wipe databases, documents, or user data, providing flexibility in managing your database state during development or testing.
+- **Transfer Databases, Collections, Documents, Storage Buckets, and more**: Includes additional commands (new) to transfer your data from one place to another. I also optimized the import process using this.
 
 ## Installation
 
@@ -60,11 +61,56 @@ Replace `--args` with the appropriate options:
 - `--import`: Import data into your databases.
 - `--backup`: Perform a backup of your databases.
 - `--wipe-users`: Wipe all user data.
-- `--write-data`: Write converted imported data to file
-- `--sync`: Synchronize your project's config and generate schema for your database
-- `--endpoint`: Set a different endpoint for the migration target
-- `--project`: Set a different project ID for the migration target
-- `--key`: Set a different API key for the migration target
+- `--write-data`: Write converted imported data to file.
+- `--sync`: Synchronize your project's config and generate schema for your database.
+- `--endpoint <endpoint>`: Set the Appwrite endpoint.
+- `--project <project>`: Set the Appwrite project ID.
+- `--key <key>`: Set the Appwrite API key.
+- `--transfer`: Transfer documents between databases.
+- `--transfer-users`: Transfer users between local and remote.
+- `--transferendpoint <transferEndpoint>`: Set the transfer endpoint for remote transfers.
+- `--transferproject <transferProject>`: Set the transfer project ID for remote transfers.
+- `--transferkey <transferKey>`: Set the transfer key for remote transfers.
+- `--fromdb <fromDbId>`: Set the source database ID.
+- `--targetdb <targetDbId>`: Set the destination database ID.
+- `--fromcoll <collectionId>`: Set the source collection ID for transfer, only used for transfer.
+- `--targetcoll <collectionId>`: Set the collection ID to import data into.
+- `--frombucket <bucketId>`: Set the source bucket ID.
+- `--targetbucket <bucketId>`: Set the destination bucket ID.
+
+## Examples
+
+### Transfer Databases
+
+Transfer databases within the same project or from a local to a remote project. If `--fromcoll` and `--targetcoll` are omitted, it will transfer the entire databases. During the database transfer, it will create any missing collections, attributes, and indices.
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --transfer --fromdb fromDbId --targetdb toDbId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+```
+
+### Transfer Specific Collections
+
+Transfer specific collections from one place to another, with all of their data.
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --transfer --fromdb fromDbId --targetdb toDbId --fromcoll sourceCollectionId --targetcoll targetCollectionId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+```
+
+### Transfer Buckets
+
+Transfer files between buckets.
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --transfer --frombucket sourceBucketId --targetbucket targetBucketId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+```
+
+### Transfer Users
+
+Transfer users between local and remote.
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --transfer-users --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+```
 
 ## If you run out of RAM
 
@@ -86,6 +132,10 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.50: Actually fixed the slight bug, it was really in the `mergeObjects`
+- 0.0.49: Fixed a slight bug with `dataLoader` not mapping updates correctly with `updateMapping`
+- 0.0.48: Added `--transfer`, `--fromdb <targetDatabaseId>`, `--targetdb <targetDatabaseId>`, `--transferendpoint <transferEndpoint>`, `--transferproject <transferProjectId>`, `--transferkey <transferApiKey>`. Additionally, I've added `--fromcoll <collectionId>` and `--targetcoll <collectionId>`. These allow you to do a few things. First, you can now transfer databases in the same project, and from local to a remote project. Second, you can now specify specific collections to transfer from one place to another, with all of their data. If `--fromcoll` and `--targetcoll` are ommitted, it will transfer the databases. During the database transfer, it will create any missing collections, attributes, and indices.
+- 0.0.47: Minor bugfixes in many releases, too small to take note of
 - 0.0.38: Lots of optimizations done to the code, added `tryAwaitWithRetry` for `fetch failed` and others like it errors (looking at you `server error`) -- this should prevent things from going sideways.
 - 0.0.37: Added `documentSecurity`, `enabled`, and `$id` to the `init` collection
 - 0.0.36: Made it update collections by default, sometimes you gotta do what you gotta do

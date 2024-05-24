@@ -26,6 +26,9 @@ import {
   OperationSchema,
 } from "./backup.js";
 import { DataLoader, type CollectionImportData } from "./dataLoader.js";
+import { transferDocumentsBetweenDbsLocalToLocal } from "./collections.js";
+import { transferDatabaseLocalToLocal } from "./databases.js";
+import { transferStorageLocalToLocal } from "./storage.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -73,6 +76,7 @@ export class ImportController {
       )
       .map((db) => db.name);
     let dataLoader: DataLoader | undefined;
+    let databaseRan: ConfigDatabase | undefined;
     for (let db of this.config.databases) {
       if (
         db.name.toLowerCase().trim().replace(" ", "") === "migrations" ||
@@ -92,7 +96,8 @@ export class ImportController {
       console.log(`Starting import data for database: ${db.name}`);
       console.log(`---------------------------------`);
       // await this.importCollections(db);
-      if (!dataLoader) {
+      if (!databaseRan) {
+        databaseRan = db;
         dataLoader = new DataLoader(
           this.appwriteFolderPath,
           this.importDataActions,
@@ -101,16 +106,36 @@ export class ImportController {
           this.setupOptions.shouldWriteFile
         );
         await dataLoader.start(db.$id);
-      } else {
-        console.log(`Using data from previous import run`);
+        await this.importCollections(db, dataLoader);
+        await resolveAndUpdateRelationships(db.$id, this.database, this.config);
+        await this.executePostImportActions(db.$id, dataLoader);
+      } else if (databaseRan.$id !== db.$id) {
+        await this.updateOthersToFinalData(databaseRan, db);
       }
-      await this.importCollections(db, dataLoader);
-      await resolveAndUpdateRelationships(db.$id, this.database, this.config);
-      await this.executePostImportActions(db.$id, dataLoader);
       console.log(`---------------------------------`);
       console.log(`Finished import data for database: ${db.name}`);
       console.log(`---------------------------------`);
     }
+  }
+
+  async updateOthersToFinalData(
+    updatedDb: ConfigDatabase,
+    targetDb: ConfigDatabase
+  ) {
+    await transferDatabaseLocalToLocal(
+      this.database,
+      updatedDb.$id,
+      targetDb.$id
+    );
+    await transferStorageLocalToLocal(
+      this.storage,
+      `${this.config.documentBucketId}_${updatedDb.name
+        .toLowerCase()
+        .replace(" ", "")}`,
+      `${this.config.documentBucketId}_${targetDb.name
+        .toLowerCase()
+        .replace(" ", "")}`
+    );
   }
 
   async importCollections(db: ConfigDatabase, dataLoader: DataLoader) {
@@ -125,7 +150,7 @@ export class ImportController {
         dataLoader.getCollectionKey(collection.name)
       );
       const createBatches = (finalData: CollectionImportData["data"]) => {
-        let maxBatchLength = 25;
+        let maxBatchLength = 100;
         const finalBatches: CollectionImportData["data"][] = [];
         for (let i = 0; i < finalData.length; i++) {
           if (i % maxBatchLength === 0) {

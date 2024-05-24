@@ -9,6 +9,45 @@ program
   .option("--endpoint <endpoint>", "Set the Appwrite endpoint", undefined)
   .option("--project <project>", "Set the Appwrite project ID", undefined)
   .option("--key <key>", "Set the Appwrite API key", undefined)
+  .option("--transfer", "Transfer documents between databases", false)
+  .option("--transfer-users", "Transfer users between local and remote", false)
+  .option(
+    "--transferendpoint <transferEndpoint>",
+    "Set the transfer endpoint for remote transfers",
+    undefined
+  )
+  .option(
+    "--transferproject <transferProject>",
+    "Set the transfer project ID for remote transfers",
+    undefined
+  )
+  .option(
+    "--transferkey <transferKey>",
+    "Set the transfer key for remote transfers",
+    undefined
+  )
+  .option("--fromdb <fromDbId>", "Set the source database ID", undefined)
+  .option(
+    "--targetdb <targetDbId>",
+    "Set the destination database ID",
+    undefined
+  )
+  .option(
+    "--fromcoll <collectionId>",
+    "Set the source collection ID for transfer, only used for transfer",
+    undefined
+  )
+  .option(
+    "--targetcoll <collectionId>",
+    "Set the collection ID to import data into",
+    undefined
+  )
+  .option("--frombucket <bucketId>", "Set the source bucket ID", undefined)
+  .option(
+    "--targetbucket <bucketId>",
+    "Set the destination bucket ID",
+    undefined
+  )
   .option("--backup", "Perform a backup before executing the command", false)
   .option("--dev", "Run in development environment", false)
   .option("--prod", "Run in production environment", false)
@@ -27,6 +66,9 @@ program.on("--help", () => {
   console.log("Examples:");
   console.log(
     "  $ npx appwrite-utils-cli appwrite-migrate --sync --endpoint https://appwrite.example.com --project 123456 --key 7890"
+  );
+  console.log(
+    "  $ npx appwrite-utils-cli appwrite-migrate --transfer --fromdb fromDbId --targetdb toDbId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey"
   );
   console.log(
     "  $ npx appwrite-utils-cli appwrite-migrate --sync --dev --backup"
@@ -70,6 +112,17 @@ program.action(async (options) => {
       endpoint: options.endpoint,
       project: options.project,
       key: options.key,
+      transfer: options.transfer,
+      transferEndpoint: options.transferEndpoint,
+      transferProject: options.transferProject,
+      transferKey: options.transferKey,
+      fromDbId: options.fromdb,
+      targetDbId: options.targetdb,
+      fromCollection: options.fromcoll,
+      collection: options.targetcoll, // Add this line
+      transferUsers: options.transferUsers,
+      fromBucket: options.frombucket,
+      targetBucket: options.targetbucket,
     };
     console.log("Running operation...", setupOptions);
 

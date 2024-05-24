@@ -1,8 +1,6 @@
 import { DateTime } from "luxon";
-import _ from "lodash";
 import type { AttributeMappings } from "../schemas/attributeMappings.js";
-
-const { cloneDeep, isObject } = _;
+import { validationRules } from "./validationRules.js";
 
 export interface ConverterFunctions {
   [key: string]: (value: any) => any;
@@ -378,7 +376,7 @@ export const converterFunctions = {
     if (Array.isArray(value)) {
       return value.map((item) => this.convertEmptyToNull(item));
     }
-    if (_.isEmpty(value)) return null;
+    if (validationRules.isEmpty(value)) return null;
     return value;
   },
 
@@ -390,15 +388,14 @@ export const converterFunctions = {
    */
   removeInvalidElements(array: any[]): any[] {
     if (!Array.isArray(array)) return array;
-    return _.filter(
-      array,
+    return array.filter(
       (element) =>
         element !== null &&
         element !== undefined &&
         element !== "" &&
         element !== "undefined" &&
         element !== "null" &&
-        !_.isEmpty(element)
+        !validationRules.isEmpty(element)
     );
   },
 
@@ -485,7 +482,7 @@ export const converterFunctions = {
 export const deepAnyToString = (data: any): any => {
   if (Array.isArray(data)) {
     return data.map((item) => deepAnyToString(item));
-  } else if (isObject(data)) {
+  } else if (validationRules.isObject(data)) {
     return Object.keys(data).reduce((acc, key) => {
       acc[key] = deepAnyToString(data[key as keyof typeof data]);
       return acc;
@@ -508,7 +505,7 @@ export const deepConvert = <T>(
 ): any => {
   if (Array.isArray(data)) {
     return data.map((item) => deepConvert(item, convertFn));
-  } else if (isObject(data)) {
+  } else if (validationRules.isObject(data)) {
     return Object.keys(data).reduce((acc: Record<string, T>, key: string) => {
       acc[key] = deepConvert(data[key as keyof typeof data], convertFn);
       return acc;
@@ -606,7 +603,7 @@ export const immutableConvert = <T>(
   data: any,
   convertFn: (value: any) => T
 ): T => {
-  const clonedData = cloneDeep(data);
+  const clonedData = structuredClone(data);
   return convertFn(clonedData);
 };
 

@@ -1,4 +1,11 @@
-import { Databases, ID, Permission, Query, type Models } from "node-appwrite";
+import {
+  Client,
+  Databases,
+  ID,
+  Permission,
+  Query,
+  type Models,
+} from "node-appwrite";
 import type { AppwriteConfig, CollectionCreate } from "appwrite-utils";
 import { nameToIdMapping, processQueue } from "./queue.js";
 import { createUpdateCollectionAttributes } from "./attributes.js";
@@ -133,7 +140,9 @@ export const wipeDatabase = async (
       collectionId: collectionId,
       collectionName: name,
     });
-    await database.deleteCollection(databaseId, collectionId);
+    tryAwaitWithRetry(
+      async () => await database.deleteCollection(databaseId, collectionId)
+    ); // Try to delete the collection and ignore errors if it doesn't exist or if it's already being deleted
   }
   return collectionsDeleted;
 };
@@ -201,16 +210,16 @@ export const createOrUpdateCollections = async (
     let collectionId: string;
     if (!collectionToUse) {
       console.log(`Creating collection: ${collection.name}`);
-      const foundColl = deletedCollections?.find(
+      let foundColl = deletedCollections?.find(
         (coll) =>
           coll.collectionName.toLowerCase().trim().replace(" ", "") ===
           collection.name.toLowerCase().trim().replace(" ", "")
       );
 
-      if (foundColl && !usedIds.has(foundColl.collectionId)) {
+      if (collection.$id) {
+        collectionId = collection.$id; // Always use the provided $id if present
+      } else if (foundColl && !usedIds.has(foundColl.collectionId)) {
         collectionId = foundColl.collectionId; // Use ID from deleted collection if not already used
-      } else if (collection.$id && !usedIds.has(collection.$id)) {
-        collectionId = collection.$id; // Use the provided $id if not already used
       } else {
         collectionId = ID.unique(); // Generate a new unique ID
       }
@@ -321,4 +330,215 @@ export const fetchAllCollections = async (
 
   console.log(`Fetched a total of ${collections.length} collections.`);
   return collections;
+};
+
+/**
+ * Transfers all documents from one collection to another in a different database
+ * within the same Appwrite Project
+ */
+export const transferDocumentsBetweenDbsLocalToLocal = async (
+  db: Databases,
+  fromDbId: string,
+  toDbId: string,
+  fromCollId: string,
+  toCollId: string
+) => {
+  let fromCollDocs = await tryAwaitWithRetry(async () =>
+    db.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
+  );
+  let totalDocumentsTransferred = 0;
+
+  if (fromCollDocs.documents.length === 0) {
+    console.log(`No documents found in collection ${fromCollId}`);
+    return;
+  } else if (fromCollDocs.documents.length < 50) {
+    const batchedPromises = fromCollDocs.documents.map((doc) => {
+      const toCreateObject: Partial<typeof doc> = {
+        ...doc,
+      };
+      delete toCreateObject.$databaseId;
+      delete toCreateObject.$collectionId;
+      delete toCreateObject.$createdAt;
+      delete toCreateObject.$updatedAt;
+      delete toCreateObject.$id;
+      delete toCreateObject.$permissions;
+      return tryAwaitWithRetry(
+        async () =>
+          await db.createDocument(
+            toDbId,
+            toCollId,
+            doc.$id,
+            toCreateObject,
+            doc.$permissions
+          )
+      );
+    });
+    await Promise.all(batchedPromises);
+    totalDocumentsTransferred += fromCollDocs.documents.length;
+  } else {
+    const batchedPromises = fromCollDocs.documents.map((doc) => {
+      const toCreateObject: Partial<typeof doc> = {
+        ...doc,
+      };
+      delete toCreateObject.$databaseId;
+      delete toCreateObject.$collectionId;
+      delete toCreateObject.$createdAt;
+      delete toCreateObject.$updatedAt;
+      delete toCreateObject.$id;
+      delete toCreateObject.$permissions;
+      return tryAwaitWithRetry(async () =>
+        db.createDocument(
+          toDbId,
+          toCollId,
+          doc.$id,
+          toCreateObject,
+          doc.$permissions
+        )
+      );
+    });
+    await Promise.all(batchedPromises);
+    totalDocumentsTransferred += fromCollDocs.documents.length;
+    while (fromCollDocs.documents.length === 50) {
+      fromCollDocs = await db.listDocuments(fromDbId, fromCollId, [
+        Query.limit(50),
+        Query.cursorAfter(
+          fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
+        ),
+      ]);
+      const batchedPromises = fromCollDocs.documents.map((doc) => {
+        const toCreateObject: Partial<typeof doc> = {
+          ...doc,
+        };
+        delete toCreateObject.$databaseId;
+        delete toCreateObject.$collectionId;
+        delete toCreateObject.$createdAt;
+        delete toCreateObject.$updatedAt;
+        delete toCreateObject.$id;
+        delete toCreateObject.$permissions;
+        return tryAwaitWithRetry(
+          async () =>
+            await db.createDocument(
+              toDbId,
+              toCollId,
+              doc.$id,
+              toCreateObject,
+              doc.$permissions
+            )
+        );
+      });
+      await Promise.all(batchedPromises);
+      totalDocumentsTransferred += fromCollDocs.documents.length;
+    }
+  }
+
+  console.log(
+    `Transferred ${totalDocumentsTransferred} documents from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}`
+  );
+};
+
+export const transferDocumentsBetweenDbsLocalToRemote = async (
+  localDb: Databases,
+  endpoint: string,
+  projectId: string,
+  apiKey: string,
+  fromDbId: string,
+  toDbId: string,
+  fromCollId: string,
+  toCollId: string
+) => {
+  const client = new Client()
+    .setEndpoint(endpoint)
+    .setProject(projectId)
+    .setKey(apiKey);
+  let totalDocumentsTransferred = 0;
+  const remoteDb = new Databases(client);
+  let fromCollDocs = await tryAwaitWithRetry(async () =>
+    localDb.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
+  );
+
+  if (fromCollDocs.documents.length === 0) {
+    console.log(`No documents found in collection ${fromCollId}`);
+    return;
+  } else if (fromCollDocs.documents.length < 50) {
+    const batchedPromises = fromCollDocs.documents.map((doc) => {
+      const toCreateObject: Partial<typeof doc> = {
+        ...doc,
+      };
+      delete toCreateObject.$databaseId;
+      delete toCreateObject.$collectionId;
+      delete toCreateObject.$createdAt;
+      delete toCreateObject.$updatedAt;
+      delete toCreateObject.$id;
+      delete toCreateObject.$permissions;
+      return tryAwaitWithRetry(async () =>
+        remoteDb.createDocument(
+          toDbId,
+          toCollId,
+          doc.$id,
+          toCreateObject,
+          doc.$permissions
+        )
+      );
+    });
+    await Promise.all(batchedPromises);
+    totalDocumentsTransferred += fromCollDocs.documents.length;
+  } else {
+    const batchedPromises = fromCollDocs.documents.map((doc) => {
+      const toCreateObject: Partial<typeof doc> = {
+        ...doc,
+      };
+      delete toCreateObject.$databaseId;
+      delete toCreateObject.$collectionId;
+      delete toCreateObject.$createdAt;
+      delete toCreateObject.$updatedAt;
+      delete toCreateObject.$id;
+      delete toCreateObject.$permissions;
+      return tryAwaitWithRetry(async () =>
+        remoteDb.createDocument(
+          toDbId,
+          toCollId,
+          doc.$id,
+          toCreateObject,
+          doc.$permissions
+        )
+      );
+    });
+    await Promise.all(batchedPromises);
+    totalDocumentsTransferred += fromCollDocs.documents.length;
+    while (fromCollDocs.documents.length === 50) {
+      fromCollDocs = await tryAwaitWithRetry(async () =>
+        localDb.listDocuments(fromDbId, fromCollId, [
+          Query.limit(50),
+          Query.cursorAfter(
+            fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
+          ),
+        ])
+      );
+      const batchedPromises = fromCollDocs.documents.map((doc) => {
+        const toCreateObject: Partial<typeof doc> = {
+          ...doc,
+        };
+        delete toCreateObject.$databaseId;
+        delete toCreateObject.$collectionId;
+        delete toCreateObject.$createdAt;
+        delete toCreateObject.$updatedAt;
+        delete toCreateObject.$id;
+        delete toCreateObject.$permissions;
+        return tryAwaitWithRetry(async () =>
+          remoteDb.createDocument(
+            toDbId,
+            toCollId,
+            doc.$id,
+            toCreateObject,
+            doc.$permissions
+          )
+        );
+      });
+      await Promise.all(batchedPromises);
+      totalDocumentsTransferred += fromCollDocs.documents.length;
+    }
+  }
+  console.log(
+    `Total documents transferred from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}: ${totalDocumentsTransferred}`
+  );
 };

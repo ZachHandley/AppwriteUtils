@@ -1,4 +1,9 @@
-import { AppwriteException, type Models, type Storage } from "node-appwrite";
+import {
+  AppwriteException,
+  Client,
+  type Models,
+  type Storage,
+} from "node-appwrite";
 import fs from "node:fs";
 import path from "node:path";
 import type { CollectionImportData } from "../migrations/dataLoader.js";
@@ -137,7 +142,8 @@ export let numTimesFailedTotal = 0;
  */
 export const tryAwaitWithRetry = async <T>(
   createFunction: () => Promise<T>,
-  attemptNum: number = 0
+  attemptNum: number = 0,
+  throwError: boolean = false
 ): Promise<T> => {
   try {
     return await createFunction();
@@ -154,6 +160,21 @@ export const tryAwaitWithRetry = async <T>(
       }
       return tryAwaitWithRetry(createFunction, attemptNum + 1);
     }
-    throw error;
+    if (throwError) {
+      throw error;
+    }
+    // @ts-ignore
+    return Promise.resolve();
   }
+};
+
+export const getAppwriteClient = (
+  endpoint: string,
+  projectId: string,
+  apiKey: string
+) => {
+  return new Client()
+    .setEndpoint(endpoint)
+    .setProject(projectId)
+    .setKey(apiKey);
 };

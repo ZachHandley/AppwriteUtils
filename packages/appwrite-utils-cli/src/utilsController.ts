@@ -20,6 +20,19 @@ import _ from "lodash";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { loadConfig as loadTsConfig } from "./utils/loadConfigs.js";
 import { findAppwriteConfig } from "./utils/loadConfigs.js";
+import {
+  transferDocumentsBetweenDbsLocalToLocal,
+  transferDocumentsBetweenDbsLocalToRemote,
+} from "./migrations/collections.js";
+import { UsersController } from "./migrations/users.js";
+import {
+  transferDatabaseLocalToLocal,
+  transferDatabaseLocalToRemote,
+} from "./migrations/databases.js";
+import {
+  transferStorageLocalToLocal,
+  transferStorageLocalToRemote,
+} from "./migrations/storage.js";
 
 // async function loadConfig(configPath: string) {
 //   if (!fs.existsSync(configPath)) {
@@ -48,6 +61,17 @@ export interface SetupOptions {
   endpoint?: string;
   project?: string;
   key?: string;
+  transfer?: boolean;
+  transferEndpoint?: string;
+  transferProject?: string;
+  transferKey?: string;
+  fromDbId?: string;
+  targetDbId?: string;
+  fromCollection?: string;
+  collection?: string;
+  transferUsers?: boolean;
+  fromBucket?: string;
+  targetBucket?: string;
 }
 
 export class UtilsController {
@@ -138,6 +162,122 @@ export class UtilsController {
     await this.init(options); // Ensure initialization is done
     if (!this.database || !this.storage || !this.config) {
       throw new Error("Database or storage not initialized");
+    }
+
+    if (options.transfer) {
+      if (options.fromCollection) {
+        if (
+          options.transferEndpoint &&
+          options.transferProject &&
+          options.transferKey
+        ) {
+          if (options.transferUsers) {
+            console.log(
+              `Transferring users from local database ${options.fromDbId} to remote database ${options.targetDbId} on endpoint ${options.transferEndpoint}...`
+            );
+            const usersController = new UsersController(
+              this.config,
+              this.database
+            );
+            await usersController.transferUsersBetweenDbsLocalToRemote(
+              options.transferEndpoint,
+              options.transferProject,
+              options.transferKey
+            );
+          }
+          console.log("Transferring documents to remote database...");
+          await transferDocumentsBetweenDbsLocalToRemote(
+            this.database,
+            options.transferEndpoint,
+            options.transferProject,
+            options.transferKey,
+            options.fromDbId!,
+            options.targetDbId!,
+            options.fromCollection!,
+            options.collection!
+          );
+        } else {
+          console.log("Transferring documents between local databases...");
+          await transferDocumentsBetweenDbsLocalToLocal(
+            this.database,
+            options.fromDbId!,
+            options.targetDbId!,
+            options.fromCollection!,
+            options.collection!
+          );
+        }
+      } else if (options.fromDbId && options.targetDbId) {
+        if (
+          options.transferEndpoint &&
+          options.transferProject &&
+          options.transferKey
+        ) {
+          if (options.transferUsers) {
+            console.log(
+              `Transferring users from local database ${options.fromDbId} to remote database ${options.targetDbId} on endpoint ${options.transferEndpoint}...`
+            );
+            const usersController = new UsersController(
+              this.config,
+              this.database
+            );
+            await usersController.transferUsersBetweenDbsLocalToRemote(
+              options.transferEndpoint,
+              options.transferProject,
+              options.transferKey
+            );
+          }
+          console.log(
+            `Transferring databases from local database ${options.fromDbId} to remote database ${options.targetDbId} on endpoint ${options.transferEndpoint}...`
+          );
+          await transferDatabaseLocalToRemote(
+            this.database,
+            options.transferEndpoint,
+            options.transferProject,
+            options.transferKey,
+            options.fromDbId!,
+            options.targetDbId!
+          );
+        } else {
+          console.log(
+            `Transferring databases from local database ${options.fromDbId} to local database ${options.targetDbId}`
+          );
+          await transferDatabaseLocalToLocal(
+            this.database,
+            options.fromDbId!,
+            options.targetDbId!
+          );
+        }
+      }
+      if (options.fromBucket && options.targetBucket) {
+        if (
+          options.transferEndpoint &&
+          options.transferProject &&
+          options.transferKey
+        ) {
+          console.log(
+            `Transferring files from bucket ${options.fromBucket} to bucket ${options.targetBucket} on endpoint ${options.transferEndpoint}...`
+          );
+          await transferStorageLocalToRemote(
+            this.storage,
+            options.transferEndpoint,
+            options.transferProject,
+            options.transferKey,
+            options.fromBucket,
+            options.targetBucket
+          );
+        } else {
+          console.log(
+            `Transferring files from bucket ${options.fromBucket} to bucket ${options.targetBucket}...`
+          );
+          await transferStorageLocalToLocal(
+            this.storage,
+            options.fromBucket,
+            options.targetBucket
+          );
+        }
+      }
+      console.log("Transfer complete.");
+      return;
     }
 
     if (options.sync) {

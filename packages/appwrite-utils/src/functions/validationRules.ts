@@ -1,63 +1,102 @@
-import _ from "lodash";
-
 export interface ValidationRules {
   [key: string]: (value: any, ...args: any[]) => boolean;
 }
 
 export const validationRules = {
-  isNumber: (value: any): boolean => _.isNumber(value),
-  isString: (value: any): boolean => _.isString(value),
-  isBoolean: (value: any): boolean => _.isBoolean(value),
-  isArray: (value: any): boolean => _.isArray(value),
+  isNumber: (value: any): boolean => typeof value === "number",
+  isString: (value: any): boolean => typeof value === "string",
+  isBoolean: (value: any): boolean => typeof value === "boolean",
+  isArray: (value: any): boolean => Array.isArray(value),
   isObject: (value: any): boolean =>
-    _.isObject(value) && !_.isArray(value) && !_.isFunction(value),
-  isNull: (value: any): boolean => _.isNull(value),
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value !== "function",
+  isNull: (value: any): boolean => value === null,
   isValidEmail: (value: string): boolean =>
-    value.match(/^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$/) !== null,
+    /^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$/.test(value),
   isValidPhone: (value: string): boolean =>
-    value.match(/^[+]?[(]?[0-9]{3}[)]?[-\s.]?[0-9]{3}[-\s.]?[0-9]{4,6}$/im) !==
-    null,
+    /^[+]?[(]?[0-9]{3}[)]?[-\s.]?[0-9]{3}[-\s.]?[0-9]{4,6}$/im.test(value),
   isValidPassword: (value: string): boolean =>
-    value.match(
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$/
-    ) !== null,
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$/.test(
+      value
+    ),
   isValidUrl: (value: string): boolean =>
-    value.match(
-      /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/
-    ) !== null,
+    /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/.test(
+      value
+    ),
   isValidHex: (value: string): boolean =>
-    value.match(/^#([a-f0-9]{6}|[a-f0-9]{3})$/i) !== null,
+    /^#([a-f0-9]{6}|[a-f0-9]{3})$/i.test(value),
   isValidHexColor: (value: string): boolean =>
-    value.match(/^#([a-f0-9]{6}|[a-f0-9]{3})$/i) !== null,
+    /^#([a-f0-9]{6}|[a-f0-9]{3})$/i.test(value),
   isValidHexAlpha: (value: string): boolean =>
-    value.match(/^#([a-f0-9]{8}|[a-f0-9]{4})$/i) !== null,
-  isValidDate: (value: string): boolean =>
-    value.match(/^\d{4}-\d{2}-\d{2}$/) !== null,
-  isValidTime: (value: string): boolean =>
-    value.match(/^\d{2}:\d{2}(:\d{2})?$/) !== null,
-  isNullish: (value: any): boolean => _.isNull(value) || _.isUndefined(value),
-  isUndefined: (value: any): boolean => _.isUndefined(value),
+    /^#([a-f0-9]{8}|[a-f0-9]{4})$/i.test(value),
+  isValidDate: (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value),
+  isValidTime: (value: string): boolean => /^\d{2}:\d{2}(:\d{2})?$/.test(value),
+  isNullish: (value: any): boolean => value == null,
+  isUndefined: (value: any): boolean => value === undefined,
   isDefined: (value: any): boolean =>
-    !_.isUndefined(value) && !_.isNull(value) && !_.isEmpty(value),
-  isDate: (value: any): boolean => _.isDate(value),
-  isEmpty: (value: any): boolean => _.isEmpty(value),
-  isInteger: (value: any): boolean => _.isInteger(value),
-  isFloat: (value: any): boolean => _.isNumber(value) && !_.isInteger(value),
-  isArrayLike: (value: any): boolean => _.isArrayLike(value),
-  isArrayLikeObject: (value: any): boolean => _.isArrayLikeObject(value),
-  isFunction: (value: any): boolean => _.isFunction(value),
-  isLength: (value: any): boolean => _.isLength(value),
-  isMap: (value: any): boolean => _.isMap(value),
-  isSet: (value: any): boolean => _.isSet(value),
-  isRegExp: (value: any): boolean => _.isRegExp(value),
-  isSymbol: (value: any): boolean => _.isSymbol(value),
-  isObjectLike: (value: any): boolean => _.isObjectLike(value),
-  isPlainObject: (value: any): boolean => _.isPlainObject(value),
-  isSafeInteger: (value: any): boolean => _.isSafeInteger(value),
-  isTypedArray: (value: any): boolean => _.isTypedArray(value),
-  isEqual: (value: any, other: any): boolean => _.isEqual(value, other),
-  isMatch: (object: any, source: any): boolean => _.isMatch(object, source),
-  has: (object: any, path: string): boolean => _.has(object, path),
-  get: (object: any, path: string, defaultValue: any): any =>
-    _.get(object, path, defaultValue),
+    value !== undefined && value !== null && value !== "",
+  isDate: (value: any): boolean => value instanceof Date,
+  isEmpty: (value: any): boolean =>
+    value == null ||
+    (typeof value === "object" && Object.keys(value).length === 0) ||
+    (Array.isArray(value) && value.length === 0),
+  isInteger: (value: any): boolean => Number.isInteger(value),
+  isFloat: (value: any): boolean =>
+    typeof value === "number" && !Number.isInteger(value),
+  isArrayLike: (value: any): boolean =>
+    value != null &&
+    typeof value !== "function" &&
+    typeof value.length === "number" &&
+    value.length >= 0,
+  isArrayLikeObject: (value: any): boolean =>
+    typeof value === "object" &&
+    value !== null &&
+    typeof value.length === "number" &&
+    value.length >= 0,
+  isFunction: (value: any): boolean => typeof value === "function",
+  isLength: (value: any): boolean =>
+    typeof value === "number" && value >= 0 && Number.isInteger(value),
+  isMap: (value: any): boolean => value instanceof Map,
+  isSet: (value: any): boolean => value instanceof Set,
+  isRegExp: (value: any): boolean => value instanceof RegExp,
+  isSymbol: (value: any): boolean => typeof value === "symbol",
+  isObjectLike: (value: any): boolean =>
+    typeof value === "object" && value !== null,
+  isPlainObject: (value: any): boolean =>
+    Object.prototype.toString.call(value) === "[object Object]",
+  isSafeInteger: (value: any): boolean => Number.isSafeInteger(value),
+  isTypedArray: (value: any): boolean =>
+    ArrayBuffer.isView(value) && !(value instanceof DataView),
+  isEqual: (value: any, other: any): boolean =>
+    JSON.stringify(value) === JSON.stringify(other),
+  isMatch: (object: any, source: any): boolean => {
+    for (let key in source) {
+      if (source[key] !== object[key]) {
+        return false;
+      }
+    }
+    return true;
+  },
+  has: (object: any, path: string): boolean => {
+    const keys = path.split(".");
+    for (let key of keys) {
+      if (object == null || !object.hasOwnProperty(key)) {
+        return false;
+      }
+      object = object[key];
+    }
+    return true;
+  },
+  get: (object: any, path: string, defaultValue: any): any => {
+    const keys = path.split(".");
+    for (let key of keys) {
+      if (object == null || !object.hasOwnProperty(key)) {
+        return defaultValue;
+      }
+      object = object[key];
+    }
+    return object;
+  },
 };

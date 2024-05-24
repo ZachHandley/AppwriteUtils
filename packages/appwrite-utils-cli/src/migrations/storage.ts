@@ -10,7 +10,10 @@ import {
 import { type OperationCreate, type BackupCreate } from "./backup.js";
 import { splitIntoBatches } from "./migrationHelper.js";
 import type { AppwriteConfig } from "appwrite-utils";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import {
+  getAppwriteClient,
+  tryAwaitWithRetry,
+} from "../utils/helperFunctions.js";
 
 export const logOperation = async (
   db: Databases,
@@ -371,4 +374,124 @@ export const backupDatabase = async (
   console.log("---------------------------------");
   console.log("Database Backup Complete");
   console.log("---------------------------------");
+};
+
+export const transferStorageLocalToLocal = async (
+  storage: Storage,
+  fromBucketId: string,
+  toBucketId: string
+) => {
+  console.log(`Transferring files from ${fromBucketId} to ${toBucketId}`);
+  let lastFileId: string | undefined;
+  let fromFiles = await tryAwaitWithRetry(
+    async () => await storage.listFiles(fromBucketId, [Query.limit(100)])
+  );
+  const allFromFiles = fromFiles.files;
+  let numberOfFiles = 0;
+  if (fromFiles.files.length < 100) {
+    for (const file of allFromFiles) {
+      const fileData = await storage.getFileDownload(file.bucketId, file.$id);
+      const fileToCreate = InputFile.fromBuffer(
+        Buffer.from(fileData),
+        file.name
+      );
+      console.log(`Creating file: ${file.name}`);
+      tryAwaitWithRetry(
+        async () =>
+          await storage.createFile(
+            toBucketId,
+            file.$id,
+            fileToCreate,
+            file.$permissions
+          )
+      );
+      numberOfFiles++;
+    }
+  } else {
+    lastFileId = fromFiles.files[fromFiles.files.length - 1].$id;
+    while (lastFileId) {
+      const files = await storage.listFiles(fromBucketId, [
+        Query.limit(100),
+        Query.cursorAfter(lastFileId),
+      ]);
+      allFromFiles.push(...files.files);
+      if (files.files.length < 100) {
+        lastFileId = undefined;
+      } else {
+        lastFileId = files.files[files.files.length - 1].$id;
+      }
+    }
+    for (const file of allFromFiles) {
+      const fileData = await storage.getFileDownload(file.bucketId, file.$id);
+      const fileToCreate = InputFile.fromBuffer(
+        Buffer.from(fileData),
+        file.name
+      );
+      await tryAwaitWithRetry(
+        async () =>
+          await storage.createFile(
+            toBucketId,
+            file.$id,
+            fileToCreate,
+            file.$permissions
+          )
+      );
+      numberOfFiles++;
+    }
+  }
+
+  console.log(
+    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`
+  );
+};
+
+export const transferStorageLocalToRemote = async (
+  localStorage: Storage,
+  endpoint: string,
+  projectId: string,
+  apiKey: string,
+  fromBucketId: string,
+  toBucketId: string
+) => {
+  console.log(
+    `Transferring files from current storage ${fromBucketId} to ${endpoint} bucket ${toBucketId}`
+  );
+  const client = getAppwriteClient(endpoint, apiKey, projectId);
+  const remoteStorage = new Storage(client);
+  let numberOfFiles = 0;
+  let lastFileId: string | undefined;
+  let fromFiles = await tryAwaitWithRetry(
+    async () => await localStorage.listFiles(fromBucketId, [Query.limit(100)])
+  );
+  const allFromFiles = fromFiles.files;
+  if (fromFiles.files.length === 100) {
+    lastFileId = fromFiles.files[fromFiles.files.length - 1].$id;
+    while (lastFileId) {
+      const files = await localStorage.listFiles(fromBucketId, [
+        Query.limit(100),
+        Query.cursorAfter(lastFileId),
+      ]);
+      allFromFiles.push(...files.files);
+      if (files.files.length < 100) {
+        break;
+      }
+      lastFileId = files.files[files.files.length - 1].$id;
+    }
+  }
+
+  for (const file of allFromFiles) {
+    await tryAwaitWithRetry(
+      async () =>
+        await remoteStorage.createFile(
+          toBucketId,
+          file.$id,
+          file,
+          file.$permissions
+        )
+    );
+    numberOfFiles++;
+  }
+  console.log(
+    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`
+  );
 };

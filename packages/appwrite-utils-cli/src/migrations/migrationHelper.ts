@@ -110,34 +110,36 @@ export const findOrCreateOperation = async (
   operationType: string,
   additionalQueries?: string[]
 ) => {
-  const operations = await database.listDocuments(
-    "migrations",
-    "currentOperations",
-    [
-      Query.equal("collectionId", collectionId),
-      Query.equal("operationType", operationType),
-      Query.equal("status", "pending"),
-      ...(additionalQueries || []),
-    ]
+  const operations = await tryAwaitWithRetry(
+    async () =>
+      await database.listDocuments("migrations", "currentOperations", [
+        Query.equal("collectionId", collectionId),
+        Query.equal("operationType", operationType),
+        Query.equal("status", "pending"),
+        ...(additionalQueries || []),
+      ])
   );
 
   if (operations.documents.length > 0) {
     return OperationSchema.parse(operations.documents[0]); // Assuming the first document is the operation we want
   } else {
     // Create a new operation document
-    const op = await database.createDocument(
-      "migrations",
-      "currentOperations",
-      ID.unique(),
-      {
-        operationType,
-        collectionId,
-        status: "pending",
-        batches: [],
-        progress: 0,
-        total: 0,
-        error: "",
-      }
+    const op = await tryAwaitWithRetry(
+      async () =>
+        await database.createDocument(
+          "migrations",
+          "currentOperations",
+          ID.unique(),
+          {
+            operationType,
+            collectionId,
+            status: "pending",
+            batches: [],
+            progress: 0,
+            total: 0,
+            error: "",
+          }
+        )
     );
 
     return OperationSchema.parse(op);

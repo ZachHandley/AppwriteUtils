@@ -15,7 +15,10 @@ import {
 import _ from "lodash";
 import { logger } from "./logging.js";
 import { splitIntoBatches } from "./migrationHelper.js";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import {
+  getAppwriteClient,
+  tryAwaitWithRetry,
+} from "../utils/helperFunctions.js";
 
 export class UsersController {
   private config: AppwriteConfig;
@@ -294,4 +297,66 @@ export class UsersController {
       }
     }
   }
+
+  transferUsersBetweenDbsLocalToRemote = async (
+    endpoint: string,
+    projectId: string,
+    apiKey: string
+  ) => {
+    const localUsers = this.users;
+    const client = getAppwriteClient(endpoint, projectId, apiKey);
+    const remoteUsers = new Users(client);
+
+    let fromUsers = await localUsers.list([Query.limit(50)]);
+
+    if (fromUsers.users.length === 0) {
+      console.log(`No users found`);
+      return;
+    } else if (fromUsers.users.length < 50) {
+      console.log(`Transferring ${fromUsers.users.length} users to remote`);
+      const batchedPromises = fromUsers.users.map((user) => {
+        return tryAwaitWithRetry(async () => {
+          const toCreateObject: Partial<typeof user> = {
+            ...user,
+          };
+          delete toCreateObject.$id;
+          delete toCreateObject.$createdAt;
+          delete toCreateObject.$updatedAt;
+          await remoteUsers.create(
+            user.$id,
+            user.email,
+            user.phone,
+            user.password,
+            user.name
+          );
+        });
+      });
+      await Promise.all(batchedPromises);
+    } else {
+      while (fromUsers.users.length === 50) {
+        fromUsers = await localUsers.list([
+          Query.limit(50),
+          Query.cursorAfter(fromUsers.users[fromUsers.users.length - 1].$id),
+        ]);
+        const batchedPromises = fromUsers.users.map((user) => {
+          return tryAwaitWithRetry(async () => {
+            const toCreateObject: Partial<typeof user> = {
+              ...user,
+            };
+            delete toCreateObject.$id;
+            delete toCreateObject.$createdAt;
+            delete toCreateObject.$updatedAt;
+            await remoteUsers.create(
+              user.$id,
+              user.email,
+              user.phone,
+              user.password,
+              user.name
+            );
+          });
+        });
+        await Promise.all(batchedPromises);
+      }
+    }
+  };
 }
