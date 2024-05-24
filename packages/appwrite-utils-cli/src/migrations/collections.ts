@@ -399,12 +399,15 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
     await Promise.all(batchedPromises);
     totalDocumentsTransferred += fromCollDocs.documents.length;
     while (fromCollDocs.documents.length === 50) {
-      fromCollDocs = await db.listDocuments(fromDbId, fromCollId, [
-        Query.limit(50),
-        Query.cursorAfter(
-          fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
-        ),
-      ]);
+      fromCollDocs = await tryAwaitWithRetry(
+        async () =>
+          await db.listDocuments(fromDbId, fromCollId, [
+            Query.limit(50),
+            Query.cursorAfter(
+              fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
+            ),
+          ])
+      );
       const batchedPromises = fromCollDocs.documents.map((doc) => {
         const toCreateObject: Partial<typeof doc> = {
           ...doc,
