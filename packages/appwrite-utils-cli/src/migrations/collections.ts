@@ -129,9 +129,7 @@ export const wipeDatabase = async (
   databaseId: string
 ): Promise<{ collectionId: string; collectionName: string }[]> => {
   console.log(`Wiping database: ${databaseId}`);
-  const { collections: existingCollections } = await tryAwaitWithRetry(
-    async () => await database.listCollections(databaseId)
-  );
+  const existingCollections = await fetchAllCollections(databaseId, database);
   let collectionsDeleted: { collectionId: string; collectionName: string }[] =
     [];
   for (const { $id: collectionId, name: name } of existingCollections) {

@@ -103,7 +103,9 @@ export const convertObjectByAttributeMappings = (
   };
 
   for (const mapping of attributeMappings) {
-    if (Array.isArray(mapping.oldKeys)) {
+    if (mapping.valueToSet !== undefined) {
+      result[mapping.targetKey] = mapping.valueToSet;
+    } else if (Array.isArray(mapping.oldKeys)) {
       // Collect and flatten values from multiple oldKeys
       const values = mapping.oldKeys
         .map((oldKey) => resolveValue(obj, oldKey))

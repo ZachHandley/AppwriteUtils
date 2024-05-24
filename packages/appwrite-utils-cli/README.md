@@ -132,6 +132,8 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.55: Added `documentExists` check to batch creation functionality to try to prevent duplicates
+- 0.0.54: Various fixes in here
 - 0.0.50: Actually fixed the slight bug, it was really in the `mergeObjects`
 - 0.0.49: Fixed a slight bug with `dataLoader` not mapping updates correctly with `updateMapping`
 - 0.0.48: Added `--transfer`, `--fromdb <targetDatabaseId>`, `--targetdb <targetDatabaseId>`, `--transferendpoint <transferEndpoint>`, `--transferproject <transferProjectId>`, `--transferkey <transferApiKey>`. Additionally, I've added `--fromcoll <collectionId>` and `--targetcoll <collectionId>`. These allow you to do a few things. First, you can now transfer databases in the same project, and from local to a remote project. Second, you can now specify specific collections to transfer from one place to another, with all of their data. If `--fromcoll` and `--targetcoll` are ommitted, it will transfer the databases. During the database transfer, it will create any missing collections, attributes, and indices.

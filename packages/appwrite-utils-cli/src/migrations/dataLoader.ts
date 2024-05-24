@@ -413,7 +413,7 @@ export class DataLoader {
         }
       }
       console.log("Running update references");
-      this.dealWithMergedUsers();
+      // this.dealWithMergedUsers();
       this.updateOldReferencesForNew();
       console.log("Done running update references");
     }
@@ -428,122 +428,57 @@ export class DataLoader {
     }
   }
 
-  dealWithMergedUsers() {
-    const usersCollectionKey = this.getCollectionKey(
-      this.config.usersCollectionName
-    );
-    const usersCollectionPrimaryKeyFields = new Set();
+  /**
+   * Deals with merged users by iterating through all collections in the configuration.
+   * We have merged users if there are duplicate emails or phones in the import data.
+   * This function will iterate through all collections that are the same name as the
+   * users collection and pull out their primaryKeyField's. It will then loop through
+   * each collection and find any documents that have a
+   *
+   * @return {void} This function does not return anything.
+   */
+  // dealWithMergedUsers() {
+  //   const usersCollectionKey = this.getCollectionKey(
+  //     this.config.usersCollectionName
+  //   );
+  //   const usersCollectionData = this.importMap.get(usersCollectionKey);
 
-    if (!this.config.collections) {
-      console.log("No collections found in configuration.");
-      return;
-    }
+  //   if (!this.config.collections) {
+  //     console.log("No collections found in configuration.");
+  //     return;
+  //   }
 
-    let needsUpdate = false;
-    let numUpdates = 0;
+  //   let needsUpdate = false;
+  //   let numUpdates = 0;
 
-    // Collect primary key fields from the users collection definitions
-    this.config.collections.forEach((collection) => {
-      if (this.getCollectionKey(collection.name) === usersCollectionKey) {
-        const collectionImportDefs = collection.importDefs;
-        if (!collectionImportDefs || !collectionImportDefs.length) {
-          return;
-        }
-        collectionImportDefs.forEach((importDef) => {
-          if (importDef.primaryKeyField) {
-            usersCollectionPrimaryKeyFields.add(importDef.primaryKeyField);
-          }
-        });
-      }
-    });
-
-    console.log(
-      `Primary key fields collected for users collection: ${[
-        ...usersCollectionPrimaryKeyFields,
-      ]}`
-    );
-
-    // Iterate over all collections to update references based on merged users
-    this.config.collections.forEach((collection) => {
-      const collectionData = this.importMap.get(
-        this.getCollectionKey(collection.name)
-      );
-
-      if (!collectionData || !collectionData.data) {
-        console.log(`No data found for collection ${collection.name}`);
-        return;
-      }
-
-      const collectionImportDefs = collection.importDefs;
-      if (!collectionImportDefs || !collectionImportDefs.length) {
-        console.log(
-          `No import definitions found for collection ${collection.name}`
-        );
-        return;
-      }
-
-      collectionImportDefs.forEach((importDef) => {
-        importDef.idMappings?.forEach((idMapping) => {
-          if (
-            this.getCollectionKey(idMapping.targetCollection) ===
-            usersCollectionKey
-          ) {
-            const fieldToSetKey = idMapping.fieldToSet || idMapping.sourceField;
-            const targetFieldKey =
-              idMapping.targetFieldToMatch || idMapping.targetField;
-
-            if (usersCollectionPrimaryKeyFields.has(targetFieldKey)) {
-              console.log(
-                `Processing collection ${collection.name} with target field ${targetFieldKey}`
-              );
-
-              // Process each item in the collection
-              collectionData.data.forEach((item) => {
-                const oldId =
-                  item.finalData[idMapping.sourceField] ||
-                  item.context[idMapping.sourceField];
-
-                if (oldId === undefined || oldId === null) {
-                  console.log(
-                    `Skipping item with undefined or null oldId in collection ${collection.name}`
-                  );
-                  return;
-                }
-
-                const newId = this.mergedUserMap.get(`${oldId}`);
-
-                if (newId) {
-                  needsUpdate = true;
-                  numUpdates++;
-                  console.log(
-                    `Updating old ID ${oldId} to new ID ${newId} in collection ${collection.name}`
-                  );
-
-                  // Update context to use new user ID
-                  item.finalData[fieldToSetKey] = newId;
-                  item.context[fieldToSetKey] = newId;
-                } else {
-                  console.log(
-                    `No new ID found for old ID ${oldId} in mergedUserMap.`
-                  );
-                }
-              });
-            }
-          }
-        });
-      });
-
-      if (needsUpdate) {
-        console.log(
-          `Updated ${numUpdates} references for collection ${collection.name}`
-        );
-        this.importMap.set(
-          this.getCollectionKey(collection.name),
-          collectionData
-        );
-      }
-    });
-  }
+  //   for (const collectionConfig of this.config.collections) {
+  //     const collectionKey = this.getCollectionKey(collectionConfig.name);
+  //     const collectionData = this.importMap.get(collectionKey);
+  //     const collectionImportDefs = collectionConfig.importDefs;
+  //     const collectionIdMappings = collectionImportDefs
+  //       .map((importDef) => importDef.idMappings)
+  //       .flat()
+  //       .filter((idMapping) => idMapping !== undefined && idMapping !== null);
+  //     if (!collectionData || !collectionData.data) continue;
+  //     for (const dataItem of collectionData.data) {
+  //       for (const idMapping of collectionIdMappings) {
+  //         // We know it's the users collection here
+  //         if (this.getCollectionKey(idMapping.targetCollection) === usersCollectionKey) {
+  //           const targetFieldKey = idMapping.targetFieldToMatch || idMapping.targetField;
+  //           if (targetFieldKey === )
+  //           const targetValue = dataItem.finalData[targetFieldKey];
+  //           const targetCollectionData = this.importMap.get(this.getCollectionKey(idMapping.targetCollection));
+  //           if (!targetCollectionData || !targetCollectionData.data) continue;
+  //           const foundData = targetCollectionData.data.filter(({ context }) => {
+  //             const targetValue = context[targetFieldKey];
+  //             const isMatch = `${targetValue}` === `${valueToMatch}`;
+  //             return isMatch && targetValue !== undefined && targetValue !== null;
+  //           });
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   updateOldReferencesForNew() {
     if (!this.config.collections) {
@@ -655,7 +590,12 @@ export class DataLoader {
                     // Merge arrays if new data is non-empty array and filter for uniqueness
                     collectionData.data[i].finalData[fieldToSetKey] = [
                       ...new Set(
-                        [...currentDataFiltered, ...newData].filter(
+                        [
+                          ...(Array.isArray(currentDataFiltered)
+                            ? currentDataFiltered
+                            : [currentDataFiltered]),
+                          ...newData,
+                        ].filter(
                           (value: any) => `${value}` !== `${valueToMatch}`
                         )
                       ),

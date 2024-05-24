@@ -14,6 +14,12 @@ export const AttributeMappingSchema = z.object({
   targetKey: z
     .string()
     .describe("The key of the attribute in the new document"),
+  valueToSet: z
+    .any()
+    .optional()
+    .describe(
+      "The value to set for the attribute in the new document, if not mapped to oldKey"
+    ),
   fileData: z
     .object({
       name: z

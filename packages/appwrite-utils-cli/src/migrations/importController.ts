@@ -26,7 +26,10 @@ import {
   OperationSchema,
 } from "./backup.js";
 import { DataLoader, type CollectionImportData } from "./dataLoader.js";
-import { transferDocumentsBetweenDbsLocalToLocal } from "./collections.js";
+import {
+  documentExists,
+  transferDocumentsBetweenDbsLocalToLocal,
+} from "./collections.js";
 import { transferDatabaseLocalToLocal } from "./databases.js";
 import { transferStorageLocalToLocal } from "./storage.js";
 
@@ -244,20 +247,50 @@ export class ImportController {
       for (let i = 0; i < dataSplit.length; i++) {
         const batches = dataSplit[i];
         console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
-        const batchPromises = batches.map((item) => {
+
+        const documentExistsPromises = batches.map(async (item) => {
           try {
             const id =
               item.finalData.docId ||
               item.finalData.userId ||
               item.context.docId ||
               item.context.userId;
+
+            if (!item.finalData) {
+              return Promise.resolve(null);
+            }
+            return tryAwaitWithRetry(
+              async () =>
+                await documentExists(
+                  this.database,
+                  db.$id,
+                  collection.$id,
+                  item.finalData
+                )
+            );
+          } catch (error) {
+            console.error(error);
+            return Promise.resolve(null);
+          }
+        });
+
+        const documentExistsResults = await Promise.all(documentExistsPromises);
+
+        const batchPromises = batches.map((item, index) => {
+          try {
+            const id =
+              item.finalData.docId ||
+              item.finalData.userId ||
+              item.context.docId ||
+              item.context.userId;
+
             if (item.finalData.hasOwnProperty("userId")) {
               delete item.finalData.userId;
             }
             if (item.finalData.hasOwnProperty("docId")) {
               delete item.finalData.docId;
             }
-            if (!item.finalData) {
+            if (!item.finalData || documentExistsResults[index]) {
               return Promise.resolve();
             }
             return tryAwaitWithRetry(
@@ -274,6 +307,7 @@ export class ImportController {
             return Promise.resolve();
           }
         });
+
         // Wait for all promises in the current batch to resolve
         await Promise.all(batchPromises);
         console.log(`Completed batch ${i + 1} of ${dataSplit.length}`);

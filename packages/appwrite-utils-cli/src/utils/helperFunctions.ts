@@ -163,6 +163,7 @@ export const tryAwaitWithRetry = async <T>(
     if (throwError) {
       throw error;
     }
+    console.error("Error during retryAwait function: " + error);
     // @ts-ignore
     return Promise.resolve();
   }

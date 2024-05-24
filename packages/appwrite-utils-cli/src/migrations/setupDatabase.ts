@@ -216,6 +216,9 @@ export const startSetup = async (
         await backupDatabase(database, db.$id, storage);
       }
       deletedCollections = await wipeDatabase(database, db.$id);
+      // Add a delay to ensure the deletion process completes
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.log(`Waited a few seconds to let the database wipe complete...`);
     }
 
     if (processDatabase) {
