@@ -140,9 +140,9 @@ export class DataLoader {
             (item) => item !== null && item !== undefined && item !== ""
           );
         }
-      } else if (typeof value === "object") {
+      } else if (typeof value === "object" && !Array.isArray(value)) {
         // If the value is an object, we need to merge it
-        if (typeof update[key] === "object") {
+        if (typeof update[key] === "object" && !Array.isArray(update[key])) {
           result[key] = this.mergeObjects(value, update[key]);
         }
       } else {
@@ -156,7 +156,12 @@ export class DataLoader {
         continue;
       } else if (!Object.hasOwn(source, key)) {
         result[key] = value;
-      } else if (typeof source[key] === "object" && typeof value === "object") {
+      } else if (
+        typeof source[key] === "object" &&
+        typeof value === "object" &&
+        !Array.isArray(source[key]) &&
+        !Array.isArray(value)
+      ) {
         result[key] = this.mergeObjects(source[key], value);
       } else if (Array.isArray(source[key]) && Array.isArray(value)) {
         result[key] = [...new Set([...source[key], ...value])].filter(
@@ -260,9 +265,6 @@ export class DataLoader {
       item,
       attributeMappings
     );
-    if (item["region"]) {
-      logger.info(`Converted item: ${JSON.stringify(convertedItem, null, 2)}`);
-    }
     // Run additional converter functions on the converted item, if any
     return this.importDataActions.runConverterFunctions(
       convertedItem,
@@ -389,11 +391,9 @@ export class DataLoader {
         );
         for (const createDef of createDefs) {
           if (!isUsersCollection) {
-            console.log(`${collection.name} is not users collection`);
             await this.prepareCreateData(db, collection, createDef);
           } else {
             // Special handling for users collection if needed
-            console.log(`${collection.name} is users collection`);
             await this.prepareUserCollectionCreateData(
               db,
               collection,
@@ -480,6 +480,24 @@ export class DataLoader {
   //   }
   // }
 
+  /**
+   * Gets the value to match for a given key in the final data or context.
+   * @param finalData - The final data object.
+   * @param context - The context object.
+   * @param key - The key to get the value for.
+   * @returns The value to match for from finalData or Context
+   */
+  getValueFromData(finalData: any, context: any, key: string) {
+    if (
+      context[key] !== undefined &&
+      context[key] !== null &&
+      context[key] !== ""
+    ) {
+      return context[key];
+    }
+    return finalData[key];
+  }
+
   updateOldReferencesForNew() {
     if (!this.config.collections) {
       return;
@@ -510,8 +528,11 @@ export class DataLoader {
                   idMapping.fieldToSet || idMapping.sourceField;
                 const targetFieldKey =
                   idMapping.targetFieldToMatch || idMapping.targetField;
-                const valueToMatch =
-                  collectionData.data[i].context[idMapping.sourceField];
+                const valueToMatch = this.getValueFromData(
+                  collectionData.data[i].finalData,
+                  collectionData.data[i].context,
+                  idMapping.sourceField
+                );
 
                 // Skip if value to match is missing or empty
                 if (
@@ -532,8 +553,12 @@ export class DataLoader {
 
                 // Find matching data in the target collection
                 const foundData = targetCollectionData.data.filter(
-                  ({ context }) => {
-                    const targetValue = context[targetFieldKey];
+                  ({ context, finalData }) => {
+                    const targetValue = this.getValueFromData(
+                      finalData,
+                      context,
+                      targetFieldKey
+                    );
                     const isMatch = `${targetValue}` === `${valueToMatch}`;
                     // Ensure the targetValue is defined and not null
                     return (
@@ -543,13 +568,12 @@ export class DataLoader {
                     );
                   }
                 );
-
                 // Log and skip if no matching data found
                 if (!foundData.length) {
                   console.log(
                     `No data found for collection ${collectionConfig.name}:\nTarget collection: ${targetCollectionKey}\nValue to match: ${valueToMatch}\nField to set: ${fieldToSetKey}\nTarget field to match: ${targetFieldKey}\nTarget field value: ${idMapping.targetField}`
                   );
-                  logger.error(
+                  logger.info(
                     `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey} -- idMapping: ${JSON.stringify(
                       idMapping,
                       null,
@@ -576,9 +600,14 @@ export class DataLoader {
                 );
 
                 // Extract the new data to set
-                const newData = foundData.map(
-                  (data) => data.context[idMapping.targetField]
-                );
+                const newData = foundData.map((data) => {
+                  const valueFound = this.getValueFromData(
+                    data.finalData,
+                    data.context,
+                    idMapping.targetField
+                  );
+                  return valueFound;
+                });
 
                 // Handle cases where current data is an array
                 if (isFieldToSetArray) {
@@ -587,19 +616,32 @@ export class DataLoader {
                     collectionData.data[i].finalData[fieldToSetKey] =
                       Array.isArray(newData) ? newData : [newData];
                   } else {
-                    // Merge arrays if new data is non-empty array and filter for uniqueness
-                    collectionData.data[i].finalData[fieldToSetKey] = [
-                      ...new Set(
-                        [
-                          ...(Array.isArray(currentDataFiltered)
-                            ? currentDataFiltered
-                            : [currentDataFiltered]),
-                          ...newData,
-                        ].filter(
-                          (value: any) => `${value}` !== `${valueToMatch}`
-                        )
-                      ),
-                    ];
+                    if (Array.isArray(currentDataFiltered)) {
+                      // Convert current data to array and merge if new data is non-empty array
+                      collectionData.data[i].finalData[fieldToSetKey] = [
+                        ...new Set(
+                          [...currentDataFiltered, ...newData].filter(
+                            (value: any) =>
+                              `${value}` !== `${valueToMatch}` && value
+                          )
+                        ),
+                      ];
+                    } else {
+                      // Merge arrays if new data is non-empty array and filter for uniqueness
+                      collectionData.data[i].finalData[fieldToSetKey] = [
+                        ...new Set(
+                          [
+                            ...(Array.isArray(currentDataFiltered)
+                              ? currentDataFiltered
+                              : [currentDataFiltered]),
+                            ...newData,
+                          ].filter(
+                            (value: any) =>
+                              `${value}` !== `${valueToMatch}` && value
+                          )
+                        ),
+                      ];
+                    }
                   }
                 } else {
                   if (!currentDataFiltered) {
@@ -612,7 +654,8 @@ export class DataLoader {
                     collectionData.data[i].finalData[fieldToSetKey] = [
                       ...new Set(
                         [currentDataFiltered, ...newData].filter(
-                          (value: any) => `${value}` !== `${valueToMatch}`
+                          (value: any) =>
+                            `${value}` !== `${valueToMatch}` && value
                         )
                       ),
                     ].slice(0, 1)[0];
@@ -635,52 +678,57 @@ export class DataLoader {
   }
 
   private writeMapsToJsonFile() {
-    const outputDir = path.resolve(process.cwd());
-    const outputFile = path.join(outputDir, "dataLoaderOutput.json");
+    const outputDir = path.resolve(process.cwd(), "zlogs");
 
-    const dataToWrite = {
-      // Convert Maps to arrays of entries for serialization
-      oldIdToNewIdPerCollectionMap: Array.from(
-        this.oldIdToNewIdPerCollectionMap.entries()
-      ).map(([key, value]) => {
-        return {
-          collection: key,
-          data: Array.from(value.entries()),
-        };
-      }),
-      mergedUserMap: Array.from(this.mergedUserMap.entries()),
-      dataFromCollections: Array.from(this.importMap.entries()).map(
-        ([key, value]) => {
-          return {
-            collection: key,
-            data: value.data.map((item: any) => item.finalData),
-          };
-        }
-      ),
-      // emailToUserIdMap: Array.from(this.emailToUserIdMap.entries()),
-      // phoneToUserIdMap: Array.from(this.phoneToUserIdMap.entries()),
-    };
+    // Ensure the logs directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir);
+    }
 
-    // Use JSON.stringify with a replacer function to handle Maps
-    const replacer = (key: any, value: any) => {
-      if (value instanceof Map) {
-        return Array.from(value.entries());
-      }
-      return value;
-    };
-
-    fs.writeFile(
-      outputFile,
-      JSON.stringify(dataToWrite, replacer, 2),
-      "utf8",
-      (err) => {
+    // Helper function to write data to a file
+    const writeToFile = (fileName: string, data: any) => {
+      const outputFile = path.join(outputDir, fileName);
+      fs.writeFile(outputFile, JSON.stringify(data, null, 2), "utf8", (err) => {
         if (err) {
-          console.error("Error writing data to JSON file:", err);
+          console.error(`Error writing data to ${fileName}:`, err);
           return;
         }
-        console.log(`Data successfully written to ${outputFile}`);
-      }
+        console.log(`Data successfully written to ${fileName}`);
+      });
+    };
+
+    // Convert Maps to arrays of entries for serialization
+    const oldIdToNewIdPerCollectionMap = Array.from(
+      this.oldIdToNewIdPerCollectionMap.entries()
+    ).map(([key, value]) => {
+      return {
+        collection: key,
+        data: Array.from(value.entries()),
+      };
+    });
+
+    const mergedUserMap = Array.from(this.mergedUserMap.entries());
+
+    // Write each part to a separate file
+    writeToFile(
+      "oldIdToNewIdPerCollectionMap.json",
+      oldIdToNewIdPerCollectionMap
     );
+    writeToFile("mergedUserMap.json", mergedUserMap);
+
+    // Write each collection's data to a separate file
+    this.importMap.forEach((value, key) => {
+      const data = {
+        collection: key,
+        data: value.data.map((item: any) => {
+          return {
+            finalData: item.finalData,
+            context: item.context,
+          };
+        }),
+      };
+      writeToFile(`${key}.json`, data);
+    });
   }
 
   /**
@@ -723,8 +771,14 @@ export class DataLoader {
     // Check for duplicate email and phone
     if (email && this.emailToUserIdMap.has(email)) {
       existingId = this.emailToUserIdMap.get(email);
+      if (phone && !this.phoneToUserIdMap.has(phone)) {
+        this.phoneToUserIdMap.set(phone, newId);
+      }
     } else if (phone && this.phoneToUserIdMap.has(phone)) {
       existingId = this.phoneToUserIdMap.get(phone);
+      if (email && !this.emailToUserIdMap.has(email)) {
+        this.emailToUserIdMap.set(email, newId);
+      }
     } else {
       if (email) this.emailToUserIdMap.set(email, newId);
       if (phone) this.phoneToUserIdMap.set(phone, newId);
@@ -827,9 +881,6 @@ export class DataLoader {
       this.oldIdToNewIdPerCollectionMap
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMap)
         .get(this.getCollectionKey(collection.name));
-    console.log(
-      `${collection.name} -- collectionOldIdToNewIdMap: ${collectionOldIdToNewIdMap}`
-    );
     if (!operationId) {
       throw new Error(
         `No import operation found for collection ${collection.name}`
@@ -963,7 +1014,10 @@ export class DataLoader {
             currentData.data[i].finalData,
             transformedItem
           );
-          currentData.data[i].context = context;
+          currentData.data[i].context = {
+            ...currentData.data[i].context,
+            ...context,
+          };
           currentData.data[i].importDef = newImportDef;
           this.importMap.set(
             this.getCollectionKey(collection.name),
@@ -1030,9 +1084,6 @@ export class DataLoader {
       this.oldIdToNewIdPerCollectionMap
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMapNew)
         .get(this.getCollectionKey(collection.name));
-    console.log(
-      `${collection.name} -- collectionOldIdToNewIdMap: ${collectionOldIdToNewIdMap}`
-    );
     const isRegions = collection.name.toLowerCase() === "regions";
     // Iterate through each item in the raw data
     for (const item of rawData) {
@@ -1054,6 +1105,9 @@ export class DataLoader {
         item,
         importDef.attributeMappings
       );
+      if (collection.name.toLowerCase() === "councils") {
+        console.log("Transformed Council: ", transformedData);
+      }
       if (isRegions) {
         logger.info(
           `Transformed region: ${JSON.stringify(transformedData, null, 2)}`
@@ -1167,7 +1221,6 @@ export class DataLoader {
 
       // Try to find itemDataToUpdate using updateMapping
       if (importDef.updateMapping) {
-        console.log(importDef.updateMapping);
         oldId =
           item[importDef.updateMapping.originalIdField] ||
           transformedData[importDef.updateMapping.originalIdField];
@@ -1199,7 +1252,7 @@ export class DataLoader {
         oldId =
           item[importDef.primaryKeyField] ||
           transformedData[importDef.primaryKeyField];
-        if (oldId) {
+        if (oldId && oldId.length > 0) {
           newId = oldIdToNewIdMap?.get(`${oldId}`);
           if (
             !newId &&

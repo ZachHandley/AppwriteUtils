@@ -132,6 +132,7 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.57: Fixed `dataLoader`'s `idMapping`'s giving me issues
 - 0.0.55: Added `documentExists` check to batch creation functionality to try to prevent duplicates
 - 0.0.54: Various fixes in here
 - 0.0.50: Actually fixed the slight bug, it was really in the `mergeObjects`

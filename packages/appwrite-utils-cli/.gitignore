@@ -1,3 +1,4 @@
 src/appwrite/*
 src/appwrite/appwriteConfig.yaml
 dataLoaderOutput.json
+zlogs

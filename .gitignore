@@ -128,3 +128,5 @@ dist
 
 packages/appwrite-utils-cli/src/appwrite/appwriteConfig.yaml
 appwriteConfig.yaml
+packages/*/**/*.json
+packages/*/**/zlogs

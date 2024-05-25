@@ -11,7 +11,11 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { logger } from "./logging.js";
-import { type AfterImportActions, type AppwriteConfig } from "appwrite-utils";
+import {
+  tryAwaitWithRetry,
+  type AfterImportActions,
+  type AppwriteConfig,
+} from "appwrite-utils";
 
 export const getDatabaseFromConfig = (config: AppwriteConfig) => {
   if (!config.appwriteClient) {
@@ -401,7 +405,9 @@ export const afterImportActions = {
         typeof value === "string" &&
         (value.startsWith("http://") || value.startsWith("https://"));
 
-      const doc = await db.getDocument(dbId, collId, docId);
+      const doc = await tryAwaitWithRetry(
+        async () => await db.getDocument(dbId, collId, docId)
+      );
       const existingFieldValue = doc[fieldName as keyof typeof doc];
 
       // Handle the case where the field is an array
@@ -432,7 +438,9 @@ export const afterImportActions = {
         const inputFile = InputFile.fromPath(tempFilePath, fileName);
 
         // Use the full file name (with extension) for creating the file
-        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+        const file = await tryAwaitWithRetry(
+          async () => await storage.createFile(bucketId, ID.unique(), inputFile)
+        );
 
         console.log("Created file from URL: ", file.$id);
 
@@ -442,15 +450,12 @@ export const afterImportActions = {
         } else {
           updateData = file.$id; // Set the new file ID
         }
-        await db.updateDocument(dbId, collId, doc.$id, {
-          [fieldName]: updateData,
-        });
-        // console.log(
-        //   "Updating document with file: ",
-        //   doc.$id,
-        //   `${fieldName}: `,
-        //   updateData
-        // );
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(dbId, collId, doc.$id, {
+              [fieldName]: updateData,
+            })
+        );
 
         // If the file was downloaded, delete it after uploading
         fs.unlinkSync(tempFilePath);
@@ -465,16 +470,21 @@ export const afterImportActions = {
         }
         const pathToFile = path.join(filePath, fileFullName);
         const inputFile = InputFile.fromPath(pathToFile, fileName);
-        const file = await storage.createFile(bucketId, ID.unique(), inputFile);
+        const file = await tryAwaitWithRetry(
+          async () => await storage.createFile(bucketId, ID.unique(), inputFile)
+        );
 
         if (isArray) {
           updateData = [...updateData, file.$id]; // Append the new file ID
         } else {
           updateData = file.$id; // Set the new file ID
         }
-        await db.updateDocument(dbId, collId, doc.$id, {
-          [fieldName]: updateData,
-        });
+        tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(dbId, collId, doc.$id, {
+              [fieldName]: updateData,
+            })
+        );
         console.log("Created file from path: ", file.$id);
       }
     } catch (error) {

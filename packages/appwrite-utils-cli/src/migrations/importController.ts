@@ -248,33 +248,33 @@ export class ImportController {
         const batches = dataSplit[i];
         console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
 
-        const documentExistsPromises = batches.map(async (item) => {
-          try {
-            const id =
-              item.finalData.docId ||
-              item.finalData.userId ||
-              item.context.docId ||
-              item.context.userId;
+        // const documentExistsPromises = batches.map(async (item) => {
+        //   try {
+        //     const id =
+        //       item.finalData.docId ||
+        //       item.finalData.userId ||
+        //       item.context.docId ||
+        //       item.context.userId;
 
-            if (!item.finalData) {
-              return Promise.resolve(null);
-            }
-            return tryAwaitWithRetry(
-              async () =>
-                await documentExists(
-                  this.database,
-                  db.$id,
-                  collection.$id,
-                  item.finalData
-                )
-            );
-          } catch (error) {
-            console.error(error);
-            return Promise.resolve(null);
-          }
-        });
+        //     if (!item.finalData) {
+        //       return Promise.resolve(null);
+        //     }
+        //     return tryAwaitWithRetry(
+        //       async () =>
+        //         await documentExists(
+        //           this.database,
+        //           db.$id,
+        //           collection.$id,
+        //           item.finalData
+        //         )
+        //     );
+        //   } catch (error) {
+        //     console.error(error);
+        //     return Promise.resolve(null);
+        //   }
+        // });
 
-        const documentExistsResults = await Promise.all(documentExistsPromises);
+        // const documentExistsResults = await Promise.all(documentExistsPromises);
 
         const batchPromises = batches.map((item, index) => {
           try {
@@ -290,7 +290,7 @@ export class ImportController {
             if (item.finalData.hasOwnProperty("docId")) {
               delete item.finalData.docId;
             }
-            if (!item.finalData || documentExistsResults[index]) {
+            if (!item.finalData) {
               return Promise.resolve();
             }
             return tryAwaitWithRetry(
