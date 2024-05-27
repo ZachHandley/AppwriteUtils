@@ -348,6 +348,11 @@ export class DataLoader {
           userId: user.$id,
           docId: user.$id,
         },
+        context: {
+          ...user,
+          userId: user.$id,
+          docId: user.$id,
+        },
         rawData: user,
       });
       this.importMap.set(this.getCollectionKey("users"), importData);
@@ -362,7 +367,10 @@ export class DataLoader {
     console.log("---------------------------------");
     await this.setupMaps(dbId);
     const allUsers = await this.getAllUsers();
-    console.log(`Fetched ${allUsers.length} users`);
+    console.log(
+      `Fetched ${allUsers.length} users, waiting a few seconds to let the program catch up...`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5000));
     // Iterate over the configured databases to find the matching one
     for (const db of this.config.databases) {
       if (db.$id !== dbId) {
@@ -568,6 +576,20 @@ export class DataLoader {
                     );
                   }
                 );
+
+                const getCurrentDataFiltered = (currentData: any) => {
+                  if (Array.isArray(currentData.finalData[fieldToSetKey])) {
+                    return currentData.finalData[fieldToSetKey].filter(
+                      (data: any) => `${data}` !== `${valueToMatch}`
+                    );
+                  }
+                  return currentData.finalData[fieldToSetKey];
+                };
+
+                // Get the current data to be updated
+                const currentDataFiltered = getCurrentDataFiltered(
+                  collectionData.data[i]
+                );
                 // Log and skip if no matching data found
                 if (!foundData.length) {
                   console.log(
@@ -584,20 +606,6 @@ export class DataLoader {
                 }
 
                 needsUpdate = true;
-
-                const getCurrentDataFiltered = (currentData: any) => {
-                  if (Array.isArray(currentData.finalData[fieldToSetKey])) {
-                    return currentData.finalData[fieldToSetKey].filter(
-                      (data: any) => `${data}` !== `${valueToMatch}`
-                    );
-                  }
-                  return currentData.finalData[fieldToSetKey];
-                };
-
-                // Get the current data to be updated
-                const currentDataFiltered = getCurrentDataFiltered(
-                  collectionData.data[i]
-                );
 
                 // Extract the new data to set
                 const newData = foundData.map((data) => {
@@ -752,17 +760,38 @@ export class DataLoader {
       finalData: z.infer<typeof AuthUserCreateSchema>;
     };
   } {
+    if (
+      this.userExistsMap.has(newId) ||
+      Array.from(this.emailToUserIdMap.values()).includes(newId) ||
+      Array.from(this.phoneToUserIdMap.values()).includes(newId)
+    ) {
+      newId = this.getTrueUniqueId(this.getCollectionKey("users"));
+    }
     let transformedItem = this.transformData(item, attributeMappings);
     const userData = AuthUserCreateSchema.safeParse(transformedItem);
-    if (!userData.success) {
+    if (!userData.success || !(userData.data.email && userData.data.phone)) {
       logger.error(
         `Invalid user data: ${JSON.stringify(
-          userData.error.errors,
+          userData.error?.errors,
           undefined,
           2
-        )}`
+        )} or missing email/phone`
       );
-      return transformedItem;
+
+      const userKeys = ["email", "phone", "name", "labels", "prefs"];
+      userKeys.forEach((key) => {
+        if (transformedItem.hasOwnProperty(key)) {
+          delete transformedItem[key];
+        }
+      });
+      return {
+        transformedItem,
+        existingId: undefined,
+        userData: {
+          rawData: item,
+          finalData: transformedItem,
+        },
+      };
     }
     const email = userData.data.email;
     const phone = userData.data.phone;
@@ -926,14 +955,28 @@ export class DataLoader {
       );
 
       // Generate a new unique ID for the item or use existing ID
-      if (!existingId) {
+      if (!existingId && !userData.finalData?.userId) {
         // No existing user ID, generate a new unique ID
-        existingId = this.getTrueUniqueId(this.getCollectionKey("users"));
-        transformedItem.docId = existingId; // Assign the new ID to the transformed data's docId field
+        existingId = this.getTrueUniqueId(
+          this.getCollectionKey(collection.name)
+        );
+        transformedItem = {
+          ...transformedItem,
+          userId: existingId,
+          docId: existingId,
+        };
+      } else if (!existingId && userData.finalData?.userId) {
+        // Existing user ID, use it as the new ID
+        existingId = userData.finalData.userId;
+        transformedItem = {
+          ...transformedItem,
+          userId: existingId,
+          docId: existingId,
+        };
       }
 
       // Create a context object for the item, including the new ID
-      let context = this.createContext(db, collection, item, existingId);
+      let context = this.createContext(db, collection, item, existingId!);
 
       // Merge the transformed data into the context
       context = { ...context, ...transformedItem, ...userData.finalData };
@@ -952,7 +995,9 @@ export class DataLoader {
           for (const data of currentData.data) {
             if (
               data.finalData.docId === oldId ||
-              data.finalData.userId === oldId
+              data.finalData.userId === oldId ||
+              data.context.docId === oldId ||
+              data.context.userId === oldId
             ) {
               transformedItem = this.mergeObjects(
                 data.finalData,
@@ -1004,41 +1049,59 @@ export class DataLoader {
         attributeMappings: mappingsWithActions,
       };
 
+      const updatedData = this.importMap.get(
+        this.getCollectionKey(collection.name)
+      )!;
+
       let foundData = false;
-      for (let i = 0; i < currentData.data.length; i++) {
+      for (let i = 0; i < updatedData.data.length; i++) {
         if (
-          currentData.data[i].finalData.docId === existingId ||
-          currentData.data[i].finalData.userId === existingId
+          updatedData.data[i].finalData.docId === existingId ||
+          updatedData.data[i].finalData.userId === existingId ||
+          updatedData.data[i].context.docId === existingId ||
+          updatedData.data[i].context.userId === existingId
         ) {
-          currentData.data[i].finalData = this.mergeObjects(
-            currentData.data[i].finalData,
+          updatedData.data[i].finalData = this.mergeObjects(
+            updatedData.data[i].finalData,
             transformedItem
           );
-          currentData.data[i].context = {
-            ...currentData.data[i].context,
-            ...context,
+          updatedData.data[i].context = this.mergeObjects(
+            updatedData.data[i].context,
+            context
+          );
+          const mergedImportDef = {
+            ...updatedData.data[i].importDef,
+            idMappings: [
+              ...(updatedData.data[i].importDef?.idMappings || []),
+              ...(newImportDef.idMappings || []),
+            ],
+            attributeMappings: [
+              ...(updatedData.data[i].importDef?.attributeMappings || []),
+              ...(newImportDef.attributeMappings || []),
+            ],
           };
-          currentData.data[i].importDef = newImportDef;
+          updatedData.data[i].importDef = mergedImportDef as ImportDef;
           this.importMap.set(
             this.getCollectionKey(collection.name),
-            currentData
+            updatedData
           );
           this.oldIdToNewIdPerCollectionMap.set(
             this.getCollectionKey(collection.name),
             collectionOldIdToNewIdMap!
           );
+
           foundData = true;
         }
       }
       if (!foundData) {
         // Add new data to the associated collection
-        currentData.data.push({
+        updatedData.data.push({
           rawData: item,
           context: context,
           importDef: newImportDef,
           finalData: transformedItem,
         });
-        this.importMap.set(this.getCollectionKey(collection.name), currentData);
+        this.importMap.set(this.getCollectionKey(collection.name), updatedData);
         this.oldIdToNewIdPerCollectionMap.set(
           this.getCollectionKey(collection.name),
           collectionOldIdToNewIdMap!
@@ -1101,18 +1164,10 @@ export class DataLoader {
       // Create a context object for the item, including the new ID
       let context = this.createContext(db, collection, item, itemIdNew);
       // Transform the item data based on the attribute mappings
-      const transformedData = this.transformData(
+      let transformedData = this.transformData(
         item,
         importDef.attributeMappings
       );
-      if (collection.name.toLowerCase() === "councils") {
-        console.log("Transformed Council: ", transformedData);
-      }
-      if (isRegions) {
-        logger.info(
-          `Transformed region: ${JSON.stringify(transformedData, null, 2)}`
-        );
-      }
       // If a primary key field is defined, handle the ID mapping and check for duplicates
       if (importDef.primaryKeyField) {
         const oldId = item[importDef.primaryKeyField];

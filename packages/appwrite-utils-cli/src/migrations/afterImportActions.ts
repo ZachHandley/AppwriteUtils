@@ -47,7 +47,9 @@ export const afterImportActions = {
   ) => {
     try {
       const db = getDatabaseFromConfig(config);
-      await db.updateDocument(dbId, collId, docId, data);
+      await tryAwaitWithRetry(
+        async () => await db.updateDocument(dbId, collId, docId, data)
+      );
     } catch (error) {
       console.error("Error updating document: ", error);
     }
@@ -63,11 +65,16 @@ export const afterImportActions = {
   ) => {
     try {
       const db = getDatabaseFromConfig(config);
-      const doc = await db.getDocument(dbId, collId, docId);
+      const doc = await tryAwaitWithRetry(
+        async () => await db.getDocument(dbId, collId, docId)
+      );
       if (doc[fieldName as keyof typeof doc] == oldFieldValue) {
-        await db.updateDocument(dbId, collId, docId, {
-          [fieldName]: newFieldValue,
-        });
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(dbId, collId, docId, {
+              [fieldName]: newFieldValue,
+            })
+        );
       }
     } catch (error) {
       console.error("Error updating document: ", error);
@@ -87,10 +94,13 @@ export const afterImportActions = {
 
     // Helper function to find a collection ID by name or return the ID if given
     const findCollectionId = async (collectionIdentifier: string) => {
-      const collectionsPulled = await db.listCollections(dbId, [
-        Query.limit(25),
-        Query.equal("name", collectionIdentifier),
-      ]);
+      const collectionsPulled = await tryAwaitWithRetry(
+        async () =>
+          await db.listCollections(dbId, [
+            Query.limit(25),
+            Query.equal("name", collectionIdentifier),
+          ])
+      );
       if (collectionsPulled.total > 0) {
         return collectionsPulled.collections[0].$id;
       } else {
@@ -114,9 +124,12 @@ export const afterImportActions = {
 
       if (valueToSet) {
         // Update the target document
-        await db.updateDocument(dbId, targetCollectionId, docId, {
-          [fieldName]: valueToSet,
-        });
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(dbId, targetCollectionId, docId, {
+              [fieldName]: valueToSet,
+            })
+        );
       }
 
       console.log(
@@ -148,10 +161,13 @@ export const afterImportActions = {
 
     // Helper function to find a collection ID by name or return the ID if given
     const findCollectionId = async (collectionIdentifier: string) => {
-      const collections = await db.listCollections(dbId, [
-        Query.equal("name", collectionIdentifier),
-        Query.limit(1),
-      ]);
+      const collections = await tryAwaitWithRetry(
+        async () =>
+          await db.listCollections(dbId, [
+            Query.equal("name", collectionIdentifier),
+            Query.limit(1),
+          ])
+      );
       return collections.total > 0
         ? collections.collections[0].$id
         : collectionIdentifier;
@@ -162,7 +178,9 @@ export const afterImportActions = {
       collectionId: string,
       fieldName: string
     ) => {
-      const collection = await db.getCollection(dbId, collectionId);
+      const collection = await tryAwaitWithRetry(
+        async () => await db.getCollection(dbId, collectionId)
+      );
       const attribute = collection.attributes.find(
         (attr: any) => attr.key === fieldName
       );
@@ -191,10 +209,8 @@ export const afterImportActions = {
           queries.push(Query.cursorAfter(cursor));
         }
         queries.push(Query.limit(docLimit));
-        const response = await db.listDocuments(
-          dbId,
-          otherCollectionId,
-          queries
+        const response = await tryAwaitWithRetry(
+          async () => await db.listDocuments(dbId, otherCollectionId, queries)
         );
         const documents = response.documents;
         if (documents.length === 0 || documents.length < docLimit) {
@@ -212,7 +228,15 @@ export const afterImportActions = {
         const updatePayload = targetFieldIsArray
           ? { [fieldName]: documentIds }
           : { [fieldName]: documentIds[0] };
-        await db.updateDocument(dbId, targetCollectionId, docId, updatePayload);
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(
+              dbId,
+              targetCollectionId,
+              docId,
+              updatePayload
+            )
+        );
 
         console.log(
           `Field ${fieldName} updated successfully in document ${docId} with ${documentIds.length} document IDs.`
@@ -239,10 +263,13 @@ export const afterImportActions = {
     const db = getDatabaseFromConfig(config);
 
     const findCollectionId = async (collectionIdentifier: string) => {
-      const collections = await db.listCollections(dbId, [
-        Query.equal("name", collectionIdentifier),
-        Query.limit(1),
-      ]);
+      const collections = await tryAwaitWithRetry(
+        async () =>
+          await db.listCollections(dbId, [
+            Query.equal("name", collectionIdentifier),
+            Query.limit(1),
+          ])
+      );
       return collections.total > 0
         ? collections.collections[0].$id
         : collectionIdentifier;
@@ -279,10 +306,8 @@ export const afterImportActions = {
         if (cursor) {
           queries.push(Query.cursorAfter(cursor));
         }
-        const response = await db.listDocuments(
-          dbId,
-          otherCollectionId,
-          queries
+        const response = await tryAwaitWithRetry(
+          async () => await db.listDocuments(dbId, otherCollectionId, queries)
         );
         const documents = response.documents;
         if (documents.length === 0 || documents.length < docLimit) {
@@ -303,7 +328,15 @@ export const afterImportActions = {
         const updatePayload = targetFieldIsArray
           ? { [fieldName]: targetFieldValues }
           : { [fieldName]: targetFieldValues[0] };
-        await db.updateDocument(dbId, targetCollectionId, docId, updatePayload);
+        await tryAwaitWithRetry(
+          async () =>
+            await db.updateDocument(
+              dbId,
+              targetCollectionId,
+              docId,
+              updatePayload
+            )
+        );
 
         console.log(
           `Field ${fieldName} updated successfully in document ${docId} with values from field ${targetField}.`
@@ -331,40 +364,48 @@ export const afterImportActions = {
   ) => {
     try {
       const storage = getStorageFromConfig(config);
-      const bucket = await storage.listBuckets([
-        Query.equal("name", bucketName),
-      ]);
+      const bucket = await tryAwaitWithRetry(
+        async () => await storage.listBuckets([Query.equal("name", bucketName)])
+      );
       if (bucket.buckets.length > 0) {
         return bucket.buckets[0];
       } else if (bucketId) {
         try {
-          return await storage.getBucket(bucketId);
+          return await tryAwaitWithRetry(
+            async () => await storage.getBucket(bucketId)
+          );
         } catch (error) {
-          return await storage.createBucket(
-            bucketId,
-            bucketName,
-            permissions,
-            fileSecurity,
-            enabled,
-            maxFileSize,
-            allowedExtensions,
-            compression,
-            encryption,
-            antivirus
+          return await tryAwaitWithRetry(
+            async () =>
+              await storage.createBucket(
+                bucketId,
+                bucketName,
+                permissions,
+                fileSecurity,
+                enabled,
+                maxFileSize,
+                allowedExtensions,
+                compression,
+                encryption,
+                antivirus
+              )
           );
         }
       } else {
-        return await storage.createBucket(
-          bucketId || ID.unique(),
-          bucketName,
-          permissions,
-          fileSecurity,
-          enabled,
-          maxFileSize,
-          allowedExtensions,
-          compression,
-          encryption,
-          antivirus
+        return await tryAwaitWithRetry(
+          async () =>
+            await storage.createBucket(
+              bucketId || ID.unique(),
+              bucketName,
+              permissions,
+              fileSecurity,
+              enabled,
+              maxFileSize,
+              allowedExtensions,
+              compression,
+              encryption,
+              antivirus
+            )
         );
       }
     } catch (error) {
@@ -384,7 +425,9 @@ export const afterImportActions = {
     try {
       const db = getDatabaseFromConfig(config);
       const storage = getStorageFromConfig(config);
-      const collection = await db.getCollection(dbId, collId);
+      const collection = await tryAwaitWithRetry(
+        async () => await db.getCollection(dbId, collId)
+      );
       const attributes = collection.attributes as any[];
       const attribute = attributes.find((a) => a.key === fieldName);
       // console.log(
@@ -423,7 +466,9 @@ export const afterImportActions = {
         const tempFilePath = path.join(tempDir, fileName);
 
         // Download the file using fetch
-        const response = await fetch(filePath);
+        const response = await tryAwaitWithRetry(
+          async () => await fetch(filePath)
+        );
         if (!response.ok)
           console.error(
             `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`

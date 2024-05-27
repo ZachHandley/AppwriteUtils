@@ -51,6 +51,7 @@ export const converterFunctions = {
    * @return {any[]} The resulting array after conversion.
    */
   anyToAnyArray(value: any): any[] {
+    if (value === null || value === undefined || value === "") return [];
     if (Array.isArray(value)) {
       return value;
     } else if (typeof value === "string") {
@@ -68,6 +69,7 @@ export const converterFunctions = {
    * @return {string[]} The resulting array after conversion.
    */
   anyToStringArray(value: any): string[] {
+    if (value === null || value === undefined || value === "") return [];
     if (Array.isArray(value)) {
       return value.map((item) => String(item));
     } else if (typeof value === "string" && value.length > 0) {
@@ -83,6 +85,7 @@ export const converterFunctions = {
    * @return {number[]} an array of numbers
    */
   anyToNumberArray(value: any): number[] {
+    if (value === null || value === undefined || value === "") return value;
     if (Array.isArray(value)) {
       return value.map((item) => Number(item));
     } else if (typeof value === "string") {
@@ -92,6 +95,7 @@ export const converterFunctions = {
   },
 
   trim(value: string): string {
+    if (value === null || value === undefined || value === "") return "";
     try {
       return value.trim();
     } catch (error) {
@@ -105,6 +109,7 @@ export const converterFunctions = {
    * @return The string with quotes removed.
    **/
   removeStartEndQuotes(value: string): string {
+    if (value === null || value === undefined || value === "") return "";
     return value.replace(/^["']|["']$/g, "");
   },
 
@@ -115,6 +120,7 @@ export const converterFunctions = {
    * @return The split string array that has the most uniform segment lengths.
    */
   trySplitByDifferentSeparators(value: string): string[] {
+    if (value === null || value === undefined || value === "") return [];
     const separators = [",", ";", "|", ":", "/", "\\"];
     let bestSplit: string[] = [];
     let bestScore = -Infinity;
@@ -151,6 +157,7 @@ export const converterFunctions = {
   },
 
   joinValues(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join("");
     } catch (error) {
@@ -159,6 +166,7 @@ export const converterFunctions = {
   },
 
   joinBySpace(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join(" ");
     } catch (error) {
@@ -167,6 +175,7 @@ export const converterFunctions = {
   },
 
   joinByComma(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join(",");
     } catch (error) {
@@ -175,6 +184,7 @@ export const converterFunctions = {
   },
 
   joinByPipe(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join("|");
     } catch (error) {
@@ -183,6 +193,7 @@ export const converterFunctions = {
   },
 
   joinBySemicolon(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join(";");
     } catch (error) {
@@ -191,6 +202,7 @@ export const converterFunctions = {
   },
 
   joinByColon(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join(":");
     } catch (error) {
@@ -199,6 +211,7 @@ export const converterFunctions = {
   },
 
   joinBySlash(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join("/");
     } catch (error) {
@@ -207,6 +220,7 @@ export const converterFunctions = {
   },
 
   joinByHyphen(values: any[]): any {
+    if (values === null || values === undefined) return values;
     try {
       return values.join("-");
     } catch (error) {
@@ -215,6 +229,7 @@ export const converterFunctions = {
   },
 
   splitByComma(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split(",");
     } catch (error) {
@@ -223,6 +238,7 @@ export const converterFunctions = {
   },
 
   splitByPipe(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split("|");
     } catch (error) {
@@ -231,6 +247,7 @@ export const converterFunctions = {
   },
 
   splitBySemicolon(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split(";");
     } catch (error) {
@@ -239,6 +256,7 @@ export const converterFunctions = {
   },
 
   splitByColon(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split(":");
     } catch (error) {
@@ -247,6 +265,7 @@ export const converterFunctions = {
   },
 
   splitBySlash(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split("/");
     } catch (error) {
@@ -255,6 +274,7 @@ export const converterFunctions = {
   },
 
   splitByBackslash(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split("\\");
     } catch (error) {
@@ -263,6 +283,7 @@ export const converterFunctions = {
   },
 
   splitBySpace(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split(" ");
     } catch (error) {
@@ -271,6 +292,7 @@ export const converterFunctions = {
   },
 
   splitByDot(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split(".");
     } catch (error) {
@@ -279,6 +301,7 @@ export const converterFunctions = {
   },
 
   splitByUnderscore(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split("_");
     } catch (error) {
@@ -287,6 +310,7 @@ export const converterFunctions = {
   },
 
   splitByHyphen(value: string): any {
+    if (value === null || value === undefined || value === "") return value;
     try {
       return value.split("-");
     } catch (error) {
@@ -300,6 +324,8 @@ export const converterFunctions = {
    * @return {any} The first element of the array.
    */
   pickFirstElement(value: any[]): any {
+    if (value === null || value === undefined || value.length === 0)
+      return value;
     try {
       return value[0];
     } catch (error) {
@@ -335,7 +361,11 @@ export const converterFunctions = {
    * @return {any} The object representation of the JSON string.
    */
   parseObject(jsonString: string): any {
-    return JSON.parse(jsonString);
+    try {
+      return JSON.parse(jsonString);
+    } catch (error) {
+      return jsonString;
+    }
   },
 
   convertPhoneStringToUSInternational(value: string): string {

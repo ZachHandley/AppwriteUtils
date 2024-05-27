@@ -237,6 +237,7 @@ export class ImportController {
       const collectionData = dataLoader.importMap.get(
         dataLoader.getCollectionKey(collection.name)
       );
+      console.log(`Processing collection: ${collection.name}...`);
       if (!collectionData) {
         console.log("No collection data for ", collection.name);
         continue;

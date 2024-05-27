@@ -390,7 +390,9 @@ export const transferStorageLocalToLocal = async (
   let numberOfFiles = 0;
   if (fromFiles.files.length < 100) {
     for (const file of allFromFiles) {
-      const fileData = await storage.getFileDownload(file.bucketId, file.$id);
+      const fileData = await tryAwaitWithRetry(
+        async () => await storage.getFileDownload(file.bucketId, file.$id)
+      );
       const fileToCreate = InputFile.fromBuffer(
         Buffer.from(fileData),
         file.name
@@ -410,10 +412,13 @@ export const transferStorageLocalToLocal = async (
   } else {
     lastFileId = fromFiles.files[fromFiles.files.length - 1].$id;
     while (lastFileId) {
-      const files = await storage.listFiles(fromBucketId, [
-        Query.limit(100),
-        Query.cursorAfter(lastFileId),
-      ]);
+      const files = await tryAwaitWithRetry(
+        async () =>
+          await storage.listFiles(fromBucketId, [
+            Query.limit(100),
+            Query.cursorAfter(lastFileId!),
+          ])
+      );
       allFromFiles.push(...files.files);
       if (files.files.length < 100) {
         lastFileId = undefined;
@@ -422,7 +427,9 @@ export const transferStorageLocalToLocal = async (
       }
     }
     for (const file of allFromFiles) {
-      const fileData = await storage.getFileDownload(file.bucketId, file.$id);
+      const fileData = await tryAwaitWithRetry(
+        async () => await storage.getFileDownload(file.bucketId, file.$id)
+      );
       const fileToCreate = InputFile.fromBuffer(
         Buffer.from(fileData),
         file.name
@@ -467,10 +474,13 @@ export const transferStorageLocalToRemote = async (
   if (fromFiles.files.length === 100) {
     lastFileId = fromFiles.files[fromFiles.files.length - 1].$id;
     while (lastFileId) {
-      const files = await localStorage.listFiles(fromBucketId, [
-        Query.limit(100),
-        Query.cursorAfter(lastFileId),
-      ]);
+      const files = await tryAwaitWithRetry(
+        async () =>
+          await localStorage.listFiles(fromBucketId, [
+            Query.limit(100),
+            Query.cursorAfter(lastFileId!),
+          ])
+      );
       allFromFiles.push(...files.files);
       if (files.files.length < 100) {
         break;
