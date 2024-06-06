@@ -79,6 +79,31 @@ export const converterFunctions = {
   },
 
   /**
+   * Converts any null, empty, or undefined value to an empty array
+   * Meant to be used if the value needs to be an array but you can't guarantee it is one
+   */
+  onlyUnsetToArray(value: any): any[] {
+    if (value === null || value === undefined || value === "") return [];
+    return value;
+  },
+
+  /**
+   * Flattens an array or a nested array of arrays into a single array.
+   *
+   * @param {any} value - The value to be flattened. Can be an array or a nested array of arrays.
+   * @return {any[]} - A flattened array of all the elements from the input array(s).
+   * If the input is null/undefined/empty, an empty array is returned.
+   * If the input is not an array or a nested array of arrays, the input is returned as is.
+   */
+  flattenArray(value: any): any[] {
+    if (value === null || value === undefined || value === "") return [];
+    if (Array.isArray(value)) {
+      return value.flat(Infinity);
+    }
+    return value;
+  },
+
+  /**
    * A function that converts any type of value to an array of numbers.
    *
    * @param {any} value - the value to be converted
@@ -172,6 +197,11 @@ export const converterFunctions = {
     } catch (error) {
       return values;
     }
+  },
+
+  makeArrayUnique(values: any[]): any[] {
+    if (values === null || values === undefined) return [];
+    return [...new Set(values)];
   },
 
   joinByComma(values: any[]): any {

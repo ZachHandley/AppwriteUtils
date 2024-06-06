@@ -132,6 +132,10 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.70: Bump to `node-appwrite` version
+- 0.0.69: Fixed single ID not getting replaced due to the below change =D also, `nice`
+- 0.0.68: Fixed the occasional case where, when mapping ID's from old data to new, there would be an array of ID's to match against. `idMappings` now supports arrays.
+- 0.0.67: Fixed `updates` in `importDef`'s update mappings overwriting postImportActions from the original
 - 0.0.57: Fixed `dataLoader`'s `idMapping`'s giving me issues
 - 0.0.55: Added `documentExists` check to batch creation functionality to try to prevent duplicates
 - 0.0.54: Various fixes in here

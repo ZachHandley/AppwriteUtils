@@ -1,12 +1,13 @@
 import {
   Databases,
   Storage,
-  InputFile,
   Query,
   ID,
   type Models,
   Client,
+  Compression,
 } from "node-appwrite";
+import { InputFile } from "node-appwrite/file";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -385,7 +386,7 @@ export const afterImportActions = {
                 enabled,
                 maxFileSize,
                 allowedExtensions,
-                compression,
+                compression ? Compression.Gzip : undefined,
                 encryption,
                 antivirus
               )
@@ -402,7 +403,7 @@ export const afterImportActions = {
               enabled,
               maxFileSize,
               allowedExtensions,
-              compression,
+              compression ? Compression.Gzip : undefined,
               encryption,
               antivirus
             )
@@ -433,6 +434,13 @@ export const afterImportActions = {
       // console.log(
       //   `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
       // );
+      if (filePath.length === 0 || fileName.length === 0) {
+        console.error(
+          `File path or name is empty for field ${fieldName} in collection ${collId}, skipping...`
+        );
+        return;
+      }
+
       let isArray = false;
       if (!attribute) {
         console.log(

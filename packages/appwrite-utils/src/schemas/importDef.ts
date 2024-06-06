@@ -27,6 +27,11 @@ export const importDefSchema = z
     idMappings: idMappingsSchema
       .optional()
       .describe("The id mappings for the attribute to map ID's to"),
+    createUsers: z
+      .boolean()
+      .default(false)
+      .nullish()
+      .describe("Whether to create users"),
     updateMapping: z
       .object({
         originalIdField: z

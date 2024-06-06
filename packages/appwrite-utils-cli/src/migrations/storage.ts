@@ -2,11 +2,11 @@ import {
   Storage,
   Databases,
   Query,
-  InputFile,
   type Models,
   ID,
   Permission,
 } from "node-appwrite";
+import { InputFile } from "node-appwrite/file";
 import { type OperationCreate, type BackupCreate } from "./backup.js";
 import { splitIntoBatches } from "./migrationHelper.js";
 import type { AppwriteConfig } from "appwrite-utils";
@@ -490,12 +490,16 @@ export const transferStorageLocalToRemote = async (
   }
 
   for (const file of allFromFiles) {
+    const fileData = await tryAwaitWithRetry(
+      async () => await localStorage.getFileDownload(file.bucketId, file.$id)
+    );
+    const fileToCreate = InputFile.fromBuffer(Buffer.from(fileData), file.name);
     await tryAwaitWithRetry(
       async () =>
         await remoteStorage.createFile(
           toBucketId,
           file.$id,
-          file,
+          fileToCreate,
           file.$permissions
         )
     );

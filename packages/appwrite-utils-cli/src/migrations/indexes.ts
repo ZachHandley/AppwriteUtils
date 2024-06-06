@@ -1,5 +1,5 @@
 import { indexSchema, type Index } from "appwrite-utils";
-import { Databases, Query, type Models } from "node-appwrite";
+import { Databases, IndexType, Query, type Models } from "node-appwrite";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 // import {}
 
@@ -19,7 +19,7 @@ export const createOrUpdateIndex = async (
     dbId,
     collectionId,
     index.key,
-    index.type,
+    index.type as IndexType,
     index.attributes,
     index.orders
   );

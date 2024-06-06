@@ -64,6 +64,7 @@ export class DataLoader {
   // Maps to hold email and phone to user ID mappings for unique-ness in User Accounts
   private emailToUserIdMap = new Map<string, string>();
   private phoneToUserIdMap = new Map<string, string>();
+  private userIdSet = new Set<string>();
   userExistsMap = new Map<string, boolean>();
   private shouldWriteFile = false;
 
@@ -212,6 +213,7 @@ export class DataLoader {
     let condition =
       this.checkMapValuesForId(newId, collectionName) ||
       this.userExistsMap.has(newId) ||
+      this.userIdSet.has(newId) ||
       this.importMap
         .get(this.getCollectionKey("users"))
         ?.data.some(
@@ -223,6 +225,7 @@ export class DataLoader {
       condition =
         this.checkMapValuesForId(newId, collectionName) ||
         this.userExistsMap.has(newId) ||
+        this.userIdSet.has(newId) ||
         this.importMap
           .get(this.getCollectionKey("users"))
           ?.data.some(
@@ -330,12 +333,13 @@ export class DataLoader {
     // Iterate over the users and setup our maps ahead of time for email and phone
     for (const user of allUsers) {
       if (user.email) {
-        this.emailToUserIdMap.set(user.email, user.$id);
+        this.emailToUserIdMap.set(user.email.toLowerCase(), user.$id);
       }
       if (user.phone) {
         this.phoneToUserIdMap.set(user.phone, user.$id);
       }
       this.userExistsMap.set(user.$id, true);
+      this.userIdSet.add(user.$id);
       let importData = this.importMap.get(this.getCollectionKey("users"));
       if (!importData) {
         importData = {
@@ -345,11 +349,13 @@ export class DataLoader {
       importData.data.push({
         finalData: {
           ...user,
+          email: user.email?.toLowerCase(),
           userId: user.$id,
           docId: user.$id,
         },
         context: {
           ...user,
+          email: user.email?.toLowerCase(),
           userId: user.$id,
           docId: user.$id,
         },
@@ -398,7 +404,7 @@ export class DataLoader {
           (def: ImportDef) => def.type === "update"
         );
         for (const createDef of createDefs) {
-          if (!isUsersCollection) {
+          if (!isUsersCollection || !createDef.createUsers) {
             await this.prepareCreateData(db, collection, createDef);
           } else {
             // Special handling for users collection if needed
@@ -536,7 +542,7 @@ export class DataLoader {
                   idMapping.fieldToSet || idMapping.sourceField;
                 const targetFieldKey =
                   idMapping.targetFieldToMatch || idMapping.targetField;
-                const valueToMatch = this.getValueFromData(
+                const sourceValue = this.getValueFromData(
                   collectionData.data[i].finalData,
                   collectionData.data[i].context,
                   idMapping.sourceField
@@ -544,9 +550,9 @@ export class DataLoader {
 
                 // Skip if value to match is missing or empty
                 if (
-                  !valueToMatch ||
-                  _.isEmpty(valueToMatch) ||
-                  valueToMatch === null
+                  !sourceValue ||
+                  _.isEmpty(sourceValue) ||
+                  sourceValue === null
                 )
                   continue;
 
@@ -559,28 +565,58 @@ export class DataLoader {
                 if (!targetCollectionData || !targetCollectionData.data)
                   continue;
 
-                // Find matching data in the target collection
-                const foundData = targetCollectionData.data.filter(
-                  ({ context, finalData }) => {
-                    const targetValue = this.getValueFromData(
-                      finalData,
-                      context,
-                      targetFieldKey
+                // Handle cases where sourceValue is an array
+                const sourceValues = Array.isArray(sourceValue)
+                  ? sourceValue.map((sourceValue) => `${sourceValue}`)
+                  : [`${sourceValue}`];
+                let newData = [];
+
+                for (const valueToMatch of sourceValues) {
+                  // Find matching data in the target collection
+                  const foundData = targetCollectionData.data.filter(
+                    ({ context, finalData }) => {
+                      const targetValue = this.getValueFromData(
+                        finalData,
+                        context,
+                        targetFieldKey
+                      );
+                      const isMatch = `${targetValue}` === `${valueToMatch}`;
+                      // Ensure the targetValue is defined and not null
+                      return (
+                        isMatch &&
+                        targetValue !== undefined &&
+                        targetValue !== null
+                      );
+                    }
+                  );
+
+                  if (foundData.length) {
+                    newData.push(
+                      ...foundData.map((data) => {
+                        const newValue = this.getValueFromData(
+                          data.finalData,
+                          data.context,
+                          idMapping.targetField
+                        );
+                        return newValue;
+                      })
                     );
-                    const isMatch = `${targetValue}` === `${valueToMatch}`;
-                    // Ensure the targetValue is defined and not null
-                    return (
-                      isMatch &&
-                      targetValue !== undefined &&
-                      targetValue !== null
+                  } else {
+                    logger.info(
+                      `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey} -- idMapping: ${JSON.stringify(
+                        idMapping,
+                        null,
+                        2
+                      )}`
                     );
                   }
-                );
+                  continue;
+                }
 
                 const getCurrentDataFiltered = (currentData: any) => {
                   if (Array.isArray(currentData.finalData[fieldToSetKey])) {
                     return currentData.finalData[fieldToSetKey].filter(
-                      (data: any) => `${data}` !== `${valueToMatch}`
+                      (data: any) => !sourceValues.includes(`${data}`)
                     );
                   }
                   return currentData.finalData[fieldToSetKey];
@@ -590,86 +626,75 @@ export class DataLoader {
                 const currentDataFiltered = getCurrentDataFiltered(
                   collectionData.data[i]
                 );
-                // Log and skip if no matching data found
-                if (!foundData.length) {
-                  console.log(
-                    `No data found for collection ${collectionConfig.name}:\nTarget collection: ${targetCollectionKey}\nValue to match: ${valueToMatch}\nField to set: ${fieldToSetKey}\nTarget field to match: ${targetFieldKey}\nTarget field value: ${idMapping.targetField}`
-                  );
-                  logger.info(
-                    `No data found for collection: ${targetCollectionKey} with value: ${valueToMatch} for field: ${fieldToSetKey} -- idMapping: ${JSON.stringify(
-                      idMapping,
-                      null,
-                      2
-                    )}`
-                  );
-                  continue;
-                }
 
-                needsUpdate = true;
+                if (newData.length) {
+                  needsUpdate = true;
 
-                // Extract the new data to set
-                const newData = foundData.map((data) => {
-                  const valueFound = this.getValueFromData(
-                    data.finalData,
-                    data.context,
-                    idMapping.targetField
-                  );
-                  return valueFound;
-                });
-
-                // Handle cases where current data is an array
-                if (isFieldToSetArray) {
-                  if (!currentDataFiltered) {
-                    // Set new data if current data is undefined
-                    collectionData.data[i].finalData[fieldToSetKey] =
-                      Array.isArray(newData) ? newData : [newData];
-                  } else {
-                    if (Array.isArray(currentDataFiltered)) {
-                      // Convert current data to array and merge if new data is non-empty array
-                      collectionData.data[i].finalData[fieldToSetKey] = [
-                        ...new Set(
-                          [...currentDataFiltered, ...newData].filter(
-                            (value: any) =>
-                              `${value}` !== `${valueToMatch}` && value
-                          )
-                        ),
-                      ];
+                  // Handle cases where current data is an array
+                  if (isFieldToSetArray) {
+                    if (!currentDataFiltered) {
+                      // Set new data if current data is undefined
+                      collectionData.data[i].finalData[fieldToSetKey] =
+                        Array.isArray(newData) ? newData : [newData];
                     } else {
-                      // Merge arrays if new data is non-empty array and filter for uniqueness
+                      if (Array.isArray(currentDataFiltered)) {
+                        // Convert current data to array and merge if new data is non-empty array
+                        collectionData.data[i].finalData[fieldToSetKey] = [
+                          ...new Set(
+                            [...currentDataFiltered, ...newData].filter(
+                              (value: any) =>
+                                value !== null &&
+                                value !== undefined &&
+                                value !== ""
+                            )
+                          ),
+                        ];
+                      } else {
+                        // Merge arrays if new data is non-empty array and filter for uniqueness
+                        collectionData.data[i].finalData[fieldToSetKey] = [
+                          ...new Set(
+                            [
+                              ...(Array.isArray(currentDataFiltered)
+                                ? currentDataFiltered
+                                : [currentDataFiltered]),
+                              ...newData,
+                            ].filter(
+                              (value: any) =>
+                                value !== null &&
+                                value !== undefined &&
+                                value !== "" &&
+                                !sourceValues.includes(`${value}`)
+                            )
+                          ),
+                        ];
+                      }
+                    }
+                  } else {
+                    if (!currentDataFiltered) {
+                      // Set new data if current data is undefined
+                      collectionData.data[i].finalData[fieldToSetKey] =
+                        Array.isArray(newData) ? newData[0] : newData;
+                    } else if (Array.isArray(newData) && newData.length > 0) {
+                      // Convert current data to array and merge if new data is non-empty array, then filter for uniqueness
+                      // and take the first value, because it's an array and the attribute is not an array
                       collectionData.data[i].finalData[fieldToSetKey] = [
                         ...new Set(
-                          [
-                            ...(Array.isArray(currentDataFiltered)
-                              ? currentDataFiltered
-                              : [currentDataFiltered]),
-                            ...newData,
-                          ].filter(
+                          [currentDataFiltered, ...newData].filter(
                             (value: any) =>
-                              `${value}` !== `${valueToMatch}` && value
+                              value !== null &&
+                              value !== undefined &&
+                              value !== "" &&
+                              !sourceValues.includes(`${value}`)
                           )
                         ),
-                      ];
+                      ].slice(0, 1)[0];
+                    } else if (
+                      !Array.isArray(newData) &&
+                      newData !== undefined
+                    ) {
+                      // Simply update the field if new data is not an array and defined
+                      collectionData.data[i].finalData[fieldToSetKey] = newData;
                     }
-                  }
-                } else {
-                  if (!currentDataFiltered) {
-                    // Set new data if current data is undefined
-                    collectionData.data[i].finalData[fieldToSetKey] =
-                      Array.isArray(newData) ? newData[0] : newData;
-                  } else if (Array.isArray(newData) && newData.length > 0) {
-                    // Convert current data to array and merge if new data is non-empty array, then filter for uniqueness
-                    // and take the first value, because it's an array and the attribute is not an array
-                    collectionData.data[i].finalData[fieldToSetKey] = [
-                      ...new Set(
-                        [currentDataFiltered, ...newData].filter(
-                          (value: any) =>
-                            `${value}` !== `${valueToMatch}` && value
-                        )
-                      ),
-                    ].slice(0, 1)[0];
-                  } else if (!Array.isArray(newData) && newData !== undefined) {
-                    // Simply update the field if new data is not an array and defined
-                    collectionData.data[i].finalData[fieldToSetKey] = newData;
                   }
                 }
               }
@@ -761,6 +786,7 @@ export class DataLoader {
     };
   } {
     if (
+      this.userIdSet.has(newId) ||
       this.userExistsMap.has(newId) ||
       Array.from(this.emailToUserIdMap.values()).includes(newId) ||
       Array.from(this.phoneToUserIdMap.values()).includes(newId)
@@ -768,8 +794,11 @@ export class DataLoader {
       newId = this.getTrueUniqueId(this.getCollectionKey("users"));
     }
     let transformedItem = this.transformData(item, attributeMappings);
-    const userData = AuthUserCreateSchema.safeParse(transformedItem);
-    if (!userData.success || !(userData.data.email && userData.data.phone)) {
+    let userData = AuthUserCreateSchema.safeParse(transformedItem);
+    if (userData.data?.email) {
+      userData.data.email = userData.data.email.toLowerCase();
+    }
+    if (!userData.success || !(userData.data.email || userData.data.phone)) {
       logger.error(
         `Invalid user data: ${JSON.stringify(
           userData.error?.errors,
@@ -793,7 +822,7 @@ export class DataLoader {
         },
       };
     }
-    const email = userData.data.email;
+    const email = userData.data.email?.toLowerCase();
     const phone = userData.data.phone;
     let existingId: string | undefined;
 
@@ -836,7 +865,12 @@ export class DataLoader {
       if (userFound) {
         userFound.finalData.userId = existingId;
         userFound.finalData.docId = existingId;
-        this.userExistsMap.set(existingId, true);
+        this.userIdSet.add(existingId);
+        transformedItem = {
+          ...transformedItem,
+          userId: existingId,
+          docId: existingId,
+        };
       }
 
       const userKeys = ["email", "phone", "name", "labels", "prefs"];
@@ -873,6 +907,7 @@ export class DataLoader {
     this.importMap.set(this.getCollectionKey("users"), {
       data: [...(usersMap?.data || []), userDataToAdd],
     });
+    this.userIdSet.add(existingId);
 
     return {
       transformedItem,
@@ -1281,23 +1316,20 @@ export class DataLoader {
           transformedData[importDef.updateMapping.originalIdField];
         if (oldId) {
           itemDataToUpdate = currentData?.data.find(
-            ({ context, rawData, finalData }) => {
+            ({ context, finalData }) => {
               const targetField =
                 importDef.updateMapping!.targetField ??
                 importDef.updateMapping!.originalIdField;
 
               return (
                 `${context[targetField]}` === `${oldId}` ||
-                `${rawData[targetField]}` === `${oldId}` ||
                 `${finalData[targetField]}` === `${oldId}`
               );
             }
           );
 
           if (itemDataToUpdate) {
-            newId =
-              itemDataToUpdate.finalData.docId ||
-              itemDataToUpdate.context.docId;
+            newId = itemDataToUpdate.context.docId;
           }
         }
       }
@@ -1391,11 +1423,11 @@ export class DataLoader {
       );
 
       // Create a context object for the item, including the new ID and transformed data
-      let context = this.createContext(db, collection, item, newId);
+      let context = itemDataToUpdate.context;
       context = this.mergeObjects(context, transformedData);
 
       // Validate the item before proceeding
-      const isValid = await this.importDataActions.validateItem(
+      const isValid = this.importDataActions.validateItem(
         item,
         importDef.attributeMappings,
         context
@@ -1427,7 +1459,31 @@ export class DataLoader {
           transformedData
         );
         itemDataToUpdate.context = context;
-        itemDataToUpdate.importDef = newImportDef;
+        // Merge existing importDef with new importDef, focusing only on postImportActions
+        itemDataToUpdate.importDef = {
+          ...itemDataToUpdate.importDef,
+          attributeMappings:
+            itemDataToUpdate.importDef?.attributeMappings.map(
+              (attrMapping, index) => ({
+                ...attrMapping,
+                postImportActions: [
+                  ...(attrMapping.postImportActions || []),
+                  ...(newImportDef.attributeMappings[index]
+                    ?.postImportActions || []),
+                ],
+              })
+            ) || [],
+        } as ImportDef;
+
+        if (collection.name.toLowerCase() === "councils") {
+          console.log(
+            `Mappings in update councils: ${JSON.stringify(
+              itemDataToUpdate.importDef.attributeMappings,
+              null,
+              2
+            )}`
+          );
+        }
       } else {
         currentData!.data.push({
           rawData: item,

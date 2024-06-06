@@ -1,4 +1,10 @@
-import { Client, Databases, Query, type Models } from "node-appwrite";
+import {
+  Client,
+  Databases,
+  IndexType,
+  Query,
+  type Models,
+} from "node-appwrite";
 import {
   getAppwriteClient,
   tryAwaitWithRetry,
@@ -139,7 +145,7 @@ export const transferDatabaseLocalToLocal = async (
               targetDbId,
               newCollection.$id,
               index.key,
-              index.type,
+              index.type as IndexType,
               index.attributes,
               index.orders
             )
@@ -226,7 +232,7 @@ export const transferDatabaseLocalToRemote = async (
             toDbId,
             toCollection.$id,
             index.key,
-            index.type,
+            index.type as IndexType,
             index.attributes,
             index.orders
           )

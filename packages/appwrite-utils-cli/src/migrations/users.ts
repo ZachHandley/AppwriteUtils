@@ -89,10 +89,10 @@ export class UsersController {
             ])
         );
         allUsers.push(...moreUsers.users);
-        lastDocumentId = moreUsers.users[moreUsers.users.length - 1].$id;
         if (moreUsers.users.length < 200) {
           break;
         }
+        lastDocumentId = moreUsers.users[moreUsers.users.length - 1].$id;
       }
     } else {
       allUsers.push(...users.users);
@@ -141,9 +141,9 @@ export class UsersController {
         }
       }
       if (e instanceof Error) {
-        logger.error("FAILED CREATING USER: ", e.message);
+        logger.error("FAILED CREATING USER: ", e.message, item);
       }
-      console.log("FAILED CREATING USER: ", e);
+      console.log("FAILED CREATING USER: ", e, item);
       throw e;
     }
   }
