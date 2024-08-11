@@ -1,5 +1,13 @@
 import { SchemaGenerator } from "./schemaStrings.js";
-import { Databases, Query, type Models, type Permission } from "node-appwrite";
+import {
+  Client,
+  Compression,
+  Databases,
+  Query,
+  Storage,
+  type Models,
+  type Permission,
+} from "node-appwrite";
 import { fetchAllCollections } from "./collections.js";
 import { fetchAllDatabases } from "./databases.js";
 import {
@@ -15,16 +23,23 @@ import {
   parseAttribute,
 } from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
+import { listBuckets } from "../storage/methods.js";
 
 export class AppwriteToX {
   config: AppwriteConfig;
+  storage: Storage;
   updatedConfig: AppwriteConfig;
   collToAttributeMap = new Map<string, Attribute[]>();
   appwriteFolderPath: string;
 
-  constructor(config: AppwriteConfig, appwriteFolderPath: string) {
+  constructor(
+    config: AppwriteConfig,
+    appwriteFolderPath: string,
+    storage: Storage
+  ) {
     this.config = config;
     this.updatedConfig = config;
+    this.storage = storage;
     this.appwriteFolderPath = appwriteFolderPath;
   }
 
@@ -62,16 +77,45 @@ export class AppwriteToX {
     }
   };
 
-  async appwriteSync(config: AppwriteConfig) {
+  async appwriteSync(config: AppwriteConfig, databases?: Models.Database[]) {
     const db = getDatabaseFromConfig(config);
-    const databases = await fetchAllDatabases(db);
+    if (!databases) {
+      databases = await fetchAllDatabases(db);
+    }
     let updatedConfig: AppwriteConfig = { ...config };
+
+    // Fetch all buckets
+    const allBuckets = await listBuckets(this.storage);
 
     // Loop through each database
     for (const database of databases) {
       if (database.name.toLowerCase() === "migrations") {
         continue;
       }
+
+      // Match bucket to database
+      const matchedBucket = allBuckets.buckets.find((bucket) =>
+        bucket.$id.toLowerCase().includes(database.$id.toLowerCase())
+      );
+
+      if (matchedBucket) {
+        const dbConfig = updatedConfig.databases.find(
+          (db) => db.$id === database.$id
+        );
+        if (dbConfig) {
+          dbConfig.bucket = {
+            $id: matchedBucket.$id,
+            name: matchedBucket.name,
+            enabled: matchedBucket.enabled,
+            maximumFileSize: matchedBucket.maximumFileSize,
+            allowedFileExtensions: matchedBucket.allowedFileExtensions,
+            compression: matchedBucket.compression as Compression,
+            encryption: matchedBucket.encryption,
+            antivirus: matchedBucket.antivirus,
+          };
+        }
+      }
+
       const collections = await fetchAllCollections(database.$id, db);
 
       // Loop through each collection in the current database
@@ -159,11 +203,30 @@ export class AppwriteToX {
         `Processed ${collections.length} collections in ${database.name}`
       );
     }
+    // Add unmatched buckets as global buckets
+    const globalBuckets = allBuckets.buckets.filter(
+      (bucket) =>
+        !updatedConfig.databases.some(
+          (db) => db.bucket && db.bucket.$id === bucket.$id
+        )
+    );
+
+    updatedConfig.buckets = globalBuckets.map((bucket) => ({
+      $id: bucket.$id,
+      name: bucket.name,
+      enabled: bucket.enabled,
+      maximumFileSize: bucket.maximumFileSize,
+      allowedFileExtensions: bucket.allowedFileExtensions,
+      compression: bucket.compression as Compression,
+      encryption: bucket.encryption,
+      antivirus: bucket.antivirus,
+    }));
+
     this.updatedConfig = updatedConfig;
   }
 
-  async toSchemas() {
-    await this.appwriteSync(this.config);
+  async toSchemas(databases?: Models.Database[]) {
+    await this.appwriteSync(this.config, databases);
     const generator = new SchemaGenerator(
       this.updatedConfig,
       this.appwriteFolderPath

@@ -107,3 +107,4 @@ export {
   type AuthUserCreate,
 } from "./schemas/authUser.js";
 export { tryAwaitWithRetry } from "./functions/helpers.js";
+export { getAppwriteClient } from "./functions/appwriteHelpers.js";

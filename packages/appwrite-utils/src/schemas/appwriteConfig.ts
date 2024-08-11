@@ -4,17 +4,13 @@ import {
   type Collections,
   type Collection,
 } from "./collection.js";
+import { BucketSchema } from "./bucket.js";
 
 export const AppwriteConfigSchema = z.object({
   appwriteEndpoint: z.string().default("https://cloud.appwrite.io/v1"),
   appwriteProject: z.string(),
   appwriteKey: z.string(),
   appwriteClient: z.any().or(z.null()).default(null),
-  enableDevDatabase: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe("Enable development database alongside production database"),
   enableBackups: z.boolean().default(true).describe("Enable backups"),
   backupInterval: z
     .number()
@@ -28,11 +24,6 @@ export const AppwriteConfigSchema = z.object({
     .default(true)
     .describe("Enable backup cleanup"),
   enableMockData: z.boolean().default(false).describe("Enable mock data"),
-  enableWipeOtherDatabases: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe("Enable wiping other databases"),
   documentBucketId: z
     .string()
     .optional()
@@ -50,6 +41,7 @@ export const AppwriteConfigSchema = z.object({
       z.object({
         $id: z.string(),
         name: z.string(),
+        bucket: BucketSchema.optional(),
       })
     )
     .optional()
@@ -60,6 +52,12 @@ export const AppwriteConfigSchema = z.object({
       { $id: "migrations", name: "Migrations" },
     ])
     .describe("Databases to create, $id is the id of the database"),
+
+  buckets: z
+    .array(BucketSchema)
+    .optional()
+    .default([])
+    .describe("Global buckets to create across all databases"),
   collections: z
     .array(CollectionCreateSchema)
     .default([])

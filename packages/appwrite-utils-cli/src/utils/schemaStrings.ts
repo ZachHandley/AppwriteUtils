@@ -1,4 +1,5 @@
 import { toCamelCase, toPascalCase } from "../utils/index.js";
+import { Databases } from "node-appwrite";
 import type {
   AppwriteConfig,
   Attribute,
@@ -8,7 +9,7 @@ import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import { dump } from "js-yaml";
-import { getDatabaseFromConfig } from "./afterImportActions.js";
+// import { getClientFromConfig } from "./getClientFromConfig.js";
 
 interface RelationshipDetail {
   parentCollection: string;
@@ -49,7 +50,7 @@ export class SchemaGenerator {
     documentBucketId: "${this.config.documentBucketId}",
     usersCollectionName: "${this.config.usersCollectionName}",
     databases: ${JSON.stringify(this.config.databases)},
-    buckets: ${JSON.stringify(this.config.buckets)}
+    buckets: ${JSON.stringify(this.config.buckets)},
   };
   
   export default appwriteConfig;

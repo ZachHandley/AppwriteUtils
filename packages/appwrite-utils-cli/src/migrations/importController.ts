@@ -27,11 +27,9 @@ import {
 } from "./backup.js";
 import { DataLoader, type CollectionImportData } from "./dataLoader.js";
 import {
-  documentExists,
-  transferDocumentsBetweenDbsLocalToLocal,
-} from "./collections.js";
-import { transferDatabaseLocalToLocal } from "./databases.js";
-import { transferStorageLocalToLocal } from "./storage.js";
+  transferDatabaseLocalToLocal,
+  transferStorageLocalToLocal,
+} from "./transfer.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -48,6 +46,7 @@ export class ImportController {
     finalItem: any;
     attributeMappings: AttributeMappings;
   }[] = [];
+  private databasesToRun: Models.Database[];
 
   constructor(
     config: AppwriteConfig,
@@ -55,7 +54,8 @@ export class ImportController {
     storage: Storage,
     appwriteFolderPath: string,
     importDataActions: ImportDataActions,
-    setupOptions: SetupOptions
+    setupOptions: SetupOptions,
+    databasesToRun?: Models.Database[]
   ) {
     this.config = config;
     this.database = database;
@@ -64,41 +64,33 @@ export class ImportController {
     this.importDataActions = importDataActions;
     this.setupOptions = setupOptions;
     this.documentCache = new Map();
+    this.databasesToRun = databasesToRun || [];
   }
 
   async run() {
-    const databasesToRun = this.config.databases
-      .filter(
-        (db) =>
-          (areCollectionNamesSame(db.name, this.config!.databases[0].name) &&
-            this.setupOptions.runProd) ||
-          (areCollectionNamesSame(db.name, this.config!.databases[1].name) &&
-            this.setupOptions.runStaging) ||
-          (areCollectionNamesSame(db.name, this.config!.databases[2].name) &&
-            this.setupOptions.runDev)
-      )
-      .map((db) => db.name);
+    let databasesToProcess: Models.Database[];
+
+    if (this.databasesToRun.length > 0) {
+      // Use the provided databases
+      databasesToProcess = this.databasesToRun;
+    } else {
+      // If no databases are specified, fetch all databases
+      const allDatabases = await this.database.list();
+      databasesToProcess = allDatabases.databases;
+    }
+
     let dataLoader: DataLoader | undefined;
-    let databaseRan: ConfigDatabase | undefined;
-    for (let db of this.config.databases) {
-      if (
-        db.name.toLowerCase().trim().replace(" ", "") === "migrations" ||
-        !databasesToRun.includes(db.name)
-      ) {
+    let databaseRan: Models.Database | undefined;
+
+    for (let db of databasesToProcess) {
+      if (db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
         continue;
       }
-      if (!db.$id) {
-        const databases = await this.database!.list([
-          Query.equal("name", db.name),
-        ]);
-        if (databases.databases.length > 0) {
-          db.$id = databases.databases[0].$id;
-        }
-      }
+
       console.log(`---------------------------------`);
       console.log(`Starting import data for database: ${db.name}`);
       console.log(`---------------------------------`);
-      // await this.importCollections(db);
+
       if (!databaseRan) {
         databaseRan = db;
         dataLoader = new DataLoader(
@@ -115,6 +107,7 @@ export class ImportController {
       } else if (databaseRan.$id !== db.$id) {
         await this.updateOthersToFinalData(databaseRan, db);
       }
+
       console.log(`---------------------------------`);
       console.log(`Finished import data for database: ${db.name}`);
       console.log(`---------------------------------`);
@@ -122,23 +115,31 @@ export class ImportController {
   }
 
   async updateOthersToFinalData(
-    updatedDb: ConfigDatabase,
-    targetDb: ConfigDatabase
+    updatedDb: Models.Database,
+    targetDb: Models.Database
   ) {
     await transferDatabaseLocalToLocal(
       this.database,
       updatedDb.$id,
       targetDb.$id
     );
-    await transferStorageLocalToLocal(
-      this.storage,
-      `${this.config.documentBucketId}_${updatedDb.name
-        .toLowerCase()
-        .replace(" ", "")}`,
-      `${this.config.documentBucketId}_${targetDb.name
-        .toLowerCase()
-        .replace(" ", "")}`
+
+    // Find the corresponding database configs
+    const updatedDbConfig = this.config.databases.find(
+      (db) => db.$id === updatedDb.$id
     );
+    const targetDbConfig = this.config.databases.find(
+      (db) => db.$id === targetDb.$id
+    );
+
+    // Transfer database-specific bucket if both databases have a bucket defined
+    if (updatedDbConfig?.bucket && targetDbConfig?.bucket) {
+      await transferStorageLocalToLocal(
+        this.storage,
+        updatedDbConfig.bucket.$id,
+        targetDbConfig.bucket.$id
+      );
+    }
   }
 
   async importCollections(db: ConfigDatabase, dataLoader: DataLoader) {

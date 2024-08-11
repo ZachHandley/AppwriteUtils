@@ -3,25 +3,71 @@ import path from "node:path";
 import type { AppwriteConfig } from "appwrite-utils";
 import { findAppwriteConfig } from "./loadConfigs.js";
 import { ID } from "node-appwrite";
+import { ulid } from "ulidx";
 
 // Example base configuration using types from appwrite-utils
 const baseConfig: AppwriteConfig = {
   appwriteEndpoint: "https://cloud.appwrite.io/v1",
   appwriteProject: "YOUR_PROJECT_ID",
   appwriteKey: "YOUR_API_KEY",
-  enableDevDatabase: true,
   enableBackups: true,
   backupInterval: 3600,
   backupRetention: 30,
   enableBackupCleanup: true,
   enableMockData: false,
-  enableWipeOtherDatabases: true,
   documentBucketId: "documents",
   usersCollectionName: "Members",
   databases: [
-    { $id: "main", name: "Main" },
-    { $id: "staging", name: "Staging" },
-    { $id: "dev", name: "Development" },
+    {
+      $id: "main",
+      name: "Main",
+      bucket: {
+        $id: "main_bucket",
+        name: "Main Bucket",
+        enabled: true,
+        maximumFileSize: 30000000,
+        allowedFileExtensions: [],
+        encryption: true,
+        antivirus: true,
+      },
+    },
+    {
+      $id: "staging",
+      name: "Staging",
+      bucket: {
+        $id: "staging_bucket",
+        name: "Staging Bucket",
+        enabled: true,
+        maximumFileSize: 30000000,
+        allowedFileExtensions: [],
+        encryption: true,
+        antivirus: true,
+      },
+    },
+    {
+      $id: "dev",
+      name: "Development",
+      bucket: {
+        $id: "dev_bucket",
+        name: "Development Bucket",
+        enabled: true,
+        maximumFileSize: 30000000,
+        allowedFileExtensions: [],
+        encryption: true,
+        antivirus: true,
+      },
+    },
+  ],
+  buckets: [
+    {
+      $id: "global_bucket",
+      name: "Global Bucket",
+      enabled: true,
+      maximumFileSize: 30000000,
+      allowedFileExtensions: [],
+      encryption: true,
+      antivirus: true,
+    },
   ],
 };
 
@@ -75,7 +121,7 @@ export const createEmptyCollection = (collectionName: string) => {
   const emptyCollection = `import type { CollectionCreate } from "appwrite-utils";
 
 const ${collectionName}: Partial<CollectionCreate> = {
-  $id: '${ID.unique()}',
+  $id: '${ulid()}',
   documentSecurity: false,
   enabled: true,
   name: '${collectionName}',
@@ -177,10 +223,6 @@ export default appwriteConfig;
   if (!existsSync(appwriteHiddenFolder)) {
     mkdirSync(appwriteHiddenFolder, { recursive: true });
   }
-  const schemaFilePath = path.join(
-    appwriteHiddenFolder,
-    "appwriteUtilsConfigSchema.json"
-  );
 
   console.log("Created config and setup files/directories successfully.");
 };
