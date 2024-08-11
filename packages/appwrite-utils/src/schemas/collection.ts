@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ulid } from "ulid";
+import { ulid } from "ulidx";
 import { importDefSchemas } from "./importDef.js";
 import { attributeSchema } from "./attribute.js";
 import { indexSchema } from "./index.js";

@@ -211,6 +211,10 @@ export const startSetup = async (
       | { collectionId: string; collectionName: string }[]
       | undefined;
 
+    if (config.enableBackups && setupOptions.doBackup) {
+      await backupDatabase(database, db.$id, storage);
+    }
+
     if (setupOptions.wipeDatabases && processDatabase) {
       if (config.enableBackups && setupOptions.doBackup) {
         await backupDatabase(database, db.$id, storage);

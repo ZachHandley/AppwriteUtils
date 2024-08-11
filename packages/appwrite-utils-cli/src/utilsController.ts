@@ -30,6 +30,7 @@ import {
   transferDatabaseLocalToRemote,
 } from "./migrations/databases.js";
 import {
+  backupDatabase,
   transferStorageLocalToLocal,
   transferStorageLocalToRemote,
 } from "./migrations/storage.js";

@@ -132,6 +132,10 @@ This setup ensures that developers have robust tools at their fingertips to mana
 
 ### Changelog
 
+- 0.0.74: Added `--backup` support, even if only one database
+- 0.0.73: Fixed weird `workspace` issue
+- 0.0.72: Remove `ulid` for `ulidx`, fixing compatibility issues
+- 0.0.71: Slight change to file download logic after errors
 - 0.0.70: Bump to `node-appwrite` version
 - 0.0.69: Fixed single ID not getting replaced due to the below change =D also, `nice`
 - 0.0.68: Fixed the occasional case where, when mapping ID's from old data to new, there would be an array of ID's to match against. `idMappings` now supports arrays.

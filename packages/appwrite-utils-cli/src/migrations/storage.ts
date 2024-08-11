@@ -388,15 +388,30 @@ export const transferStorageLocalToLocal = async (
   );
   const allFromFiles = fromFiles.files;
   let numberOfFiles = 0;
+
+  const downloadFileWithRetry = async (bucketId: string, fileId: string) => {
+    let attempts = 3;
+    while (attempts > 0) {
+      try {
+        return await storage.getFileDownload(bucketId, fileId);
+      } catch (error) {
+        console.error(`Error downloading file ${fileId}: ${error}`);
+        attempts--;
+        if (attempts === 0) throw error;
+      }
+    }
+  };
+
   if (fromFiles.files.length < 100) {
     for (const file of allFromFiles) {
       const fileData = await tryAwaitWithRetry(
-        async () => await storage.getFileDownload(file.bucketId, file.$id)
+        async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
-      const fileToCreate = InputFile.fromBuffer(
-        Buffer.from(fileData),
-        file.name
-      );
+      if (!fileData) {
+        console.error(`Error downloading file ${file.$id}`);
+        continue;
+      }
+      const fileToCreate = InputFile.fromBuffer(fileData, file.name);
       console.log(`Creating file: ${file.name}`);
       tryAwaitWithRetry(
         async () =>
@@ -428,8 +443,12 @@ export const transferStorageLocalToLocal = async (
     }
     for (const file of allFromFiles) {
       const fileData = await tryAwaitWithRetry(
-        async () => await storage.getFileDownload(file.bucketId, file.$id)
+        async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
+      if (!fileData) {
+        console.error(`Error downloading file ${file.$id}`);
+        continue;
+      }
       const fileToCreate = InputFile.fromBuffer(
         Buffer.from(fileData),
         file.name
