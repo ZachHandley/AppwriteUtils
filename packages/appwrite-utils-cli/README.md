@@ -6,13 +6,15 @@
 
 ## Features
 
+- **Interactive Mode**: Run the CLI in interactive mode for a guided experience through all available options.
 - **Easy Configuration**: Initialize your Appwrite project configurations interactively directly from the command line.
-- **Database Migrations**: Control the migration process with options to target production, staging, or development environments.
+- **Database Migrations**: Control the migration process with options to target specific databases and collections.
 - **Schema Generation**: Generate and manage TypeScript schemas directly from your Appwrite database schemas.
 - **Data Import**: Facilitate the import of data into your Appwrite databases with comprehensive command-line support.
 - **Backup Management**: Create backups of your Appwrite databases to ensure data integrity and safety.
 - **Flexible Database Management**: Includes commands to wipe databases, documents, or user data, providing flexibility in managing your database state during development or testing.
-- **Transfer Databases, Collections, Documents, Storage Buckets, and more**: Includes additional commands (new) to transfer your data from one place to another. I also optimized the import process using this.
+- **Data Transfer**: Transfer data between databases, collections, and even between local and remote Appwrite instances.
+- **Configuration Synchronization**: Sync your local Appwrite configuration with your remote Appwrite project.
 
 ## Installation
 
@@ -22,116 +24,108 @@ To use `appwrite-utils-cli`, you can install it globally via npm to make it acce
 npm install -g appwrite-utils-cli
 ```
 
-However, due to the nature of the speed at which I am developing this project, I would recommend the following command:
+However, due to the rapid development of this project, it's recommended to use the following command:
 
 ```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate --arg1 --arg2 --arg3
+npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 ```
 
-**DO NOT INSTALL THIS LOCALLY INTO YOUR PROJECT, IT IS MEANT TO BE USED AS A COMMAND LINE TOOL ONLY**
+**Note: Do not install this locally into your project. It is meant to be used as a command-line tool only.**
 
 ## Usage
 
-After installation, you can access the tool directly from your command line using the provided commands. Here's how you can use the different functionalities:
+After installation, you can access the tool directly from your command line using the provided commands.
 
-### Initialization
+### Interactive Mode
 
-Interactively set up your Appwrite project with necessary configurations:
-
-```bash
-npx --package=appwrite-utils-cli@latest appwrite-init
-```
-
-### Running Migrations and Tasks
-
-Run migration and management tasks with specific flags according to your needs:
+Run the CLI in interactive mode:
 
 ```bash
-npx --package=appwrite-utils-cli@latest appwrite-migrate --args
+npx --package=appwrite-utils-cli@latest appwrite-migrate --it
 ```
 
-Replace `--args` with the appropriate options:
+This will guide you through all available options interactively.
 
-- `--prod`: Run tasks in the production environment.
-- `--staging`: Run tasks in the staging environment.
-- `--dev`: Run tasks in the development environment.
-- `--wipe`: Wipe all databases.
-- `--wipe-docs`: Wipe all documents in the databases.
-- `--generate`: Generate TypeScript schemas from database schemas.
-- `--import`: Import data into your databases.
-- `--backup`: Perform a backup of your databases.
-- `--wipe-users`: Wipe all user data.
-- `--write-data`: Write converted imported data to file.
-- `--sync`: Synchronize your project's config and generate schema for your database.
-- `--endpoint <endpoint>`: Set the Appwrite endpoint.
-- `--project <project>`: Set the Appwrite project ID.
-- `--key <key>`: Set the Appwrite API key.
-- `--transfer`: Transfer documents between databases.
-- `--transfer-users`: Transfer users between local and remote.
-- `--transferendpoint <transferEndpoint>`: Set the transfer endpoint for remote transfers.
-- `--transferproject <transferProject>`: Set the transfer project ID for remote transfers.
-- `--transferkey <transferKey>`: Set the transfer key for remote transfers.
-- `--fromdb <fromDbId>`: Set the source database ID.
-- `--targetdb <targetDbId>`: Set the destination database ID.
-- `--fromcoll <collectionId>`: Set the source collection ID for transfer, only used for transfer.
-- `--targetcoll <collectionId>`: Set the collection ID to import data into.
-- `--frombucket <bucketId>`: Set the source bucket ID.
-- `--targetbucket <bucketId>`: Set the destination bucket ID.
+### Non-Interactive Mode
+
+You can also use specific flags to run tasks without the interactive prompt:
+
+```bash
+npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
+```
+
+Available options:
+
+- `--it`: Run in interactive mode
+- `--dbIds`: Comma-separated list of database IDs to operate on
+- `--collectionIds`: Comma-separated list of collection IDs to operate on
+- `--bucketIds`: Comma-separated list of bucket IDs to operate on
+- `--wipe`: Wipe data (all: everything, docs: only documents, users: only user data)
+- `--generate`: Generate TypeScript schemas from database schemas
+- `--import`: Import data into your databases
+- `--backup`: Perform a backup of your databases
+- `--writeData`: Write converted imported data to file
+- `--push`: Push your local Appwrite config to your configured Appwrite Project
+- `--sync`: Synchronize by pulling your Appwrite config from your configured Appwrite Project
+- `--endpoint`: Set the Appwrite endpoint
+- `--projectId`: Set the Appwrite project ID
+- `--apiKey`: Set the Appwrite API key
+- `--transfer`: Transfer data between databases or collections
+- `--fromDbId`: Set the source database ID for transfer
+- `--toDbId`: Set the destination database ID for transfer
+- `--fromCollectionId`: Set the source collection ID for transfer
+- `--toCollectionId`: Set the destination collection ID for transfer
+- `--fromBucketId`: Set the source bucket ID for transfer
+- `--toBucketId`: Set the destination bucket ID for transfer
+- `--remoteEndpoint`: Set the remote Appwrite endpoint for transfers
+- `--remoteProjectId`: Set the remote Appwrite project ID for transfers
+- `--remoteApiKey`: Set the remote Appwrite API key for transfers
 
 ## Examples
 
 ### Transfer Databases
 
-Transfer databases within the same project or from a local to a remote project. If `--fromcoll` and `--targetcoll` are omitted, it will transfer the entire databases. During the database transfer, it will create any missing collections, attributes, and indices.
+Transfer databases within the same project or from a local to a remote project:
 
 ```bash
-npx appwrite-utils-cli appwrite-migrate --transfer --fromdb fromDbId --targetdb toDbId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+npx appwrite-utils-cli appwrite-migrate --transfer --fromDbId sourceDbId --toDbId targetDbId --remoteEndpoint https://appwrite.otherserver.com --remoteProjectId yourProjectId --remoteApiKey yourApiKey
 ```
 
 ### Transfer Specific Collections
 
-Transfer specific collections from one place to another, with all of their data.
+Transfer specific collections from one place to another, with all of their data:
 
 ```bash
-npx appwrite-utils-cli appwrite-migrate --transfer --fromdb fromDbId --targetdb toDbId --fromcoll sourceCollectionId --targetcoll targetCollectionId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+npx appwrite-utils-cli appwrite-migrate --transfer --fromDbId sourceDbId --toDbId targetDbId --fromCollectionId sourceCollectionId --toCollectionId targetCollectionId --remoteEndpoint https://appwrite.otherserver.com --remoteProjectId yourProjectId --remoteApiKey yourApiKey
 ```
 
 ### Transfer Buckets
 
-Transfer files between buckets.
+Transfer files between buckets:
 
 ```bash
-npx appwrite-utils-cli appwrite-migrate --transfer --frombucket sourceBucketId --targetbucket targetBucketId --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
+npx appwrite-utils-cli appwrite-migrate --transfer --fromBucketId sourceBucketId --toBucketId targetBucketId --remoteEndpoint https://appwrite.otherserver.com --remoteProjectId yourProjectId --remoteApiKey yourApiKey
 ```
 
-### Transfer Users
+## Additional Notes
 
-Transfer users between local and remote.
+- If you run out of RAM during large data imports, you can increase Node's memory allocation:
 
-```bash
-npx appwrite-utils-cli appwrite-migrate --transfer-users --transferendpoint https://appwrite.otherserver.com --transferproject yourProjectId --transferkey yourApiKey
-```
+  ```bash
+  export NODE_OPTIONS="--max-old-space-size=16384"
+  ```
 
-## If you run out of RAM
+  This sets the allocation to 16GB. For most cases, 8GB (`8192`) should be sufficient.
 
-This happens because Node only allocates 4 GB, it'll only happen if you're importing a ton of data, but you can use `export NODE_OPTIONS="--max-old-space-size=16384"` or the relevant command for your system if that doesn't work, and it'll set the env var to whatever. That's 16 GB, I would recommend `8192` for most.
+- The CLI now supports OpenAPI generation for each attribute in the schema. Add a `description` to any attribute or collection, and it will export that schema to the `appwrite/openapi` folder.
 
-### OpenAPI Generation (almost done, in progress)
+This updated CLI ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line, with both interactive and non-interactive modes available for flexibility.
 
-Recently, I have also added an optional OpenAPI generation for each attribute in the schema. This is because I needed it and because I felt it would be nice to have. This is done using [this package](https://github.com/asteasolutions/zod-to-openapi), many thanks to them.
+## Changelog
 
-To use it, add a `description` to any attribute or collection, and it will export that schema to the `appwrite/openapi` folder
-
-This setup ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line. I also have added logging automatically for information and errors as the console can be hard to keep up with.
-
-### Roadmap
-
-- Syncing configuration (DONE)
-- Better file format for config (potentially)
-- Separation of collections and import configuration from main config
-
-### Changelog
-
+- 0.9.3: Fixed deployment error
+- 0.9.2: Added changelog back, whoops
+- 0.0.90: Updated README with new command-line options and fixed alias issues
 - 0.0.74: Added `--backup` support, even if only one database
 - 0.0.73: Fixed weird `workspace` issue
 - 0.0.72: Remove `ulid` for `ulidx`, fixing compatibility issues

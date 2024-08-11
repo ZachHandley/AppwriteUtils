@@ -11,3 +11,7 @@ export const getClientFromConfig = (config: AppwriteConfig) => {
   }
   return appwriteClient;
 };
+
+export const getClient = (endpoint: string, project: string, key: string) => {
+  return new Client().setEndpoint(endpoint).setProject(project).setKey(key);
+};

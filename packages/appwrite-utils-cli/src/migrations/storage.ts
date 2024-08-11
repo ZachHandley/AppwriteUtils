@@ -70,13 +70,15 @@ export const initOrGetBackupStorage = async (storage: Storage) => {
 export const initOrGetDocumentStorage = async (
   storage: Storage,
   config: AppwriteConfig,
-  dbName: string
+  dbId: string,
+  bucketName?: string
 ) => {
   try {
     await tryAwaitWithRetry(
       async () =>
         await storage.getBucket(
-          `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`
+          bucketName ??
+            `${config.documentBucketId}_${dbId.toLowerCase().replace(" ", "")}`
         )
     );
   } catch (e) {
@@ -85,8 +87,8 @@ export const initOrGetDocumentStorage = async (
     const documentStorage = await tryAwaitWithRetry(
       async () =>
         await storage.createBucket(
-          `${config.documentBucketId}_${dbName.toLowerCase().replace(" ", "")}`,
-          `Document Storage ${dbName}`,
+          `${config.documentBucketId}_${dbId.toLowerCase().replace(" ", "")}`,
+          `${dbId} Storage`,
           [
             Permission.read("any"),
             Permission.create("users"),
@@ -411,7 +413,10 @@ export const transferStorageLocalToLocal = async (
         console.error(`Error downloading file ${file.$id}`);
         continue;
       }
-      const fileToCreate = InputFile.fromBuffer(fileData, file.name);
+      const fileToCreate = InputFile.fromBuffer(
+        new Uint8Array(fileData),
+        file.name
+      );
       console.log(`Creating file: ${file.name}`);
       tryAwaitWithRetry(
         async () =>
@@ -450,7 +455,7 @@ export const transferStorageLocalToLocal = async (
         continue;
       }
       const fileToCreate = InputFile.fromBuffer(
-        Buffer.from(fileData),
+        new Uint8Array(fileData),
         file.name
       );
       await tryAwaitWithRetry(
@@ -512,7 +517,10 @@ export const transferStorageLocalToRemote = async (
     const fileData = await tryAwaitWithRetry(
       async () => await localStorage.getFileDownload(file.bucketId, file.$id)
     );
-    const fileToCreate = InputFile.fromBuffer(Buffer.from(fileData), file.name);
+    const fileToCreate = InputFile.fromBuffer(
+      new Uint8Array(fileData),
+      file.name
+    );
     await tryAwaitWithRetry(
       async () =>
         await remoteStorage.createFile(

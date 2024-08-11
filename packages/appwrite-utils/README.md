@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.8: Upgraded some parts of the package, AppwriteConfig typing updated to include buckets, made cli tool interactive
 - 0.3.7: Remove `ulid` to replace with `ulidx` for compatibility
 - 0.3.6: Bump to `appwrite` version
 - 0.3.5: Added `flattenArray` which flattens an array, so if you accidentally convert things into `"someValue": [ ['1' ], '2', ]` you can now make that just `['1', '2',]`

@@ -42,16 +42,15 @@ export class SchemaGenerator {
     appwriteEndpoint: "${this.config.appwriteEndpoint}",
     appwriteProject: "${this.config.appwriteProject}",
     appwriteKey: "${this.config.appwriteKey}",
-    enableDevDatabase: ${this.config.enableDevDatabase},
     enableBackups: ${this.config.enableBackups},
     backupInterval: ${this.config.backupInterval},
     backupRetention: ${this.config.backupRetention},
     enableBackupCleanup: ${this.config.enableBackupCleanup},
     enableMockData: ${this.config.enableMockData},
-    enableWipeOtherDatabases: ${this.config.enableWipeOtherDatabases},
     documentBucketId: "${this.config.documentBucketId}",
     usersCollectionName: "${this.config.usersCollectionName}",
-    databases: ${JSON.stringify(this.config.databases)}
+    databases: ${JSON.stringify(this.config.databases)},
+    buckets: ${JSON.stringify(this.config.buckets)},
   };
   
   export default appwriteConfig;
