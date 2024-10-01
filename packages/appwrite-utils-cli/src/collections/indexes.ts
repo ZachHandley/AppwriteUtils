@@ -1,6 +1,6 @@
 import { indexSchema, type Index } from "appwrite-utils";
 import { Databases, IndexType, Query, type Models } from "node-appwrite";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const createOrUpdateIndex = async (
   dbId: string,
@@ -15,12 +15,12 @@ export const createOrUpdateIndex = async (
   let newIndex: Models.Index | null = null;
   if (
     existingIndex.total > 0 &&
-    existingIndex.indexes.some(
-      (index) =>
-        (index.key === index.key &&
-          index.type === index.type &&
-          index.attributes === index.attributes) ||
-        JSON.stringify(index) === JSON.stringify(index)
+    !existingIndex.indexes.some(
+      (existingIndex) =>
+        (existingIndex.key === index.key &&
+          existingIndex.type === index.type &&
+          existingIndex.attributes === index.attributes) ||
+        JSON.stringify(existingIndex) === JSON.stringify(index)
     )
   ) {
     await db.deleteIndex(dbId, collectionId, existingIndex.indexes[0].key);
@@ -49,5 +49,7 @@ export const createOrUpdateIndexes = async (
     await tryAwaitWithRetry(
       async () => await createOrUpdateIndex(dbId, db, collectionId, index)
     );
+    // Add delay after each index creation/update
+    await delay(500);
   }
 };

@@ -1,5 +1,5 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import { fetchAllCollections } from "../collections/methods.js";
 
 export const fetchAllDatabases = async (
@@ -41,6 +41,7 @@ export const wipeDatabase = async (
     await tryAwaitWithRetry(
       async () => await database.deleteCollection(databaseId, collectionId)
     );
+    await delay(100);
   }
 
   return collectionsDeleted;

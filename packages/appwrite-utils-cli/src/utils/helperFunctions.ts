@@ -179,3 +179,6 @@ export const getAppwriteClient = (
     .setProject(projectId)
     .setKey(apiKey);
 };
+
+export const delay = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));

@@ -100,6 +100,71 @@ export const deleteFile = async (
   return await storage.deleteFile(bucketId, fileId);
 };
 
+export const ensureDatabaseConfigBucketsExist = async (
+  storage: Storage,
+  config: AppwriteConfig,
+  databases: Models.Database[] = []
+) => {
+  for (const db of databases) {
+    const database = config.databases?.find((d) => d.$id === db.$id);
+    if (database?.bucket) {
+      try {
+        await storage.getBucket(database.bucket.$id);
+        console.log(`Bucket ${database.bucket.$id} already exists.`);
+      } catch (e) {
+        const permissions: string[] = [];
+        if (
+          database.bucket.permissions &&
+          database.bucket.permissions.length > 0
+        ) {
+          for (const permission of database.bucket.permissions) {
+            switch (permission.permission) {
+              case "read":
+                permissions.push(Permission.read(permission.target));
+                break;
+              case "create":
+                permissions.push(Permission.create(permission.target));
+                break;
+              case "update":
+                permissions.push(Permission.update(permission.target));
+                break;
+              case "delete":
+                permissions.push(Permission.delete(permission.target));
+                break;
+              case "write":
+                permissions.push(Permission.write(permission.target));
+                break;
+              default:
+                console.warn(`Unknown permission: ${permission.permission}`);
+                break;
+            }
+          }
+        }
+        try {
+          await storage.createBucket(
+            database.bucket.$id,
+            database.bucket.name,
+            permissions,
+            database.bucket.fileSecurity,
+            database.bucket.enabled,
+            database.bucket.maximumFileSize,
+            database.bucket.allowedFileExtensions,
+            database.bucket.compression as Compression,
+            database.bucket.encryption,
+            database.bucket.antivirus
+          );
+          console.log(`Bucket ${database.bucket.$id} created successfully.`);
+        } catch (createError) {
+          console.error(
+            `Failed to create bucket ${database.bucket.$id}:`,
+            createError
+          );
+        }
+      }
+    }
+  }
+};
+
 export const wipeDocumentStorage = async (
   storage: Storage,
   bucketId: string

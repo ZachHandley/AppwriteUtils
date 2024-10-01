@@ -33,6 +33,7 @@ interface CliOptions {
   remoteEndpoint?: string;
   remoteProjectId?: string;
   remoteApiKey?: string;
+  setup?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -145,18 +146,34 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Set the remote Appwrite API key for transfers",
   })
+  .option("setup", {
+    type: "boolean",
+    description: "Setup the project with example data",
+  })
   .help()
   .parse();
 
 async function main() {
   const parsedArgv = (await argv) as ParsedArgv;
-  const controller = new UtilsController(process.cwd());
-  await controller.init();
+  let controller: UtilsController | undefined;
 
   if (parsedArgv.it) {
-    const cli = new InteractiveCLI(process.cwd(), controller);
+    try {
+      controller = new UtilsController(process.cwd());
+      await controller.init();
+    } catch (error: any) {
+      // If it fails, that means there's no config, more than likely
+      console.log(
+        "No config found, you probably need to create the setup files"
+      );
+    }
+    const cli = new InteractiveCLI(process.cwd());
     await cli.run();
   } else {
+    if (!controller) {
+      controller = new UtilsController(process.cwd());
+      await controller.init();
+    }
     // Handle non-interactive mode with the new options
     const options: SetupOptions = {
       databases: parsedArgv.dbIds

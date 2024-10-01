@@ -80,6 +80,7 @@ Available options:
 - `--remoteEndpoint`: Set the remote Appwrite endpoint for transfers
 - `--remoteProjectId`: Set the remote Appwrite project ID for transfers
 - `--remoteApiKey`: Set the remote Appwrite API key for transfers
+- `--setup`: Create setup files
 
 ## Examples
 
@@ -123,7 +124,19 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
-- 0.9.3: Fixed deployment error
+- 0.9.60: Fix init command to repository URL
+- 0.9.59: Fix to Windows path names for loading config
+- 0.9.58: The same as before, I just missed it hah
+- 0.9.57: Changed generated schema type of `$createdAt` and `$updatedAt` to string from `string | Date` cause honestly if you want a date just parse it
+- 0.9.56: Changed the updateAttribute so it doesn't always update attributes and hopefully fixed the required error
+- 0.9.55: Updated to use `node-appwrite@14` for appwrite 1.6.0
+- 0.9.54: Added small delay (`100ms`) between collection deletions, reduced other delays from `1000` to `500/250ms`
+- 0.9.53: Reduced delay, went too far
+- 0.9.52: Add delay after creating indexes, attributes, and others to prevent `fetch failed` errors during large-scale collection creation
+- 0.9.51: Fix transfer databases, remove "ensure duplicates" check
+- 0.9.5: Fixed not checking for storage bucket for each database (checking the creation status) when importing data
+- 0.9.4: Fixed migrations database ensuring it has the required collections
+- 0.9.3: Fixed deployment error && fix lack of existing `appwriteConfig.ts` file from causing error (you want to be able to setup yeah? haha)
 - 0.9.2: Added changelog back, whoops
 - 0.0.90: Updated README with new command-line options and fixed alias issues
 - 0.0.74: Added `--backup` support, even if only one database

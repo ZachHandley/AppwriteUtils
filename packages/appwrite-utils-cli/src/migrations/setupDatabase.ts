@@ -3,6 +3,7 @@ import { createOrUpdateAttribute } from "./attributes.js";
 import { getMigrationCollectionSchemas } from "./backup.js";
 import {
   areCollectionNamesSame,
+  delay,
   toCamelCase,
   tryAwaitWithRetry,
 } from "../utils/index.js";
@@ -14,7 +15,7 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   console.log("Starting Migrations Setup");
   console.log("---------------------------------");
   const database = new Databases(config.appwriteClient!);
-  let db: Models.Database | null = null;
+  let db: Models.Database | undefined;
   const migrationCollectionsSetup = getMigrationCollectionSchemas();
 
   try {
@@ -31,36 +32,70 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
     console.log("Migrations database created");
   }
 
+  if (!db) {
+    console.error("Failed to create or retrieve the migrations database");
+    return;
+  }
+
   for (const [collectionName, { collection, attributes }] of Object.entries(
     migrationCollectionsSetup
   )) {
     const collectionId = toCamelCase(collectionName);
-    let collectionFound: Models.Collection | null = null;
+    let collectionFound: Models.Collection | undefined;
     try {
       collectionFound = await tryAwaitWithRetry(
-        async () => await database.getCollection(db!.$id, collectionId)
+        async () => await database.getCollection(db.$id, collectionId),
+        undefined,
+        true
       );
+      console.log(`Collection found: ${collectionId}`);
     } catch (e) {
       console.log(`Collection not found: ${collectionId}`);
-      collectionFound = await tryAwaitWithRetry(
-        async () =>
-          await database.createCollection(
-            db!.$id,
-            collectionId,
-            collectionName,
-            undefined,
-            collection.documentSecurity,
-            collection.enabled
-          )
-      );
+      try {
+        collectionFound = await tryAwaitWithRetry(
+          async () =>
+            await database.createCollection(
+              db.$id,
+              collectionId,
+              collectionName,
+              undefined,
+              collection.documentSecurity,
+              collection.enabled
+            ),
+          undefined,
+          true
+        );
+        console.log(`Collection created: ${collectionId}`);
+      } catch (createError) {
+        console.error(
+          `Failed to create collection: ${collectionId}`,
+          createError
+        );
+        continue;
+      }
     }
+
+    if (!collectionFound) {
+      console.error(`Failed to create or retrieve collection: ${collectionId}`);
+      continue;
+    }
+
     for (const attribute of attributes) {
-      await createOrUpdateAttribute(
-        database,
-        db!.$id,
-        collectionFound!,
-        attribute
-      );
+      try {
+        await createOrUpdateAttribute(
+          database,
+          db.$id,
+          collectionFound,
+          attribute
+        );
+        await delay(100);
+        console.log(`Attribute created/updated: ${attribute.key}`);
+      } catch (attrError) {
+        console.error(
+          `Failed to create/update attribute: ${attribute.key}`,
+          attrError
+        );
+      }
     }
   }
   console.log("---------------------------------");
@@ -80,7 +115,7 @@ export const ensureDatabasesExist = async (config: AppwriteConfig) => {
     (d) => d.name.toLowerCase().trim().replace(" ", "") === "migrations"
   );
   if (existingDatabases.databases.length !== 0 && migrationsDatabase) {
-    console.log("Wiping all databases except migrations");
+    console.log("Creating all databases except migrations");
     databasesToEnsure.push(migrationsDatabase);
   }
 

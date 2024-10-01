@@ -31,25 +31,15 @@ enum CHOICES {
 }
 
 export class InteractiveCLI {
-  private controller: UtilsController;
+  private controller: UtilsController | undefined;
 
-  constructor(currentDir?: string, utilsController?: UtilsController) {
-    if (utilsController) {
-      this.controller = utilsController;
-    } else if (currentDir) {
-      this.controller = new UtilsController(currentDir);
-    } else {
-      throw new Error("Current directory or utils controller is required");
-    }
-  }
+  constructor(private currentDir: string) {}
 
   async run(): Promise<void> {
     console.log("Welcome to Appwrite Utils CLI Tool by Zach Handley");
     console.log(
-      "For more information, visit https://github.com/zachhandley/appwrite-utils"
+      "For more information, visit https://github.com/zachhandley/AppwriteUtils"
     );
-
-    await this.controller.init();
 
     while (true) {
       const { action } = await inquirer.prompt([
@@ -66,30 +56,37 @@ export class InteractiveCLI {
           await this.createCollectionConfig();
           break;
         case CHOICES.SETUP_DIRS_FILES:
-          await setupDirsFiles(false);
+          await setupDirsFiles(false, this.currentDir);
           break;
         case CHOICES.SETUP_DIRS_FILES_WITH_EXAMPLE_DATA:
-          await setupDirsFiles(true);
+          await setupDirsFiles(true, this.currentDir);
           break;
         case CHOICES.SYNCHRONIZE_CONFIGURATIONS:
+          await this.initControllerIfNeeded();
           await this.synchronizeConfigurations();
           break;
         case CHOICES.SYNC_DB:
+          await this.initControllerIfNeeded();
           await this.syncDb();
           break;
         case CHOICES.TRANSFER_DATA:
+          await this.initControllerIfNeeded();
           await this.transferData();
           break;
         case CHOICES.BACKUP_DATABASE:
+          await this.initControllerIfNeeded();
           await this.backupDatabase();
           break;
         case CHOICES.WIPE_DATABASE:
+          await this.initControllerIfNeeded();
           await this.wipeDatabase();
           break;
         case CHOICES.GENERATE_SCHEMAS:
+          await this.initControllerIfNeeded();
           await this.generateSchemas();
           break;
         case CHOICES.IMPORT_DATA:
+          await this.initControllerIfNeeded();
           await this.importData();
           break;
         case CHOICES.EXIT:
@@ -99,17 +96,19 @@ export class InteractiveCLI {
     }
   }
 
+  private async initControllerIfNeeded() {
+    if (!this.controller) {
+      this.controller = new UtilsController(this.currentDir);
+      await this.controller.init();
+    }
+  }
+
   private async selectDatabases(
     databases: Models.Database[],
     message: string,
     multiSelect = true
   ): Promise<Models.Database[]> {
     const choices = databases.map((db) => ({ name: db.name, value: db }));
-
-    if (multiSelect) {
-      choices.unshift({ name: "Select All", value: "ALL" as any });
-      choices.push({ name: "Clear Selection", value: "CLEAR" as any });
-    }
 
     const { selectedDatabases } = await inquirer.prompt([
       {
@@ -122,18 +121,7 @@ export class InteractiveCLI {
       },
     ]);
 
-    if (multiSelect) {
-      if (selectedDatabases.includes("ALL")) {
-        return databases;
-      } else if (selectedDatabases.includes("CLEAR")) {
-        return [];
-      }
-    }
-
-    return selectedDatabases.filter(
-      (db: Models.Database | string): db is Models.Database =>
-        typeof db !== "string"
-    );
+    return selectedDatabases;
   }
 
   private async selectCollections(
@@ -151,11 +139,6 @@ export class InteractiveCLI {
       value: collection,
     }));
 
-    if (multiSelect) {
-      choices.unshift({ name: "Select All", value: "ALL" as any });
-      choices.push({ name: "Clear Selection", value: "CLEAR" as any });
-    }
-
     const { selectedCollections } = await inquirer.prompt([
       {
         type: multiSelect ? "checkbox" : "list",
@@ -167,19 +150,7 @@ export class InteractiveCLI {
       },
     ]);
 
-    if (multiSelect) {
-      if (selectedCollections.includes("ALL")) {
-        return collections;
-      } else if (selectedCollections.includes("CLEAR")) {
-        return [];
-      }
-    }
-
-    return selectedCollections.filter(
-      (
-        collection: Models.Collection | string
-      ): collection is Models.Collection => typeof collection !== "string"
-    );
+    return selectedCollections;
   }
 
   private async selectBuckets(
@@ -189,13 +160,8 @@ export class InteractiveCLI {
   ): Promise<Models.Bucket[]> {
     const choices = buckets.map((bucket) => ({
       name: bucket.name,
-      value: bucket.$id,
+      value: bucket,
     }));
-
-    if (multiSelect) {
-      choices.unshift({ name: "Select All", value: "ALL" });
-      choices.push({ name: "Clear Selection", value: "CLEAR" });
-    }
 
     const { selectedBuckets } = await inquirer.prompt([
       {
@@ -208,17 +174,7 @@ export class InteractiveCLI {
       },
     ]);
 
-    if (multiSelect) {
-      if (selectedBuckets.includes("ALL")) {
-        return buckets;
-      } else if (selectedBuckets.includes("CLEAR")) {
-        return [];
-      }
-    }
-
-    return selectedBuckets.map(
-      (id: string) => buckets.find((bucket) => bucket.$id === id)!
-    );
+    return selectedBuckets;
   }
 
   private async createCollectionConfig(): Promise<void> {
@@ -239,7 +195,7 @@ export class InteractiveCLI {
     config: AppwriteConfig,
     databases?: ConfigDatabases
   ): Promise<AppwriteConfig> {
-    const { storage } = this.controller;
+    const { storage } = this.controller!;
     if (!storage) {
       throw new Error(
         "Storage is not initialized. Is the config file correct and created?"
@@ -458,74 +414,73 @@ export class InteractiveCLI {
   }
 
   private async syncDb(): Promise<void> {
-    await this.controller.syncDb();
+    await this.controller!.syncDb();
   }
 
   private async synchronizeConfigurations(): Promise<void> {
-    if (!this.controller.database) {
+    if (!this.controller!.database) {
       throw new Error(
         "Database is not initialized. Is the config file correct and created?"
       );
     }
-    const databases = await fetchAllDatabases(this.controller.database);
+    const databases = await fetchAllDatabases(this.controller!.database);
 
     const selectedDatabases = await this.selectDatabases(
       databases,
-      "Select databases to synchronize (or select none to synchronize all):"
+      "Select databases to synchronize:"
     );
 
     console.log("Configuring storage buckets...");
     const updatedConfig = await this.configureBuckets(
-      this.controller.config!,
+      this.controller!.config!,
       selectedDatabases
     );
 
     console.log("Synchronizing configurations...");
-    await this.controller.synchronizeConfigurations(
+    await this.controller!.synchronizeConfigurations(
       selectedDatabases,
       updatedConfig
     );
   }
 
   private async backupDatabase(): Promise<void> {
-    if (!this.controller.database) {
+    if (!this.controller!.database) {
       throw new Error(
         "Database is not initialized, is the config file correct & created?"
       );
     }
-    const databases = await fetchAllDatabases(this.controller.database);
+    const databases = await fetchAllDatabases(this.controller!.database);
 
     const selectedDatabases = await this.selectDatabases(
       databases,
-      "Select databases to backup (or select none to backup all):"
+      "Select databases to backup:"
     );
 
     for (const db of selectedDatabases) {
       console.log(`Backing up database: ${db.name}`);
-      await this.controller.backupDatabase(db);
+      await this.controller!.backupDatabase(db);
     }
   }
 
   private async wipeDatabase(): Promise<void> {
-    if (!this.controller.database || !this.controller.storage) {
+    if (!this.controller!.database || !this.controller!.storage) {
       throw new Error(
         "Database or Storage is not initialized, is the config file correct & created?"
       );
     }
-    const databases = await fetchAllDatabases(this.controller.database);
-    const storage = await listBuckets(this.controller.storage);
+    const databases = await fetchAllDatabases(this.controller!.database);
+    const storage = await listBuckets(this.controller!.storage);
 
     const selectedDatabases = await this.selectDatabases(
       databases,
-      "Select databases to wipe (or select none to skip database wipe):"
+      "Select databases to wipe:"
     );
 
     const { selectedStorage } = await inquirer.prompt([
       {
         type: "checkbox",
         name: "selectedStorage",
-        message:
-          "Select storage buckets to wipe (or select none to skip storage wipe):",
+        message: "Select storage buckets to wipe:",
         choices: storage.buckets.map((s) => ({ name: s.name, value: s.$id })),
       },
     ]);
@@ -552,13 +507,13 @@ export class InteractiveCLI {
     if (confirm) {
       console.log("Wiping selected items...");
       for (const db of selectedDatabases) {
-        await this.controller.wipeDatabase(db);
+        await this.controller!.wipeDatabase(db);
       }
       for (const bucketId of selectedStorage) {
-        await this.controller.wipeDocumentStorage(bucketId);
+        await this.controller!.wipeDocumentStorage(bucketId);
       }
       if (wipeUsers) {
-        await this.controller.wipeUsers();
+        await this.controller!.wipeUsers();
       }
     } else {
       console.log("Wipe operation cancelled.");
@@ -567,16 +522,16 @@ export class InteractiveCLI {
 
   private async generateSchemas(): Promise<void> {
     console.log("Generating schemas...");
-    await this.controller.generateSchemas();
+    await this.controller!.generateSchemas();
   }
 
   private async importData(): Promise<void> {
-    if (!this.controller.database) {
+    if (!this.controller!.database) {
       throw new Error(
         "Database is not initialized, is the config file correct & created?"
       );
     }
-    const databases = await fetchAllDatabases(this.controller.database);
+    const databases = await fetchAllDatabases(this.controller!.database);
 
     const selectedDatabases = await this.selectDatabases(
       databases,
@@ -587,8 +542,8 @@ export class InteractiveCLI {
     for (const db of selectedDatabases) {
       const dbCollections = await this.selectCollections(
         db,
-        this.controller.database,
-        `Select collections to import data into for database ${db.name} (or select none to import into all):`,
+        this.controller!.database,
+        `Select collections to import data into for database ${db.name}:`,
         true
       );
       selectedCollections = [...selectedCollections, ...dbCollections];
@@ -603,29 +558,30 @@ export class InteractiveCLI {
       },
     ]);
 
-    const { checkDuplicates } = await inquirer.prompt([
-      {
-        type: "confirm",
-        name: "checkDuplicates",
-        message: "Do you want to check for duplicates during import?",
-        default: true,
-      },
-    ]);
+    // const { checkDuplicates } = await inquirer.prompt([
+    //   {
+    //     type: "confirm",
+    //     name: "checkDuplicates",
+    //     message: "Do you want to check for duplicates during import?",
+    //     default: true,
+    //   },
+    // ]);
 
     console.log("Importing data...");
-    await this.controller.importData({
+    await this.controller!.importData({
       databases: selectedDatabases,
       collections:
         selectedCollections.length > 0
           ? selectedCollections.map((c) => c.$id)
           : undefined,
       shouldWriteFile,
-      checkDuplicates,
+      checkDuplicates: false,
+      // checkDuplicates,
     });
   }
 
   private async transferData(): Promise<void> {
-    if (!this.controller.database) {
+    if (!this.controller!.database) {
       throw new Error(
         "Database is not initialized, is the config file correct & created?"
       );
@@ -640,7 +596,7 @@ export class InteractiveCLI {
       },
     ]);
 
-    let sourceClient = this.controller.database;
+    let sourceClient = this.controller!.database;
     let targetClient: Databases;
     let sourceDatabases: Models.Database[];
     let targetDatabases: Models.Database[];
@@ -682,24 +638,47 @@ export class InteractiveCLI {
       targetDatabases = await fetchAllDatabases(targetClient);
     } else {
       targetClient = sourceClient;
-      sourceDatabases = targetDatabases = await fetchAllDatabases(sourceClient);
+      const allDatabases = await fetchAllDatabases(sourceClient);
+      sourceDatabases = targetDatabases = allDatabases;
     }
 
-    const [fromDb] = await this.selectDatabases(
+    const fromDbs = await this.selectDatabases(
       sourceDatabases,
       "Select the source database:",
       false
     );
-    const [targetDb] = await this.selectDatabases(
-      targetDatabases.filter((db) => db.$id !== fromDb.$id),
+    console.log(fromDbs);
+    const fromDb = fromDbs as unknown as {
+      $id: string;
+      name: string;
+      $createdAt: string;
+      $updatedAt: string;
+      enabled: boolean;
+    };
+    if (!fromDb) {
+      throw new Error("No source database selected");
+    }
+    const availableDbs = targetDatabases.filter((db) => db.$id !== fromDb.$id);
+    const targetDbs = await this.selectDatabases(
+      availableDbs,
       "Select the target database:",
       false
     );
+    const targetDb = targetDbs as unknown as {
+      $id: string;
+      name: string;
+      $createdAt: string;
+      $updatedAt: string;
+      enabled: boolean;
+    };
+    if (!targetDb) {
+      throw new Error("No target database selected");
+    }
 
     const selectedCollections = await this.selectCollections(
       fromDb,
       sourceClient,
-      "Select collections to transfer (or select none to transfer all):"
+      "Select collections to transfer):"
     );
 
     const { transferStorage } = await inquirer.prompt([
@@ -714,7 +693,7 @@ export class InteractiveCLI {
     let sourceBucket, targetBucket;
 
     if (transferStorage) {
-      const sourceStorage = new Storage(this.controller.appwriteServer!);
+      const sourceStorage = new Storage(this.controller!.appwriteServer!);
       const targetStorage = isRemote
         ? new Storage(
             getClient(
@@ -730,16 +709,18 @@ export class InteractiveCLI {
         ? await listBuckets(targetStorage)
         : sourceBuckets;
 
-      [sourceBucket] = await this.selectBuckets(
+      const sourceBucketPicked = await this.selectBuckets(
         sourceBuckets.buckets,
         "Select the source bucket:",
         false
       );
-      [targetBucket] = await this.selectBuckets(
+      const targetBucketPicked = await this.selectBuckets(
         targetBuckets.buckets,
         "Select the target bucket:",
         false
       );
+      sourceBucket = sourceBucketPicked as unknown as Models.Bucket;
+      targetBucket = targetBucketPicked as unknown as Models.Bucket;
     }
 
     let transferOptions: TransferOptions = {
@@ -762,6 +743,6 @@ export class InteractiveCLI {
     }
 
     console.log("Transferring data...");
-    await this.controller.transferData(transferOptions);
+    await this.controller!.transferData(transferOptions);
   }
 }

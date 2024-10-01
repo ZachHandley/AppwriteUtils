@@ -194,16 +194,42 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
   fromCollId: string,
   toCollId: string
 ) => {
-  let fromCollDocs = await tryAwaitWithRetry(async () =>
-    db.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
-  );
   let totalDocumentsTransferred = 0;
+  let lastDocumentId: string | undefined;
+  let hasMoreDocuments = true;
 
-  if (fromCollDocs.documents.length === 0) {
-    console.log(`No documents found in collection ${fromCollId}`);
-    return;
-  } else if (fromCollDocs.documents.length < 50) {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
+  while (hasMoreDocuments) {
+    const queryParams = [Query.limit(50)];
+    if (lastDocumentId) {
+      queryParams.push(Query.cursorAfter(lastDocumentId));
+    }
+
+    const fromCollDocs = await tryAwaitWithRetry(async () =>
+      db.listDocuments(fromDbId, fromCollId, queryParams)
+    );
+
+    if (fromCollDocs.documents.length === 0) {
+      if (totalDocumentsTransferred === 0) {
+        console.log(`No documents found in collection ${fromCollId}`);
+      }
+      break;
+    }
+
+    const allDocsToCreateCheck = await tryAwaitWithRetry(
+      async () =>
+        await db.listDocuments(toDbId, toCollId, [
+          Query.equal(
+            "$id",
+            fromCollDocs.documents.map((doc) => doc.$id)
+          ),
+        ])
+    );
+
+    const docsToCreate = fromCollDocs.documents.filter(
+      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
+    );
+
+    const batchedPromises = docsToCreate.map((doc) => {
       const toCreateObject: Partial<typeof doc> = {
         ...doc,
       };
@@ -224,64 +250,15 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
           )
       );
     });
+
     await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-  } else {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(async () =>
-        db.createDocument(
-          toDbId,
-          toCollId,
-          doc.$id,
-          toCreateObject,
-          doc.$permissions
-        )
-      );
-    });
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-    while (fromCollDocs.documents.length === 50) {
-      fromCollDocs = await tryAwaitWithRetry(
-        async () =>
-          await db.listDocuments(fromDbId, fromCollId, [
-            Query.limit(50),
-            Query.cursorAfter(
-              fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
-            ),
-          ])
-      );
-      const batchedPromises = fromCollDocs.documents.map((doc) => {
-        const toCreateObject: Partial<typeof doc> = {
-          ...doc,
-        };
-        delete toCreateObject.$databaseId;
-        delete toCreateObject.$collectionId;
-        delete toCreateObject.$createdAt;
-        delete toCreateObject.$updatedAt;
-        delete toCreateObject.$id;
-        delete toCreateObject.$permissions;
-        return tryAwaitWithRetry(
-          async () =>
-            await db.createDocument(
-              toDbId,
-              toCollId,
-              doc.$id,
-              toCreateObject,
-              doc.$permissions
-            )
-        );
-      });
-      await Promise.all(batchedPromises);
-      totalDocumentsTransferred += fromCollDocs.documents.length;
+    totalDocumentsTransferred += docsToCreate.length;
+
+    if (fromCollDocs.documents.length < 50) {
+      hasMoreDocuments = false;
+    } else {
+      lastDocumentId =
+        fromCollDocs.documents[fromCollDocs.documents.length - 1].$id;
     }
   }
 
@@ -314,7 +291,19 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
     console.log(`No documents found in collection ${fromCollId}`);
     return;
   } else if (fromCollDocs.documents.length < 50) {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
+    const allDocsToCreateCheck = await tryAwaitWithRetry(
+      async () =>
+        await remoteDb.listDocuments(toDbId, toCollId, [
+          Query.equal(
+            "$id",
+            fromCollDocs.documents.map((doc) => doc.$id)
+          ),
+        ])
+    );
+    const docsToCreate = fromCollDocs.documents.filter(
+      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
+    );
+    const batchedPromises = docsToCreate.map((doc) => {
       const toCreateObject: Partial<typeof doc> = {
         ...doc,
       };
@@ -337,7 +326,19 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
     await Promise.all(batchedPromises);
     totalDocumentsTransferred += fromCollDocs.documents.length;
   } else {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
+    const allDocsToCreateCheck = await tryAwaitWithRetry(
+      async () =>
+        await remoteDb.listDocuments(toDbId, toCollId, [
+          Query.equal(
+            "$id",
+            fromCollDocs.documents.map((doc) => doc.$id)
+          ),
+        ])
+    );
+    const docsToCreate = fromCollDocs.documents.filter(
+      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
+    );
+    const batchedPromises = docsToCreate.map((doc) => {
       const toCreateObject: Partial<typeof doc> = {
         ...doc,
       };
@@ -533,8 +534,7 @@ export const transferDatabaseLocalToRemote = async (
     async () => await localDb.listCollections(fromDbId, [Query.limit(50)])
   );
   const allFromCollections = fromCollections.collections;
-  if (fromCollections.collections.length < 50) {
-  } else {
+  if (fromCollections.collections.length >= 50) {
     lastCollectionId =
       fromCollections.collections[fromCollections.collections.length - 1].$id;
     while (lastCollectionId) {
@@ -555,43 +555,108 @@ export const transferDatabaseLocalToRemote = async (
   }
 
   for (const collection of allFromCollections) {
-    const toCollection = await tryAwaitWithRetry(
+    let toCollection: Models.Collection;
+    const toCollectionExists = await tryAwaitWithRetry(
       async () =>
-        await remoteDb.createCollection(
-          toDbId,
-          collection.$id,
-          collection.name,
-          collection.$permissions,
-          collection.documentSecurity,
-          collection.enabled
-        )
+        await remoteDb.listCollections(toDbId, [
+          Query.equal("$id", collection.$id),
+        ])
     );
-    console.log(`Collection ${toCollection.name} created`);
 
-    for (const attribute of collection.attributes) {
-      await tryAwaitWithRetry(
+    if (toCollectionExists.collections.length > 0) {
+      console.log(`Collection ${collection.name} already exists. Updating...`);
+      toCollection = toCollectionExists.collections[0];
+      // Update collection if needed
+      if (
+        toCollection.name !== collection.name ||
+        toCollection.$permissions !== collection.$permissions ||
+        toCollection.documentSecurity !== collection.documentSecurity ||
+        toCollection.enabled !== collection.enabled
+      ) {
+        toCollection = await tryAwaitWithRetry(
+          async () =>
+            await remoteDb.updateCollection(
+              toDbId,
+              collection.$id,
+              collection.name,
+              collection.$permissions,
+              collection.documentSecurity,
+              collection.enabled
+            )
+        );
+        console.log(`Collection ${toCollection.name} updated`);
+      }
+    } else {
+      toCollection = await tryAwaitWithRetry(
         async () =>
-          await createOrUpdateAttribute(
-            remoteDb,
+          await remoteDb.createCollection(
             toDbId,
-            toCollection,
-            parseAttribute(attribute as any)
+            collection.$id,
+            collection.name,
+            collection.$permissions,
+            collection.documentSecurity,
+            collection.enabled
           )
       );
+      console.log(`Collection ${toCollection.name} created`);
     }
 
-    for (const index of collection.indexes) {
-      await tryAwaitWithRetry(
-        async () =>
-          await remoteDb.createIndex(
-            toDbId,
-            toCollection.$id,
-            index.key,
-            index.type as IndexType,
-            index.attributes,
-            index.orders
-          )
+    // Check and update attributes
+    const existingAttributes = await tryAwaitWithRetry(
+      async () => await remoteDb.listAttributes(toDbId, toCollection.$id)
+    );
+    for (const attribute of collection.attributes) {
+      const parsedAttribute = parseAttribute(attribute as any);
+      const existingAttribute = existingAttributes.attributes.find(
+        // @ts-expect-error
+        (attr) => attr.key === parsedAttribute.key
       );
+      if (!existingAttribute) {
+        await tryAwaitWithRetry(
+          async () =>
+            await createOrUpdateAttribute(
+              remoteDb,
+              toDbId,
+              toCollection,
+              parsedAttribute
+            )
+        );
+        console.log(`Attribute ${parsedAttribute.key} created`);
+      } else {
+        // Check if attribute needs updating
+        // Note: Appwrite doesn't allow updating most attribute properties
+        // You might need to delete and recreate the attribute if significant changes are needed
+        console.log(`Attribute ${parsedAttribute.key} already exists`);
+      }
+    }
+
+    // Check and update indexes
+    const existingIndexes = await tryAwaitWithRetry(
+      async () => await remoteDb.listIndexes(toDbId, toCollection.$id)
+    );
+    for (const index of collection.indexes) {
+      const existingIndex = existingIndexes.indexes.find(
+        (idx) => idx.key === index.key
+      );
+      if (!existingIndex) {
+        await tryAwaitWithRetry(
+          async () =>
+            await remoteDb.createIndex(
+              toDbId,
+              toCollection.$id,
+              index.key,
+              index.type as IndexType,
+              index.attributes,
+              index.orders
+            )
+        );
+        console.log(`Index ${index.key} created`);
+      } else {
+        // Check if index needs updating
+        // Note: Appwrite doesn't allow updating indexes
+        // You might need to delete and recreate the index if changes are needed
+        console.log(`Index ${index.key} already exists`);
+      }
     }
 
     await transferDocumentsBetweenDbsLocalToRemote(

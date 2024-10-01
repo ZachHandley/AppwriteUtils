@@ -6,7 +6,7 @@ import {
 } from "appwrite-utils";
 import { nameToIdMapping, enqueueOperation } from "../migrations/queue.js";
 import _ from "lodash";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 const attributesSame = (
   databaseAttribute: Attribute,
@@ -27,11 +27,10 @@ export const createOrUpdateAttribute = async (
 ): Promise<void> => {
   let action = "create";
   let foundAttribute: Attribute | undefined;
-  const updateEnabled = false;
   let finalAttribute: any = attribute;
   try {
     const collectionAttr = collection.attributes.find(
-      // @ts-expect-error
+      // @ts-ignore
       (attr) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
@@ -39,21 +38,17 @@ export const createOrUpdateAttribute = async (
     foundAttribute = undefined;
   }
 
-  if (
-    foundAttribute &&
-    attributesSame(foundAttribute, attribute) &&
-    updateEnabled
-  ) {
-    // Check if mutable properties have changed and set action to "update" if necessary
+  if (foundAttribute) {
+    // Check if any properties have changed
     const requiredChanged =
       "required" in foundAttribute && "required" in attribute
         ? foundAttribute.required !== attribute.required
         : false;
 
-    // const xdefaultChanged =
-    //   "xdefault" in foundAttribute && "xdefault" in attribute
-    //     ? foundAttribute.xdefault !== attribute.xdefault
-    //     : false;
+    const xdefaultChanged =
+      "xdefault" in foundAttribute && "xdefault" in attribute
+        ? foundAttribute.xdefault !== attribute.xdefault
+        : false;
 
     const onDeleteChanged =
       foundAttribute.type === "relationship" &&
@@ -63,43 +58,23 @@ export const createOrUpdateAttribute = async (
         ? foundAttribute.onDelete !== attribute.onDelete
         : false;
 
-    if (requiredChanged || onDeleteChanged) {
+    if (requiredChanged || xdefaultChanged || onDeleteChanged) {
       console.log(
-        `Required changed: ${requiredChanged}\nOnDelete changed: ${onDeleteChanged}`
+        `Updating attribute: ${attribute.key}\nRequired changed: ${requiredChanged}\nDefault changed: ${xdefaultChanged}\nOnDelete changed: ${onDeleteChanged}`
       );
       console.log(
         `Found attribute: ${JSON.stringify(foundAttribute, null, 2)}`
       );
-      console.log(`Attribute: ${JSON.stringify(attribute, null, 2)}`);
+      console.log(`New attribute: ${JSON.stringify(attribute, null, 2)}`);
       finalAttribute = {
-        ...attribute,
         ...foundAttribute,
+        ...attribute,
       };
       action = "update";
     } else {
-      // If no properties that can be updated have changed, return early
+      // If no properties have changed, return early
       return;
     }
-  } else if (
-    foundAttribute &&
-    !attributesSame(foundAttribute, attribute) &&
-    updateEnabled
-  ) {
-    console.log(
-      `Deleting attribute with same key ${
-        attribute.key
-      } -- but different values -- ${JSON.stringify(
-        attribute,
-        null,
-        2
-      )} -- ${JSON.stringify(foundAttribute, null, 2)}`
-    );
-    await db.deleteAttribute(dbId, collection.$id, attribute.key);
-    // After deletion, you might want to create the attribute anew
-    finalAttribute = attribute;
-    action = "create";
-  } else if (!updateEnabled && foundAttribute) {
-    return;
   }
 
   // Relationship attribute logic with adjustments
@@ -158,7 +133,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.size,
               finalAttribute.required || false,
-              (finalAttribute.xdefault as string) || undefined,
+              finalAttribute.xdefault
+                ? `${finalAttribute.xdefault}`
+                : undefined,
               finalAttribute.array || false,
               finalAttribute.encrypted
             )
@@ -171,7 +148,10 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              (finalAttribute.xdefault as string) || undefined
+              finalAttribute.xdefault
+                ? `${finalAttribute.xdefault}`
+                : undefined,
+              finalAttribute.size
             )
         );
       }
@@ -461,21 +441,22 @@ export const createUpdateCollectionAttributes = async (
     `Creating/Updating attributes for collection: ${collection.name}`
   );
 
-  const batchSize = 3; // Size of each batch
+  const batchSize = 3;
   for (let i = 0; i < attributes.length; i += batchSize) {
-    // Slice the attributes array to get a batch of at most batchSize elements
     const batch = attributes.slice(i, i + batchSize);
     const attributePromises = batch.map((attribute) =>
       createOrUpdateAttribute(db, dbId, collection, attribute)
     );
 
-    // Await the completion of all promises in the current batch
     const results = await Promise.allSettled(attributePromises);
     results.forEach((result) => {
       if (result.status === "rejected") {
         console.error("An attribute promise was rejected:", result.reason);
       }
     });
+
+    // Add delay after each batch
+    await delay(500);
   }
   console.log(
     `Finished creating/updating attributes for collection: ${collection.name}`

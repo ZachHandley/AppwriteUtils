@@ -158,8 +158,11 @@ export default ${collectionName};`;
   writeFileSync(collectionFilePath, emptyCollection);
 };
 
-export const setupDirsFiles = async (example: boolean = false) => {
-  const basePath = process.cwd();
+export const setupDirsFiles = async (
+  example: boolean = false,
+  currentDir?: string
+) => {
+  const basePath = currentDir || process.cwd();
   const srcPath = path.join(basePath);
 
   // Check if src directory exists in the current working directory

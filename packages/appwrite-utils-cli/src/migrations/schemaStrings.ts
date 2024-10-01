@@ -301,8 +301,8 @@ export class SchemaGenerator {
     let schemaString = `${imports}\n\n`;
     schemaString += `export const ${pascalName}SchemaBase = z.object({\n`;
     schemaString += `  $id: z.string().optional(),\n`;
-    schemaString += `  $createdAt: z.date().or(z.string()).optional(),\n`;
-    schemaString += `  $updatedAt: z.date().or(z.string()).optional(),\n`;
+    schemaString += `  $createdAt: z.string().optional(),\n`;
+    schemaString += `  $updatedAt: z.string().optional(),\n`;
     for (const attribute of attributes) {
       if (attribute.type === "relationship") {
         continue;

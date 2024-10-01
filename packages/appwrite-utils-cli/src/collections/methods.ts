@@ -12,7 +12,7 @@ import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
 import _ from "lodash";
 import { SchemaGenerator } from "../utils/schemaStrings.js";
-import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const documentExists = async (
   db: Databases,
@@ -141,6 +141,7 @@ export const wipeDatabase = async (
     tryAwaitWithRetry(
       async () => await database.deleteCollection(databaseId, collectionId)
     ); // Try to delete the collection and ignore errors if it doesn't exist or if it's already being deleted
+    await delay(100);
   }
   return collectionsDeleted;
 };
@@ -163,7 +164,7 @@ export const createOrUpdateCollections = async (
   if (!configCollections) {
     return;
   }
-  const usedIds = new Set(); // To track IDs used in this operation
+  const usedIds = new Set();
 
   for (const { attributes, indexes, ...collection } of configCollections) {
     // Prepare permissions for the collection
@@ -215,14 +216,14 @@ export const createOrUpdateCollections = async (
       );
 
       if (collection.$id) {
-        collectionId = collection.$id; // Always use the provided $id if present
+        collectionId = collection.$id;
       } else if (foundColl && !usedIds.has(foundColl.collectionId)) {
-        collectionId = foundColl.collectionId; // Use ID from deleted collection if not already used
+        collectionId = foundColl.collectionId;
       } else {
-        collectionId = ID.unique(); // Generate a new unique ID
+        collectionId = ID.unique();
       }
 
-      usedIds.add(collectionId); // Mark this ID as used
+      usedIds.add(collectionId);
 
       // Create the collection with the determined ID
       try {
@@ -243,7 +244,7 @@ export const createOrUpdateCollections = async (
         console.error(
           `Failed to create collection ${collection.name} with ID ${collectionId}: ${error}`
         );
-        continue; // Skip to the next collection on failure
+        continue;
       }
     } else {
       console.log(`Collection ${collection.name} exists, updating it`);
@@ -260,6 +261,9 @@ export const createOrUpdateCollections = async (
       );
     }
 
+    // Add delay after creating/updating collection
+    await delay(250);
+
     // Update attributes and indexes for the collection
     console.log("Creating Attributes");
     await createUpdateCollectionAttributes(
@@ -268,6 +272,10 @@ export const createOrUpdateCollections = async (
       collectionToUse!,
       attributes
     );
+
+    // Add delay after creating attributes
+    await delay(250);
+
     console.log("Creating Indexes");
     await createOrUpdateIndexes(
       databaseId,
@@ -275,6 +283,9 @@ export const createOrUpdateCollections = async (
       collectionToUse!.$id,
       indexes ?? []
     );
+
+    // Add delay after creating indexes
+    await delay(250);
   }
   // Process any remaining tasks in the queue
   await processQueue(database, databaseId);

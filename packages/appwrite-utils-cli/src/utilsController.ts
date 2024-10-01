@@ -18,6 +18,7 @@ import {
 } from "./collections/methods.js";
 import {
   backupDatabase,
+  ensureDatabaseConfigBucketsExist,
   initOrGetBackupStorage,
   wipeDocumentStorage,
 } from "./storage/methods.js";
@@ -101,10 +102,22 @@ export class UtilsController {
     await setupMigrationDatabase(this.config);
   }
 
+  async ensureDatabaseConfigBucketsExist(databases: Models.Database[] = []) {
+    await this.init();
+    if (!this.storage) throw new Error("Storage not initialized");
+    if (!this.config) throw new Error("Config not initialized");
+    await ensureDatabaseConfigBucketsExist(
+      this.storage,
+      this.config,
+      databases
+    );
+  }
+
   async ensureDatabasesExist(databases?: Models.Database[]) {
     await this.init();
     if (!this.config) throw new Error("Config not initialized");
     await this.setupMigrationDatabase();
+    await this.ensureDatabaseConfigBucketsExist(databases);
     await ensureDatabasesExist(this.config);
   }
 
@@ -161,6 +174,7 @@ export class UtilsController {
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
     for (const database of databases) {
+      if (database.$id === "migrations") continue;
       await this.createOrUpdateCollections(database);
     }
   }
@@ -230,6 +244,7 @@ export class UtilsController {
     if (!this.database) throw new Error("Database not initialized");
     const databases = await fetchAllDatabases(this.database);
     await this.ensureDatabasesExist(databases);
+    await this.ensureDatabaseConfigBucketsExist(databases);
     await this.createOrUpdateCollectionsForDatabases(databases);
   }
 
