@@ -107,7 +107,7 @@ export const createOrUpdateAttribute = async (
     return;
   }
 
-  // console.log(`${action}-ing attribute: ${finalAttribute.key}`);
+  console.log(`${action}-ing attribute: ${finalAttribute.key}`);
 
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
@@ -154,6 +154,7 @@ export const createOrUpdateAttribute = async (
     }
   }
   finalAttribute = attributeSchema.parse(finalAttribute);
+  console.log(`Final Attribute: ${JSON.stringify(finalAttribute)}`);
   switch (finalAttribute.type) {
     case "string":
       if (action === "create") {

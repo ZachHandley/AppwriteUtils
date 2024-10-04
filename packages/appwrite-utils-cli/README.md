@@ -124,6 +124,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.75: Fixed attribute bug
 - 0.9.72: Fixed my own null bug
 - 0.9.71: Reverted `node-appwrite` to 14, this seems to fix the xdefault error
 - 0.9.70: I think I stopped it from deleting attributes, my bad on that
