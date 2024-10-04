@@ -124,6 +124,13 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.72: Fixed my own null bug
+- 0.9.71: Reverted `node-appwrite` to 14, this seems to fix the xdefault error
+- 0.9.70: I think I stopped it from deleting attributes, my bad on that
+- 0.9.68: Temporarily disabled updating Attributes until `updateStringAttribute` is fixed -- it just deletes them now
+- 0.9.65: Temporary fix for Appwrite's `updateStringAttribute` bug
+- 0.9.64: Fixed string attribute requiring xdefault
+- 0.9.61: Remove fileURLToPath -- should hopefully fix windows
 - 0.9.60: Fix init command to repository URL
 - 0.9.59: Fix to Windows path names for loading config
 - 0.9.58: The same as before, I just missed it hah

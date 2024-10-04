@@ -151,7 +151,6 @@ export const createOrUpdateAttribute = async (
               finalAttribute.xdefault
                 ? `${finalAttribute.xdefault}`
                 : undefined,
-              finalAttribute.size
             )
         );
       }

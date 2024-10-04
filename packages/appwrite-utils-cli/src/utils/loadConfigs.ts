@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import { type AppwriteConfig, type Collection } from "appwrite-utils";
 import { register } from "tsx/esm/api"; // Import the register function
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 /**
  * Recursively searches for a file named 'appwriteConfig.ts' starting from the given directory.
@@ -40,7 +40,7 @@ export const loadConfig = async (
   try {
     const configPath = path.join(configDir, "appwriteConfig.ts");
     console.log(`Loading config from: ${configPath}`);
-    const configUrl = fileURLToPath(new URL(configPath, import.meta.url));
+    const configUrl = pathToFileURL(configPath).href;
     const config = (await import(configUrl)).default as AppwriteConfig;
 
     const collectionsDir = path.join(configDir, "collections");
@@ -50,7 +50,7 @@ export const loadConfig = async (
 
     for (const file of collectionFiles) {
       const filePath = path.join(collectionsDir, file);
-      const fileUrl = fileURLToPath(new URL(filePath, import.meta.url));
+      const fileUrl = pathToFileURL(filePath).href;
       const collectionModule = (await import(fileUrl)).default as Collection;
       config.collections.push(collectionModule);
     }

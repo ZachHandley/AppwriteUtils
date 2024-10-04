@@ -12,11 +12,61 @@ const attributesSame = (
   databaseAttribute: Attribute,
   configAttribute: Attribute
 ): boolean => {
-  return (
-    databaseAttribute.key == configAttribute.key &&
-    databaseAttribute.type == configAttribute.type &&
-    databaseAttribute.array == configAttribute.array
-  );
+  const attributesToCheck = [
+    'key',
+    'type',
+    'array',
+    'encrypted',
+    'required',
+    'size',
+    'min',
+    'max',
+    'xdefault',
+    'elements',
+    'relationType',
+    'twoWay',
+    'twoWayKey',
+    'onDelete',
+    'relatedCollection'
+  ];
+
+  return attributesToCheck.every(attr => {
+    // Check if both objects have the attribute
+    const dbHasAttr = attr in databaseAttribute;
+    const configHasAttr = attr in configAttribute;
+
+    // If both have the attribute, compare values
+    if (dbHasAttr && configHasAttr) {
+      const dbValue = databaseAttribute[attr as keyof typeof databaseAttribute];
+      const configValue = configAttribute[attr as keyof typeof configAttribute];
+
+      // Consider undefined and null as equivalent
+      if ((dbValue === undefined || dbValue === null) && (configValue === undefined || configValue === null)) {
+        return true;
+      }
+
+      return dbValue === configValue;
+    }
+
+    // If neither has the attribute, consider it the same
+    if (!dbHasAttr && !configHasAttr) {
+      return true;
+    }
+
+    // If one has the attribute and the other doesn't, check if it's undefined or null
+    if (dbHasAttr && !configHasAttr) {
+      const dbValue = databaseAttribute[attr as keyof typeof databaseAttribute];
+      return dbValue === undefined || dbValue === null;
+    }
+
+    if (!dbHasAttr && configHasAttr) {
+      const configValue = configAttribute[attr as keyof typeof configAttribute];
+      return configValue === undefined || configValue === null;
+    }
+
+    // If we reach here, the attributes are different
+    return false;
+  });
 };
 
 export const createOrUpdateAttribute = async (
@@ -27,7 +77,7 @@ export const createOrUpdateAttribute = async (
 ): Promise<void> => {
   let action = "create";
   let foundAttribute: Attribute | undefined;
-  const updateEnabled = false;
+  const updateEnabled = true;
   let finalAttribute: any = attribute;
   try {
     const collectionAttr = collection.attributes.find(
@@ -39,68 +89,25 @@ export const createOrUpdateAttribute = async (
     foundAttribute = undefined;
   }
 
-  if (
-    foundAttribute &&
-    attributesSame(foundAttribute, attribute) &&
-    updateEnabled
-  ) {
-    // Check if mutable properties have changed and set action to "update" if necessary
-    const requiredChanged =
-      "required" in foundAttribute && "required" in attribute
-        ? foundAttribute.required !== attribute.required
-        : false;
-
-    // const xdefaultChanged =
-    //   "xdefault" in foundAttribute && "xdefault" in attribute
-    //     ? foundAttribute.xdefault !== attribute.xdefault
-    //     : false;
-
-    const onDeleteChanged =
-      foundAttribute.type === "relationship" &&
-      attribute.type === "relationship" &&
-      "onDelete" in foundAttribute &&
-      "onDelete" in attribute
-        ? foundAttribute.onDelete !== attribute.onDelete
-        : false;
-
-    if (requiredChanged || onDeleteChanged) {
-      console.log(
-        `Required changed: ${requiredChanged}\nOnDelete changed: ${onDeleteChanged}`
-      );
-      console.log(
-        `Found attribute: ${JSON.stringify(foundAttribute, null, 2)}`
-      );
-      console.log(`Attribute: ${JSON.stringify(attribute, null, 2)}`);
-      finalAttribute = {
-        ...attribute,
-        ...foundAttribute,
-      };
-      action = "update";
-    } else {
-      // If no properties that can be updated have changed, return early
-      return;
-    }
-  } else if (
-    foundAttribute &&
-    !attributesSame(foundAttribute, attribute) &&
-    updateEnabled
-  ) {
+  if (foundAttribute && attributesSame(foundAttribute, attribute) && updateEnabled) {
+    finalAttribute = {
+      ...attribute,
+      ...foundAttribute,
+    };
+    action = "update";
+  } else if (foundAttribute && !attributesSame(foundAttribute, attribute) && updateEnabled) {
     console.log(
-      `Deleting attribute with same key ${
-        attribute.key
-      } -- but different values -- ${JSON.stringify(
-        attribute,
-        null,
-        2
-      )} -- ${JSON.stringify(foundAttribute, null, 2)}`
+      `Updating attribute with same key ${attribute.key} but different values`
     );
-    await db.deleteAttribute(dbId, collection.$id, attribute.key);
-    // After deletion, you might want to create the attribute anew
     finalAttribute = attribute;
-    action = "create";
-  } else if (!updateEnabled && foundAttribute) {
+    action = "update";
+  } else if (!updateEnabled && foundAttribute && !attributesSame(foundAttribute, attribute)) {
+    await db.deleteAttribute(dbId, collection.$id, attribute.key);
+    console.log(`Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`);
     return;
   }
+
+  // console.log(`${action}-ing attribute: ${finalAttribute.key}`);
 
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
@@ -158,7 +165,7 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.size,
               finalAttribute.required || false,
-              (finalAttribute.xdefault as string) || undefined,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
               finalAttribute.array || false,
               finalAttribute.encrypted
             )
@@ -171,7 +178,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              (finalAttribute.xdefault as string) || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
             )
         );
       }
@@ -197,10 +204,10 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min,
-              finalAttribute.max,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.min || -2147483647,
+              finalAttribute.max || 2147483647,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -223,9 +230,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || 0,
+              finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -239,10 +246,10 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min,
-              finalAttribute.max,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.min || -2147483647,
+              finalAttribute.max || 2147483647,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -253,9 +260,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || 0,
+              finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -269,8 +276,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -281,7 +288,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -295,8 +302,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -307,7 +314,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -321,8 +328,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -333,7 +340,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -347,8 +354,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -359,7 +366,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -373,8 +380,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -385,7 +392,7 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
@@ -400,8 +407,8 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined,
-              finalAttribute.array
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.array || false
             )
         );
       } else {
@@ -413,7 +420,7 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault || undefined
+              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
             )
         );
       }
