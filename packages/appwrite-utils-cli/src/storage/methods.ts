@@ -155,10 +155,10 @@ export const ensureDatabaseConfigBucketsExist = async (
           );
           console.log(`Bucket ${database.bucket.$id} created successfully.`);
         } catch (createError) {
-          console.error(
-            `Failed to create bucket ${database.bucket.$id}:`,
-            createError
-          );
+          // console.error(
+          //   `Failed to create bucket ${database.bucket.$id}:`,
+          //   createError
+          // );
         }
       }
     }

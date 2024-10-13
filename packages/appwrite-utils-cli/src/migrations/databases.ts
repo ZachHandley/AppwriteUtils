@@ -9,12 +9,6 @@ import {
   getAppwriteClient,
   tryAwaitWithRetry,
 } from "../utils/helperFunctions.js";
-import {
-  transferDocumentsBetweenDbsLocalToLocal,
-  transferDocumentsBetweenDbsLocalToRemote,
-} from "./collections.js";
-import { createOrUpdateAttribute } from "./attributes.js";
-import { parseAttribute } from "appwrite-utils";
 
 export const fetchAllDatabases = async (
   database: Databases

@@ -1,5 +1,5 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { createOrUpdateAttribute } from "./attributes.js";
+import { createOrUpdateAttribute } from "../collections/attributes.js";
 import { getMigrationCollectionSchemas } from "./backup.js";
 import {
   areCollectionNamesSame,
@@ -14,7 +14,10 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   console.log("---------------------------------");
   console.log("Starting Migrations Setup");
   console.log("---------------------------------");
-  const database = new Databases(config.appwriteClient!);
+  const database = new Databases(config.appwriteClient);
+  if (!config.appwriteClient) {
+    throw new Error("Appwrite client is not initialized in the config");
+  }
   let db: Models.Database | undefined;
   const migrationCollectionsSetup = getMigrationCollectionSchemas();
 
@@ -103,9 +106,17 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
   console.log("---------------------------------");
 };
 
-export const ensureDatabasesExist = async (config: AppwriteConfig) => {
-  const database = new Databases(config.appwriteClient!);
-  const databasesToEnsure = config.databases;
+export const ensureDatabasesExist = async (config: AppwriteConfig, databasesToEnsure?: Models.Database[]) => {
+  if (!config.appwriteClient) {
+    throw new Error("Appwrite client is not initialized in the config");
+  }
+  const database = new Databases(config.appwriteClient);
+  const databasesToCreate = databasesToEnsure || config.databases || [];
+
+  if (!databasesToCreate.length) {
+    console.log("No databases to create");
+    return;
+  }
 
   const existingDatabases = await tryAwaitWithRetry(
     async () => await database.list([Query.limit(500)])
@@ -116,10 +127,10 @@ export const ensureDatabasesExist = async (config: AppwriteConfig) => {
   );
   if (existingDatabases.databases.length !== 0 && migrationsDatabase) {
     console.log("Creating all databases except migrations");
-    databasesToEnsure.push(migrationsDatabase);
+    databasesToCreate.push(migrationsDatabase);
   }
 
-  for (const db of databasesToEnsure) {
+  for (const db of databasesToCreate) {
     if (!existingDatabases.databases.some((d) => d.name === db.name)) {
       await tryAwaitWithRetry(
         async () => await database.create(db.$id || ulid(), db.name, true)
@@ -133,7 +144,7 @@ export const wipeOtherDatabases = async (
   database: Databases,
   databasesToKeep: Models.Database[]
 ) => {
-  console.log(`Databases to keep: ${databasesToKeep.join(", ")}`);
+  console.log(`Databases to keep: ${databasesToKeep.map(db => db.name).join(", ")}`);
   const allDatabases = await tryAwaitWithRetry(
     async () => await database.list([Query.limit(500)])
   );
@@ -148,6 +159,36 @@ export const wipeOtherDatabases = async (
     if (!databasesToKeep.some((d) => d.name === db.name)) {
       await tryAwaitWithRetry(async () => await database.delete(db.$id));
       console.log(`Deleted database: ${db.name}`);
+    }
+  }
+};
+
+export const ensureCollectionsExist = async (
+  config: AppwriteConfig,
+  database: Models.Database,
+  collectionsToEnsure?: Models.Collection[]
+) => {
+  const databaseClient = new Databases(config.appwriteClient!);
+  const collectionsToCreate = collectionsToEnsure || 
+    (config.collections ? config.collections : []);
+
+  const existingCollections = await tryAwaitWithRetry(
+    async () => await databaseClient.listCollections(database.$id, [Query.limit(500)])
+  );
+
+  for (const collection of collectionsToCreate) {
+    if (!existingCollections.collections.some((c) => c.name === collection.name)) {
+      await tryAwaitWithRetry(
+        async () => await databaseClient.createCollection(
+          database.$id,
+          ulid(),
+          collection.name,
+          undefined,
+          true,
+          true
+        )
+      );
+      console.log(`${collection.name} collection created in ${database.name}`);
     }
   }
 };

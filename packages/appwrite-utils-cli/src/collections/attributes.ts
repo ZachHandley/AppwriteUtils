@@ -7,6 +7,7 @@ import {
 import { nameToIdMapping, enqueueOperation } from "../migrations/queue.js";
 import _ from "lodash";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import chalk from "chalk";
 
 const attributesSame = (
   databaseAttribute: Attribute,
@@ -85,6 +86,7 @@ export const createOrUpdateAttribute = async (
       (attr) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
+    // console.log(`Found attribute: ${JSON.stringify(foundAttribute)}`);
   } catch (error) {
     foundAttribute = undefined;
   }
@@ -93,10 +95,13 @@ export const createOrUpdateAttribute = async (
     // No need to do anything, they are the same
     return;
   } else if (foundAttribute && !attributesSame(foundAttribute, attribute) && updateEnabled) {
-    console.log(
-      `Updating attribute with same key ${attribute.key} but different values`
-    );
-    finalAttribute = attribute;
+    // console.log(
+    //   `Updating attribute with same key ${attribute.key} but different values`
+    // );
+    finalAttribute = {
+      ...foundAttribute,
+      ...attribute,
+    };
     action = "update";
   } else if (!updateEnabled && foundAttribute && !attributesSame(foundAttribute, attribute)) {
     await db.deleteAttribute(dbId, collection.$id, attribute.key);
@@ -120,9 +125,9 @@ export const createOrUpdateAttribute = async (
           relatedCollectionId!
         );
       } catch (e) {
-        console.log(
-          `Collection not found: ${finalAttribute.relatedCollection} when nameToIdMapping was set`
-        );
+        // console.log(
+        //   `Collection not found: ${finalAttribute.relatedCollection} when nameToIdMapping was set`
+        // );
         collectionFoundViaRelatedCollection = undefined;
       }
     } else {
@@ -139,7 +144,7 @@ export const createOrUpdateAttribute = async (
       }
     }
     if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
-      console.log(`Enqueueing operation for attribute: ${finalAttribute.key}`);
+      // console.log(`Enqueueing operation for attribute: ${finalAttribute.key}`);
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
@@ -150,7 +155,7 @@ export const createOrUpdateAttribute = async (
       return;
     }
   }
-  finalAttribute = attributeSchema.parse(finalAttribute);
+  finalAttribute = parseAttribute(finalAttribute);
   // console.log(`Final Attribute: ${JSON.stringify(finalAttribute)}`);
   switch (finalAttribute.type) {
     case "string":
@@ -463,7 +468,7 @@ export const createUpdateCollectionAttributes = async (
   attributes: Attribute[]
 ): Promise<void> => {
   console.log(
-    `Creating/Updating attributes for collection: ${collection.name}`
+    chalk.green(`Creating/Updating attributes for collection: ${collection.name}`)
   );
 
   const batchSize = 3;

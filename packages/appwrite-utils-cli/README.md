@@ -61,6 +61,7 @@ Available options:
 - `--collectionIds`: Comma-separated list of collection IDs to operate on
 - `--bucketIds`: Comma-separated list of bucket IDs to operate on
 - `--wipe`: Wipe data (all: everything, docs: only documents, users: only user data)
+- `--wipeCollections`: Wipe collections (wipes specified collections from collectionIds -- does this non-destructively, deletes all documents)
 - `--generate`: Generate TypeScript schemas from database schemas
 - `--import`: Import data into your databases
 - `--backup`: Perform a backup of your databases
@@ -124,6 +125,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.78: Added colored text! And also added a lot more customization options as to what to wipe, update, etc.
 - 0.9.75: Fixed attribute bug
 - 0.9.72: Fixed my own null bug
 - 0.9.71: Reverted `node-appwrite` to 14, this seems to fix the xdefault error

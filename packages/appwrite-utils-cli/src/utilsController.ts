@@ -9,12 +9,14 @@ import {
   setupMigrationDatabase,
   ensureDatabasesExist,
   wipeOtherDatabases,
+  ensureCollectionsExist,
 } from "./migrations/setupDatabase.js";
 import {
   createOrUpdateCollections,
   wipeDatabase,
   generateSchemas,
   fetchAllCollections,
+  wipeCollection,
 } from "./collections/methods.js";
 import {
   backupDatabase,
@@ -46,6 +48,7 @@ export interface SetupOptions {
   collections?: string[];
   doBackup?: boolean;
   wipeDatabase?: boolean;
+  wipeCollections?: boolean;
   wipeDocumentStorage?: boolean;
   wipeUsers?: boolean;
   generateSchemas?: boolean;
@@ -96,6 +99,18 @@ export class UtilsController {
     }
   }
 
+  async reloadConfig() {
+    this.config = await loadConfig(this.appwriteFolderPath);
+    this.appwriteServer = new Client();
+      this.appwriteServer
+        .setEndpoint(this.config.appwriteEndpoint)
+        .setProject(this.config.appwriteProject)
+        .setKey(this.config.appwriteKey);
+      this.database = new Databases(this.appwriteServer);
+      this.storage = new Storage(this.appwriteServer);
+      this.config.appwriteClient = this.appwriteServer;
+  }
+
   async setupMigrationDatabase() {
     await this.init();
     if (!this.config) throw new Error("Config not initialized");
@@ -118,7 +133,13 @@ export class UtilsController {
     if (!this.config) throw new Error("Config not initialized");
     await this.setupMigrationDatabase();
     await this.ensureDatabaseConfigBucketsExist(databases);
-    await ensureDatabasesExist(this.config);
+    await ensureDatabasesExist(this.config, databases);
+  }
+  
+  async ensureCollectionsExist(database: Models.Database, collections?: Models.Collection[]) {
+    await this.init();
+    if (!this.config) throw new Error("Config not initialized");
+    await ensureCollectionsExist(this.config, database, collections);
   }
 
   async getDatabasesByIds(ids: string[]) {
@@ -163,25 +184,32 @@ export class UtilsController {
     return await wipeDatabase(this.database, database.$id);
   }
 
+  async wipeCollection(database: Models.Database, collection: Models.Collection) {
+    await this.init();
+    if (!this.database) throw new Error("Database not initialized");
+    await wipeCollection(this.database, database.$id, collection.$id);
+  }
+
   async wipeDocumentStorage(bucketId: string) {
     await this.init();
     if (!this.storage) throw new Error("Storage not initialized");
     await wipeDocumentStorage(this.storage, bucketId);
   }
 
-  async createOrUpdateCollectionsForDatabases(databases: Models.Database[]) {
+  async createOrUpdateCollectionsForDatabases(databases: Models.Database[], collections: Models.Collection[] = []) {
     await this.init();
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
     for (const database of databases) {
       if (database.$id === "migrations") continue;
-      await this.createOrUpdateCollections(database);
+      await this.createOrUpdateCollections(database, undefined, collections);
     }
   }
 
   async createOrUpdateCollections(
     database: Models.Database,
-    deletedCollections?: { collectionId: string; collectionName: string }[]
+    deletedCollections?: { collectionId: string; collectionName: string }[],
+    collections: Models.Collection[] = []
   ) {
     await this.init();
     if (!this.database || !this.config)
@@ -190,7 +218,8 @@ export class UtilsController {
       this.database,
       database.$id,
       this.config,
-      deletedCollections
+      deletedCollections,
+      collections
     );
   }
 
@@ -200,10 +229,12 @@ export class UtilsController {
     await generateSchemas(this.config, this.appwriteFolderPath);
   }
 
-  async importData(options: SetupOptions) {
+  async importData(options: SetupOptions = {}) {
     await this.init();
-    if (!this.config || !this.database || !this.storage)
-      throw new Error("Config, database, or storage not initialized");
+    if (!this.database) throw new Error("Database not initialized");
+    if (!this.storage) throw new Error("Storage not initialized");
+    if (!this.config) throw new Error("Config not initialized");
+
     const importDataActions = new ImportDataActions(
       this.database,
       this.storage,
@@ -212,15 +243,18 @@ export class UtilsController {
       this.validityRuleDefinitions,
       this.afterImportActionsDefinitions
     );
+
     const importController = new ImportController(
       this.config,
       this.database,
       this.storage,
       this.appwriteFolderPath,
       importDataActions,
-      options
+      options,
+      options.databases
     );
-    await importController.run();
+
+    await importController.run(options.collections);
   }
 
   async synchronizeConfigurations(
@@ -239,13 +273,16 @@ export class UtilsController {
     await appwriteToX.toSchemas(databases);
   }
 
-  async syncDb() {
+  async syncDb(databases: Models.Database[] = [], collections: Models.Collection[] = []) {
     await this.init();
     if (!this.database) throw new Error("Database not initialized");
-    const databases = await fetchAllDatabases(this.database);
+    if (databases.length === 0) {
+      const allDatabases = await fetchAllDatabases(this.database);
+      databases = allDatabases;
+    }
     await this.ensureDatabasesExist(databases);
     await this.ensureDatabaseConfigBucketsExist(databases);
-    await this.createOrUpdateCollectionsForDatabases(databases);
+    await this.createOrUpdateCollectionsForDatabases(databases, collections);
   }
 
   getAppwriteFolderPath() {

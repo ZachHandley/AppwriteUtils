@@ -7,6 +7,9 @@ import { UtilsController, type SetupOptions } from "./utilsController.js";
 import type { TransferOptions } from "./migrations/transfer.js";
 import { Databases, Storage, type Models } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
+import { fetchAllDatabases } from "./migrations/databases.js";
+import { setupDirsFiles } from "./utils/setupFiles.js";
+import { fetchAllCollections } from "./collections/methods.js";
 
 interface CliOptions {
   it?: boolean;
@@ -14,6 +17,7 @@ interface CliOptions {
   collectionIds?: string;
   bucketIds?: string;
   wipe?: "all" | "docs" | "users";
+  wipeCollections?: boolean;
   generate?: boolean;
   import?: boolean;
   backup?: boolean;
@@ -61,6 +65,10 @@ const argv = yargs(hideBin(process.argv))
     choices: ["all", "docs", "users"] as const,
     description:
       "Wipe data (all: everything, docs: only documents, users: only user data)",
+  })
+  .option("wipeCollections", {
+    type: "boolean",
+    description: "Wipe collections, uses collectionIds option to get the collections to wipe",
   })
   .option("generate", {
     type: "boolean",
@@ -125,86 +133,88 @@ const argv = yargs(hideBin(process.argv))
     description: "Set the destination collection ID for transfer",
   })
   .option("fromBucketId", {
-    alias: ["fromBucket"],
     type: "string",
     description: "Set the source bucket ID for transfer",
   })
   .option("toBucketId", {
-    alias: ["toBucket"],
     type: "string",
     description: "Set the destination bucket ID for transfer",
   })
   .option("remoteEndpoint", {
     type: "string",
-    description: "Set the remote Appwrite endpoint for transfers",
+    description: "Set the remote Appwrite endpoint for transfer",
   })
   .option("remoteProjectId", {
     type: "string",
-    description: "Set the remote Appwrite project ID for transfers",
+    description: "Set the remote Appwrite project ID for transfer",
   })
   .option("remoteApiKey", {
     type: "string",
-    description: "Set the remote Appwrite API key for transfers",
+    description: "Set the remote Appwrite API key for transfer",
   })
   .option("setup", {
     type: "boolean",
-    description: "Setup the project with example data",
+    description: "Setup directories and files",
   })
-  .help()
-  .parse();
+  .parse() as ParsedArgv;
 
 async function main() {
-  const parsedArgv = (await argv) as ParsedArgv;
-  let controller: UtilsController | undefined;
+  const controller = new UtilsController(process.cwd());
 
-  if (parsedArgv.it) {
-    try {
-      controller = new UtilsController(process.cwd());
-      await controller.init();
-    } catch (error: any) {
-      // If it fails, that means there's no config, more than likely
-      console.log(
-        "No config found, you probably need to create the setup files"
-      );
-    }
+  if (argv.it) {
     const cli = new InteractiveCLI(process.cwd());
     await cli.run();
   } else {
-    if (!controller) {
-      controller = new UtilsController(process.cwd());
-      await controller.init();
+    await controller.init();
+
+    if (argv.setup) {
+      await setupDirsFiles(false, process.cwd());
+      return;
     }
-    // Handle non-interactive mode with the new options
+
+    const parsedArgv = argv;
+
     const options: SetupOptions = {
       databases: parsedArgv.dbIds
-        ? await controller.getDatabasesByIds(
-            parsedArgv.dbIds.replace(" ", "").split(",")
-          )
+        ? await controller.getDatabasesByIds(parsedArgv.dbIds.split(","))
         : undefined,
-      collections: parsedArgv.collectionIds
-        ? parsedArgv.collectionIds.replace(" ", "").split(",")
-        : undefined,
+      collections: parsedArgv.collectionIds?.split(","),
       doBackup: parsedArgv.backup,
       wipeDatabase: parsedArgv.wipe === "all" || parsedArgv.wipe === "docs",
       wipeDocumentStorage: parsedArgv.wipe === "all",
       wipeUsers: parsedArgv.wipe === "all" || parsedArgv.wipe === "users",
       generateSchemas: parsedArgv.generate,
       importData: parsedArgv.import,
-      checkDuplicates: false,
       shouldWriteFile: parsedArgv.writeData,
+      wipeCollections: parsedArgv.wipeCollections,
     };
 
-    if (parsedArgv.push) {
-      await controller.syncDb();
+    if (parsedArgv.push || parsedArgv.sync) {
+      const databases = options.databases || await fetchAllDatabases(controller.database!);
+      let collections: Models.Collection[] = [];
+      
+      if (options.collections) {
+        for (const db of databases) {
+          const dbCollections = await fetchAllCollections(db.$id, controller.database!);
+          collections = collections.concat(dbCollections.filter(c => options.collections!.includes(c.$id)));
+        }
+      }
+
+      if (parsedArgv.push) {
+        await controller.syncDb(databases, collections);
+      } else if (parsedArgv.sync) {
+        await controller.synchronizeConfigurations(databases);
+      }
     }
 
     if (
       options.wipeDatabase ||
       options.wipeDocumentStorage ||
-      options.wipeUsers
+      options.wipeUsers ||
+      options.wipeCollections
     ) {
-      if (options.wipeDatabase) {
-        for (const db of options.databases || []) {
+      if (options.wipeDatabase && options.databases) {
+        for (const db of options.databases) {
           await controller.wipeDatabase(db);
         }
       }
@@ -216,10 +226,19 @@ async function main() {
       if (options.wipeUsers) {
         await controller.wipeUsers();
       }
+      if (options.wipeCollections && options.databases) {
+        for (const db of options.databases) {
+          const dbCollections = await fetchAllCollections(db.$id, controller.database!);
+          const collectionsToWipe = dbCollections.filter(c => options.collections!.includes(c.$id));
+          for (const collection of collectionsToWipe) {
+            await controller.wipeCollection(db, collection);
+          }
+        }
+      }
     }
 
-    if (options.doBackup) {
-      for (const db of options.databases || []) {
+    if (options.doBackup && options.databases) {
+      for (const db of options.databases) {
         await controller.backupDatabase(db);
       }
     }
@@ -254,8 +273,8 @@ async function main() {
         );
         targetDatabases = new Databases(remoteClient);
         targetStorage = new Storage(remoteClient);
-        const remoteDbs = await targetDatabases.list();
-        toDb = remoteDbs.databases.find((db) => db.$id === parsedArgv.toDbId);
+        const remoteDbs = await fetchAllDatabases(targetDatabases);
+        toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
       } else {
         toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId!]))[0];
       }
@@ -292,10 +311,6 @@ async function main() {
       };
 
       await controller.transferData(transferOptions);
-    }
-
-    if (parsedArgv.sync) {
-      await controller.synchronizeConfigurations(options.databases);
     }
   }
 }

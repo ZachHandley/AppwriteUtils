@@ -74,10 +74,13 @@ const baseConfig: AppwriteConfig = {
 const collectionsConfig: { name: string; content: string }[] = [
   {
     name: "ExampleCollection",
-    content: `import { CollectionCreate } from "appwrite-utils";
+    content: `import type { CollectionCreate } from "appwrite-utils";
     
 const ExampleCollection: Partial<CollectionCreate> = {
   name: 'ExampleCollection',
+  $id: '${ulid()}',
+  documentSecurity: false,
+  enabled: true,
   $permissions: [
     { permission: 'read', target: 'any' },
     { permission: 'create', target: 'users' },

@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.9: Refactored the cli tool to allow for more specificity and configuration
 - 0.3.8: Upgraded some parts of the package, AppwriteConfig typing updated to include buckets, made cli tool interactive
 - 0.3.7: Remove `ulid` to replace with `ulidx` for compatibility
 - 0.3.6: Bump to `appwrite` version

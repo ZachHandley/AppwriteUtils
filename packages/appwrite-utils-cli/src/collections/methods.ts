@@ -6,7 +6,7 @@ import {
   Query,
   type Models,
 } from "node-appwrite";
-import type { AppwriteConfig, CollectionCreate } from "appwrite-utils";
+import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
 import { nameToIdMapping, processQueue } from "../migrations/queue.js";
 import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
@@ -124,6 +124,22 @@ export const fetchAndCacheCollectionByName = async (
   }
 };
 
+async function wipeDocumentsFromCollection(database: Databases, databaseId: string, collectionId: string) {
+  const initialDocuments = await database.listDocuments(databaseId, collectionId, [Query.limit(1000)]);
+  let documents = initialDocuments.documents;
+  while (documents.length === 1000) {
+    const docsResponse = await database.listDocuments(databaseId, collectionId, [Query.limit(1000)]);
+    documents = documents.concat(docsResponse.documents);
+  }
+  const batchDeletePromises = documents.map(doc => database.deleteDocument(databaseId, collectionId, doc.$id));
+  const maxStackSize = 100;
+  for (let i = 0; i < batchDeletePromises.length; i += maxStackSize) {
+    await Promise.all(batchDeletePromises.slice(i, i + maxStackSize));
+    await delay(100);
+  }
+  console.log(`Deleted ${documents.length} documents from collection ${collectionId}`);
+}
+
 export const wipeDatabase = async (
   database: Databases,
   databaseId: string
@@ -146,6 +162,20 @@ export const wipeDatabase = async (
   return collectionsDeleted;
 };
 
+export const wipeCollection = async (
+  database: Databases,
+  databaseId: string,
+  collectionId: string
+): Promise<void> => {
+  const collections = await database.listCollections(databaseId, [Query.equal("$id", collectionId)]);
+  if (collections.total === 0) {
+    console.log(`Collection ${collectionId} not found`);
+    return;
+  }
+  const collection = collections.collections[0];
+  await wipeDocumentsFromCollection(database, databaseId, collection.$id);
+};
+
 export const generateSchemas = async (
   config: AppwriteConfig,
   appwriteFolderPath: string
@@ -158,38 +188,45 @@ export const createOrUpdateCollections = async (
   database: Databases,
   databaseId: string,
   config: AppwriteConfig,
-  deletedCollections?: { collectionId: string; collectionName: string }[]
+  deletedCollections?: { collectionId: string; collectionName: string }[],
+  selectedCollections: Models.Collection[] = []
 ): Promise<void> => {
-  const configCollections = config.collections;
-  if (!configCollections) {
+  const collectionsToProcess = selectedCollections.length > 0 ? selectedCollections : config.collections;
+  if (!collectionsToProcess) {
     return;
   }
   const usedIds = new Set();
 
-  for (const { attributes, indexes, ...collection } of configCollections) {
+  for (const collection of collectionsToProcess) {
+    const { attributes, indexes, ...collectionData } = collection;
+
     // Prepare permissions for the collection
     const permissions: string[] = [];
     if (collection.$permissions && collection.$permissions.length > 0) {
       for (const permission of collection.$permissions) {
-        switch (permission.permission) {
-          case "read":
-            permissions.push(Permission.read(permission.target));
-            break;
-          case "create":
-            permissions.push(Permission.create(permission.target));
-            break;
-          case "update":
-            permissions.push(Permission.update(permission.target));
-            break;
-          case "delete":
-            permissions.push(Permission.delete(permission.target));
-            break;
-          case "write":
-            permissions.push(Permission.write(permission.target));
-            break;
-          default:
-            console.log(`Unknown permission: ${permission.permission}`);
-            break;
+        if (typeof permission === 'string') {
+          permissions.push(permission);
+        } else {
+          switch (permission.permission) {
+            case "read":
+              permissions.push(Permission.read(permission.target));
+              break;
+            case "create":
+              permissions.push(Permission.create(permission.target));
+              break;
+            case "update":
+              permissions.push(Permission.update(permission.target));
+              break;
+            case "delete":
+              permissions.push(Permission.delete(permission.target));
+              break;
+            case "write":
+              permissions.push(Permission.write(permission.target));
+              break;
+            default:
+              console.log(`Unknown permission: ${permission.permission}`);
+              break;
+          }
         }
       }
     }
@@ -198,7 +235,7 @@ export const createOrUpdateCollections = async (
     let collectionsFound = await tryAwaitWithRetry(
       async () =>
         await database.listCollections(databaseId, [
-          Query.equal("name", collection.name),
+          Query.equal("name", collectionData.name),
         ])
     );
 
@@ -208,15 +245,15 @@ export const createOrUpdateCollections = async (
     // Determine the correct ID for the collection
     let collectionId: string;
     if (!collectionToUse) {
-      console.log(`Creating collection: ${collection.name}`);
+      console.log(`Creating collection: ${collectionData.name}`);
       let foundColl = deletedCollections?.find(
         (coll) =>
           coll.collectionName.toLowerCase().trim().replace(" ", "") ===
-          collection.name.toLowerCase().trim().replace(" ", "")
+          collectionData.name.toLowerCase().trim().replace(" ", "")
       );
 
-      if (collection.$id) {
-        collectionId = collection.$id;
+      if (collectionData.$id) {
+        collectionId = collectionData.$id;
       } else if (foundColl && !usedIds.has(foundColl.collectionId)) {
         collectionId = foundColl.collectionId;
       } else {
@@ -232,31 +269,31 @@ export const createOrUpdateCollections = async (
             await database.createCollection(
               databaseId,
               collectionId,
-              collection.name,
+              collectionData.name,
               permissions,
-              collection.documentSecurity ?? false,
-              collection.enabled ?? true
+              collectionData.documentSecurity ?? false,
+              collectionData.enabled ?? true
             )
         );
-        collection.$id = collectionToUse!.$id;
-        nameToIdMapping.set(collection.name, collectionToUse!.$id);
+        collectionData.$id = collectionToUse!.$id;
+        nameToIdMapping.set(collectionData.name, collectionToUse!.$id);
       } catch (error) {
         console.error(
-          `Failed to create collection ${collection.name} with ID ${collectionId}: ${error}`
+          `Failed to create collection ${collectionData.name} with ID ${collectionId}: ${error}`
         );
         continue;
       }
     } else {
-      console.log(`Collection ${collection.name} exists, updating it`);
+      console.log(`Collection ${collectionData.name} exists, updating it`);
       await tryAwaitWithRetry(
         async () =>
           await database.updateCollection(
             databaseId,
             collectionToUse!.$id,
-            collection.name,
+            collectionData.name,
             permissions,
-            collection.documentSecurity ?? false,
-            collection.enabled ?? true
+            collectionData.documentSecurity ?? false,
+            collectionData.enabled ?? true
           )
       );
     }
@@ -270,6 +307,7 @@ export const createOrUpdateCollections = async (
       database,
       databaseId,
       collectionToUse!,
+      // @ts-expect-error
       attributes
     );
 
@@ -281,7 +319,7 @@ export const createOrUpdateCollections = async (
       databaseId,
       database,
       collectionToUse!.$id,
-      indexes ?? []
+      (indexes ?? []) as Indexes,
     );
 
     // Add delay after creating indexes

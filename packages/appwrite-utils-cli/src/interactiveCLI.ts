@@ -15,6 +15,7 @@ import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
 import type { AppwriteConfig, ConfigDatabases } from "appwrite-utils";
 import { ulid } from "ulidx";
+import chalk from "chalk";
 
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
@@ -25,8 +26,10 @@ enum CHOICES {
   TRANSFER_DATA = "Transfer data",
   BACKUP_DATABASE = "Backup database",
   WIPE_DATABASE = "Wipe database",
+  WIPE_COLLECTIONS = "Wipe collections",
   GENERATE_SCHEMAS = "Generate schemas",
   IMPORT_DATA = "Import data",
+  RELOAD_CONFIG = "Reload configuration files",
   EXIT = "Exit",
 }
 
@@ -36,9 +39,9 @@ export class InteractiveCLI {
   constructor(private currentDir: string) {}
 
   async run(): Promise<void> {
-    console.log("Welcome to Appwrite Utils CLI Tool by Zach Handley");
+    console.log(chalk.green("Welcome to Appwrite Utils CLI Tool by Zach Handley"));
     console.log(
-      "For more information, visit https://github.com/zachhandley/AppwriteUtils"
+      chalk.blue("For more information, visit https://github.com/zachhandley/AppwriteUtils")
     );
 
     while (true) {
@@ -46,10 +49,12 @@ export class InteractiveCLI {
         {
           type: "list",
           name: "action",
-          message: "What would you like to do?",
+          message: chalk.yellow("What would you like to do?"),
           choices: Object.values(CHOICES),
         },
       ]);
+
+      await this.initControllerIfNeeded();
 
       switch (action) {
         case CHOICES.CREATE_COLLECTION_CONFIG:
@@ -81,6 +86,10 @@ export class InteractiveCLI {
           await this.initControllerIfNeeded();
           await this.wipeDatabase();
           break;
+        case CHOICES.WIPE_COLLECTIONS:
+          await this.initControllerIfNeeded();
+          await this.wipeCollections();
+          break;
         case CHOICES.GENERATE_SCHEMAS:
           await this.initControllerIfNeeded();
           await this.generateSchemas();
@@ -89,14 +98,18 @@ export class InteractiveCLI {
           await this.initControllerIfNeeded();
           await this.importData();
           break;
+        case CHOICES.RELOAD_CONFIG:
+          await this.initControllerIfNeeded();
+          await this.reloadConfig();
+          break;
         case CHOICES.EXIT:
-          console.log("Exiting...");
+          console.log(chalk.green("Goodbye!"));
           return;
       }
     }
   }
 
-  private async initControllerIfNeeded() {
+  private async initControllerIfNeeded(): Promise<void> {
     if (!this.controller) {
       this.controller = new UtilsController(this.currentDir);
       await this.controller.init();
@@ -108,13 +121,13 @@ export class InteractiveCLI {
     message: string,
     multiSelect = true
   ): Promise<Models.Database[]> {
-    const choices = databases.map((db) => ({ name: db.name, value: db }));
+    const choices = databases.map((db) => ({ name: db.name, value: db })).filter((db) => db.name.toLowerCase() !== "migrations");
 
     const { selectedDatabases } = await inquirer.prompt([
       {
         type: multiSelect ? "checkbox" : "list",
         name: "selectedDatabases",
-        message,
+        message: chalk.blue(message),
         choices,
         loop: false,
         pageSize: 10,
@@ -143,7 +156,7 @@ export class InteractiveCLI {
       {
         type: multiSelect ? "checkbox" : "list",
         name: "selectedCollections",
-        message,
+        message: chalk.blue(message),
         choices,
         loop: false,
         pageSize: 10,
@@ -167,7 +180,7 @@ export class InteractiveCLI {
       {
         type: multiSelect ? "checkbox" : "list",
         name: "selectedBuckets",
-        message,
+        message: chalk.blue(message),
         choices,
         loop: false,
         pageSize: 10,
@@ -182,12 +195,12 @@ export class InteractiveCLI {
       {
         type: "input",
         name: "collectionName",
-        message: "Enter the name of the collection:",
+        message: chalk.blue("Enter the name of the collection:"),
         validate: (input) =>
           input.trim() !== "" || "Collection name cannot be empty.",
       },
     ]);
-    console.log(`Creating collection config file for '${collectionName}'...`);
+    console.log(chalk.green(`Creating collection config file for '${collectionName}'...`));
     createEmptyCollection(collectionName);
   }
 
@@ -211,7 +224,7 @@ export class InteractiveCLI {
           {
             type: "confirm",
             name: "wantCreateBucket",
-            message: `There are no buckets. Do you want to create a bucket for the database "${database.name}"?`,
+            message: chalk.blue(`There are no buckets. Do you want to create a bucket for the database "${database.name}"?`),
             default: true,
           },
         ]);
@@ -414,7 +427,20 @@ export class InteractiveCLI {
   }
 
   private async syncDb(): Promise<void> {
-    await this.controller!.syncDb();
+    console.log(chalk.yellow("Syncing database..."));
+    const databases = await this.selectDatabases(
+      await fetchAllDatabases(this.controller!.database!),
+      chalk.blue("Select databases to synchronize:"),
+      true,
+    );
+    const collections = await this.selectCollections(
+      databases[0],
+      this.controller!.database!,
+      chalk.blue("Select collections to synchronize:"),
+      true,
+    );
+    await this.controller!.syncDb(databases, collections);
+    console.log(chalk.green("Database sync completed."));
   }
 
   private async synchronizeConfigurations(): Promise<void> {
@@ -430,17 +456,18 @@ export class InteractiveCLI {
       "Select databases to synchronize:"
     );
 
-    console.log("Configuring storage buckets...");
+    console.log(chalk.yellow("Configuring storage buckets..."));
     const updatedConfig = await this.configureBuckets(
       this.controller!.config!,
       selectedDatabases
     );
 
-    console.log("Synchronizing configurations...");
+    console.log(chalk.yellow("Synchronizing configurations..."));
     await this.controller!.synchronizeConfigurations(
       selectedDatabases,
       updatedConfig
     );
+    console.log(chalk.green("Configuration synchronization completed."));
   }
 
   private async backupDatabase(): Promise<void> {
@@ -457,9 +484,10 @@ export class InteractiveCLI {
     );
 
     for (const db of selectedDatabases) {
-      console.log(`Backing up database: ${db.name}`);
+      console.log(chalk.yellow(`Backing up database: ${db.name}`));
       await this.controller!.backupDatabase(db);
     }
+    console.log(chalk.green("Database backup completed."));
   }
 
   private async wipeDatabase(): Promise<void> {
@@ -498,14 +526,15 @@ export class InteractiveCLI {
       {
         type: "confirm",
         name: "confirm",
-        message:
-          "Are you sure you want to wipe the selected items? This action cannot be undone.",
+        message: chalk.red(
+          "Are you sure you want to wipe the selected items? This action cannot be undone."
+        ),
         default: false,
       },
     ]);
 
     if (confirm) {
-      console.log("Wiping selected items...");
+      console.log(chalk.yellow("Wiping selected items..."));
       for (const db of selectedDatabases) {
         await this.controller!.wipeDatabase(db);
       }
@@ -515,39 +544,87 @@ export class InteractiveCLI {
       if (wipeUsers) {
         await this.controller!.wipeUsers();
       }
+      console.log(chalk.green("Wipe operation completed."));
     } else {
-      console.log("Wipe operation cancelled.");
+      console.log(chalk.blue("Wipe operation cancelled."));
     }
   }
 
-  private async generateSchemas(): Promise<void> {
-    console.log("Generating schemas...");
-    await this.controller!.generateSchemas();
-  }
-
-  private async importData(): Promise<void> {
+  private async wipeCollections(): Promise<void> {
     if (!this.controller!.database) {
       throw new Error(
         "Database is not initialized, is the config file correct & created?"
       );
     }
     const databases = await fetchAllDatabases(this.controller!.database);
-
     const selectedDatabases = await this.selectDatabases(
       databases,
-      "Select the database(s) to import data into:"
+      "Select the database(s) containing the collections to wipe:",
+      true
     );
 
-    let selectedCollections: Models.Collection[] = [];
-    for (const db of selectedDatabases) {
-      const dbCollections = await this.selectCollections(
-        db,
+    for (const database of selectedDatabases) {
+      const collections = await this.selectCollections(
+        database,
         this.controller!.database,
-        `Select collections to import data into for database ${db.name}:`,
+        `Select collections to wipe from ${database.name}:`,
         true
       );
-      selectedCollections = [...selectedCollections, ...dbCollections];
+
+      const { confirm } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirm",
+          message: chalk.red(
+            `Are you sure you want to wipe the selected collections from ${database.name}? This action cannot be undone.`
+          ),
+          default: false,
+        },
+      ]);
+
+      if (confirm) {
+        console.log(chalk.yellow(`Wiping selected collections from ${database.name}...`));
+        for (const collection of collections) {
+          await this.controller!.wipeCollection(database, collection);
+          console.log(chalk.green(`Collection ${collection.name} wiped successfully.`));
+        }
+      } else {
+        console.log(chalk.blue(`Wipe operation cancelled for ${database.name}.`));
+      }
     }
+    console.log(chalk.green("Wipe collections operation completed."));
+  }
+
+  private async generateSchemas(): Promise<void> {
+    console.log(chalk.yellow("Generating schemas..."));
+    await this.controller!.generateSchemas();
+    console.log(chalk.green("Schema generation completed."));
+  }
+
+  private async importData(): Promise<void> {
+    console.log(chalk.yellow("Importing data..."));
+
+    const { doBackup } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "doBackup",
+        message: "Do you want to perform a backup before importing?",
+        default: true,
+      },
+    ]);
+
+    const databases = await this.selectDatabases(
+      await fetchAllDatabases(this.controller!.database!),
+      "Select databases to import data into:",
+      true
+    );
+
+    const collections = await this.selectCollections(
+      databases[0],
+      this.controller!.database!,
+      "Select collections to import data into (leave empty for all):",
+      true
+    );
 
     const { shouldWriteFile } = await inquirer.prompt([
       {
@@ -558,26 +635,20 @@ export class InteractiveCLI {
       },
     ]);
 
-    // const { checkDuplicates } = await inquirer.prompt([
-    //   {
-    //     type: "confirm",
-    //     name: "checkDuplicates",
-    //     message: "Do you want to check for duplicates during import?",
-    //     default: true,
-    //   },
-    // ]);
-
-    console.log("Importing data...");
-    await this.controller!.importData({
-      databases: selectedDatabases,
-      collections:
-        selectedCollections.length > 0
-          ? selectedCollections.map((c) => c.$id)
-          : undefined,
+    const options = {
+      databases,
+      collections: collections.map(c => c.name),
+      doBackup,
+      importData: true,
       shouldWriteFile,
-      checkDuplicates: false,
-      // checkDuplicates,
-    });
+    };
+
+    try {
+      await this.controller!.importData(options);
+      console.log(chalk.green("Data import completed successfully."));
+    } catch (error) {
+      console.error(chalk.red("Error importing data:"), error);
+    }
   }
 
   private async transferData(): Promise<void> {
@@ -647,14 +718,7 @@ export class InteractiveCLI {
       "Select the source database:",
       false
     );
-    console.log(fromDbs);
-    const fromDb = fromDbs as unknown as {
-      $id: string;
-      name: string;
-      $createdAt: string;
-      $updatedAt: string;
-      enabled: boolean;
-    };
+    const fromDb = fromDbs[0];
     if (!fromDb) {
       throw new Error("No source database selected");
     }
@@ -664,13 +728,7 @@ export class InteractiveCLI {
       "Select the target database:",
       false
     );
-    const targetDb = targetDbs as unknown as {
-      $id: string;
-      name: string;
-      $createdAt: string;
-      $updatedAt: string;
-      enabled: boolean;
-    };
+    const targetDb = targetDbs[0];
     if (!targetDb) {
       throw new Error("No target database selected");
     }
@@ -678,7 +736,7 @@ export class InteractiveCLI {
     const selectedCollections = await this.selectCollections(
       fromDb,
       sourceClient,
-      "Select collections to transfer):"
+      "Select collections to transfer:"
     );
 
     const { transferStorage } = await inquirer.prompt([
@@ -719,8 +777,8 @@ export class InteractiveCLI {
         "Select the target bucket:",
         false
       );
-      sourceBucket = sourceBucketPicked as unknown as Models.Bucket;
-      targetBucket = targetBucketPicked as unknown as Models.Bucket;
+      sourceBucket = sourceBucketPicked[0];
+      targetBucket = targetBucketPicked[0];
     }
 
     let transferOptions: TransferOptions = {
@@ -742,7 +800,18 @@ export class InteractiveCLI {
       };
     }
 
-    console.log("Transferring data...");
+    console.log(chalk.yellow("Transferring data..."));
     await this.controller!.transferData(transferOptions);
+    console.log(chalk.green("Data transfer completed."));
+  }
+
+  private async reloadConfig(): Promise<void> {
+    console.log(chalk.yellow("Reloading configuration files..."));
+    try {
+      await this.controller!.reloadConfig();
+      console.log(chalk.green("Configuration files reloaded successfully."));
+    } catch (error) {
+      console.error(chalk.red("Error reloading configuration files:"), error);
+    }
   }
 }

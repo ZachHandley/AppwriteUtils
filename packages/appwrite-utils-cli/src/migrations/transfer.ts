@@ -9,7 +9,7 @@ import {
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { getAppwriteClient } from "../utils/helperFunctions.js";
-import { createOrUpdateAttribute } from "./attributes.js";
+import { createOrUpdateAttribute } from "../collections/attributes.js";
 import { parseAttribute } from "appwrite-utils";
 
 export interface TransferOptions {
