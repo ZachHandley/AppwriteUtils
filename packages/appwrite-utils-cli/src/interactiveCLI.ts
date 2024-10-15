@@ -13,9 +13,10 @@ import {
 } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
-import type { AppwriteConfig, ConfigDatabases } from "appwrite-utils";
+import { parseAttribute, PermissionToAppwritePermission, type AppwriteConfig, type ConfigDatabases } from "appwrite-utils";
 import { ulid } from "ulidx";
 import chalk from "chalk";
+import { DateTime } from "luxon";
 
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
@@ -122,6 +123,9 @@ export class InteractiveCLI {
     multiSelect = true
   ): Promise<Models.Database[]> {
     const choices = databases.map((db) => ({ name: db.name, value: db })).filter((db) => db.name.toLowerCase() !== "migrations");
+    const configDatabases = this.getLocalDatabases();
+    const allDatabases = Array.from(new Set([...databases, ...configDatabases]));
+
 
     const { selectedDatabases } = await inquirer.prompt([
       {
@@ -147,7 +151,9 @@ export class InteractiveCLI {
       database.$id,
       databasesClient
     );
-    const choices = collections.map((collection) => ({
+    const configCollections = this.getLocalCollections();
+    const allCollections = Array.from(new Set([...collections, ...configCollections]));
+    const choices = allCollections.map((collection) => ({
       name: collection.name,
       value: collection,
     }));
@@ -803,6 +809,35 @@ export class InteractiveCLI {
     console.log(chalk.yellow("Transferring data..."));
     await this.controller!.transferData(transferOptions);
     console.log(chalk.green("Data transfer completed."));
+  }
+
+
+  private getLocalCollections(): Models.Collection[] {
+    const configCollections = this.controller!.config!.collections || [];
+    // @ts-expect-error - appwrite invalid types
+    return configCollections.map(c => ({
+      $id: c.$id || ulid(),
+      $createdAt: DateTime.now().toISO(),
+      $updatedAt: DateTime.now().toISO(),
+      name: c.name,
+      enabled: c.enabled || true,
+      documentSecurity: c.documentSecurity || false,
+      attributes: c.attributes || [],
+      indexes: c.indexes || [],
+      $permissions: PermissionToAppwritePermission(c.$permissions) || [],
+      databaseId: c.databaseId!,
+    }));
+  }
+
+  private getLocalDatabases(): Models.Database[] {
+    const configDatabases = this.controller!.config!.databases || [];
+    return configDatabases.map(db => ({
+      $id: db.$id || ulid(),
+      $createdAt: DateTime.now().toISO(),
+      $updatedAt: DateTime.now().toISO(),
+      name: db.name,
+      enabled: true,
+    }));
   }
 
   private async reloadConfig(): Promise<void> {

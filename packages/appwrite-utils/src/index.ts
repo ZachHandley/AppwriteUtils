@@ -80,6 +80,7 @@ export {
   permissionSchema,
   type Permissions,
   permissionsSchema,
+  PermissionToAppwritePermission,
 } from "./schemas/permissions.js";
 export {
   type IdMapping,

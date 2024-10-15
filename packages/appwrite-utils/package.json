@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils",
   "module": "dist/index.js",
-  "version": "0.3.9",
+  "version": "0.3.91",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",

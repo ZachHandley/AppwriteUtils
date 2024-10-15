@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.91: Updated permissions to include `parsePermissions` which maps my permissions (`target`, `permission` to the Appwrite strings) -- also added `PermissionToAppwritePermission` which converts one of mine (target, permission) to Appwrite
 - 0.3.9: Refactored the cli tool to allow for more specificity and configuration
 - 0.3.8: Upgraded some parts of the package, AppwriteConfig typing updated to include buckets, made cli tool interactive
 - 0.3.7: Remove `ulid` to replace with `ulidx` for compatibility
