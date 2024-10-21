@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.93: Forgot to export it 👁👄👁
 - 0.3.92: Added a `getFilePreviewUrl` which allows you to modify image files, or just get a preview of a file, without downloading it (creates a URL instead of an `ArrayBuffer`)
 - 0.3.91: Updated permissions to include `parsePermissions` which maps my permissions (`target`, `permission` to the Appwrite strings) -- also added `PermissionToAppwritePermission` which converts one of mine (target, permission) to Appwrite
 - 0.3.9: Refactored the cli tool to allow for more specificity and configuration

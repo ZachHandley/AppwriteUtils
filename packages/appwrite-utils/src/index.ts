@@ -5,7 +5,7 @@ export {
   converterFunctions,
   type ConverterFunctions,
 } from "./functions/converters.js";
-export { getFileDownloadUrl, getFileViewUrl } from "./functions/files.js";
+export { getFileDownloadUrl, getFileViewUrl, getFilePreviewUrl } from "./functions/files.js";
 export {
   validationRules,
   type ValidationRules,
