@@ -41,18 +41,27 @@ export const loadConfig = async (
     const configPath = path.join(configDir, "appwriteConfig.ts");
     console.log(`Loading config from: ${configPath}`);
     const configUrl = pathToFileURL(configPath).href;
-    const config = (await import(configUrl)).default as AppwriteConfig;
-
+    const configModule = (await import(configUrl));
+    const config: AppwriteConfig | undefined = configModule.default?.default || configModule.default || configModule;
+    if (!config) {
+      throw new Error("Failed to load config");
+    }
     const collectionsDir = path.join(configDir, "collections");
     const collectionFiles = fs.readdirSync(collectionsDir);
 
     config.collections = [];
 
     for (const file of collectionFiles) {
+      if (file === "index.ts") {
+        continue;
+      }
       const filePath = path.join(collectionsDir, file);
       const fileUrl = pathToFileURL(filePath).href;
-      const collectionModule = (await import(fileUrl)).default as Collection;
-      config.collections.push(collectionModule);
+      const collectionModule = (await import(fileUrl));
+      const collection: Collection | undefined = collectionModule.default?.default || collectionModule.default || collectionModule;
+      if (collection) {
+        config.collections.push(collection);
+      }
     }
 
     return config;

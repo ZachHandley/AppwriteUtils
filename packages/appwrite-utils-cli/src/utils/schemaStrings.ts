@@ -146,6 +146,9 @@ export class SchemaGenerator {
       return;
     }
     this.config.collections.forEach((collection) => {
+      if (!collection.attributes) {
+        return;
+      }
       collection.attributes.forEach((attr) => {
         if (attr.type === "relationship" && attr.twoWay && attr.twoWayKey) {
           const relationshipAttr = attr as RelationshipAttribute;

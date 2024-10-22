@@ -10,6 +10,7 @@ import {
   Client,
   type Models,
   Compression,
+  Query,
 } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
@@ -37,7 +38,7 @@ enum CHOICES {
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
 
-  constructor(private currentDir: string) {}
+  constructor(private currentDir: string) { }
 
   async run(): Promise<void> {
     console.log(chalk.green("Welcome to Appwrite Utils CLI Tool by Zach Handley"));
@@ -55,10 +56,9 @@ export class InteractiveCLI {
         },
       ]);
 
-      await this.initControllerIfNeeded();
-
       switch (action) {
         case CHOICES.CREATE_COLLECTION_CONFIG:
+          await this.initControllerIfNeeded();
           await this.createCollectionConfig();
           break;
         case CHOICES.SETUP_DIRS_FILES:
@@ -122,10 +122,19 @@ export class InteractiveCLI {
     message: string,
     multiSelect = true
   ): Promise<Models.Database[]> {
-    const choices = databases.map((db) => ({ name: db.name, value: db })).filter((db) => db.name.toLowerCase() !== "migrations");
+    await this.initControllerIfNeeded();
     const configDatabases = this.getLocalDatabases();
-    const allDatabases = Array.from(new Set([...databases, ...configDatabases]));
+    const allDatabases = [...databases, ...configDatabases].reduce((acc, db) => {
+      if (!acc.find(d => d.name === db.name)) {
+        acc.push(db);
+      }
+      return acc;
+    }, [] as Models.Database[]);
 
+    const choices = allDatabases
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((db) => ({ name: db.name, value: db }))
+      .filter((db) => db.name.toLowerCase() !== "migrations");
 
     const { selectedDatabases } = await inquirer.prompt([
       {
@@ -147,10 +156,17 @@ export class InteractiveCLI {
     message: string,
     multiSelect = true
   ): Promise<Models.Collection[]> {
-    const collections = await fetchAllCollections(
-      database.$id,
-      databasesClient
-    );
+    await this.initControllerIfNeeded();
+    const dbExists = await databasesClient.list([Query.equal("name", database.name)]);
+    let collections: Models.Collection[] = [];
+    if (dbExists.total === 0) {
+      console.log(chalk.red(`Database "${database.name}" does not exist, using only local collection options`));
+    } else {
+      collections = await fetchAllCollections(
+        database.$id,
+        databasesClient
+      );
+    }
     const configCollections = this.getLocalCollections();
     const collectionNames = collections.map((c) => c.name).concat(configCollections.map((c) => c.name));
     const allCollectionNamesUnique = Array.from(new Set(collectionNames));
@@ -681,10 +697,10 @@ export class InteractiveCLI {
     let targetDatabases: Models.Database[];
     let remoteOptions:
       | {
-          transferEndpoint: string;
-          transferProject: string;
-          transferKey: string;
-        }
+        transferEndpoint: string;
+        transferProject: string;
+        transferKey: string;
+      }
       | undefined;
 
     if (isRemote) {
@@ -762,12 +778,12 @@ export class InteractiveCLI {
       const sourceStorage = new Storage(this.controller!.appwriteServer!);
       const targetStorage = isRemote
         ? new Storage(
-            getClient(
-              remoteOptions!.transferEndpoint,
-              remoteOptions!.transferProject,
-              remoteOptions!.transferKey
-            )
+          getClient(
+            remoteOptions!.transferEndpoint,
+            remoteOptions!.transferProject,
+            remoteOptions!.transferKey
           )
+        )
         : sourceStorage;
 
       const sourceBuckets = await listBuckets(sourceStorage);
@@ -815,7 +831,7 @@ export class InteractiveCLI {
 
 
   private getLocalCollections(): Models.Collection[] {
-    const configCollections = this.controller!.config!.collections || [];
+    const configCollections = this.controller!.config?.collections || [];
     // @ts-expect-error - appwrite invalid types
     return configCollections.map(c => ({
       $id: c.$id || ulid(),
@@ -832,7 +848,7 @@ export class InteractiveCLI {
   }
 
   private getLocalDatabases(): Models.Database[] {
-    const configDatabases = this.controller!.config!.databases || [];
+    const configDatabases = this.controller!.config?.databases || [];
     return configDatabases.map(db => ({
       $id: db.$id || ulid(),
       $createdAt: DateTime.now().toISO(),

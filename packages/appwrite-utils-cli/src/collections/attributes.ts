@@ -471,11 +471,32 @@ export const createUpdateCollectionAttributes = async (
     chalk.green(`Creating/Updating attributes for collection: ${collection.name}`)
   );
 
+  // @ts-expect-error
+  const existingAttributes: Attribute[] = collection.attributes.map((attr) => parseAttribute(attr)) || [];
+
+  const attributesToRemove = existingAttributes.filter((attr) => !attributes.some((a) => a.key === attr.key));
+  const indexesToRemove = collection.indexes.filter((index) => attributesToRemove.some((attr) => index.attributes.includes(attr.key)));
+
+  if (attributesToRemove.length > 0) {
+    if (indexesToRemove.length > 0) {
+      console.log(chalk.red(`Removing indexes as they rely on an attribute that is being removed: ${indexesToRemove.map((index) => index.key).join(", ")}`));
+      for (const index of indexesToRemove) {
+        await tryAwaitWithRetry(async () => await db.deleteIndex(dbId, collection.$id, index.key));
+        await delay(100);
+      }
+    }
+    for (const attr of attributesToRemove) {
+      console.log(chalk.red(`Removing attribute: ${attr.key} as it is no longer in the collection`));
+      await tryAwaitWithRetry(async () => await db.deleteAttribute(dbId, collection.$id, attr.key));
+      await delay(50);
+    }
+  }
+
   const batchSize = 3;
   for (let i = 0; i < attributes.length; i += batchSize) {
     const batch = attributes.slice(i, i + batchSize);
     const attributePromises = batch.map((attribute) =>
-      createOrUpdateAttribute(db, dbId, collection, attribute)
+      tryAwaitWithRetry(async () => await createOrUpdateAttribute(db, dbId, collection, attribute))
     );
 
     const results = await Promise.allSettled(attributePromises);
@@ -486,7 +507,7 @@ export const createUpdateCollectionAttributes = async (
     });
 
     // Add delay after each batch
-    await delay(500);
+    await delay(200);
   }
   console.log(
     `Finished creating/updating attributes for collection: ${collection.name}`

@@ -159,12 +159,12 @@ const argv = yargs(hideBin(process.argv))
   .parse() as ParsedArgv;
 
 async function main() {
-  const controller = new UtilsController(process.cwd());
-
+  
   if (argv.it) {
     const cli = new InteractiveCLI(process.cwd());
     await cli.run();
   } else {
+    const controller = new UtilsController(process.cwd());
     await controller.init();
 
     if (argv.setup) {

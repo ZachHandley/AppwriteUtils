@@ -125,6 +125,9 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.92: Fixed `createOrUpdateAttributes` so it deletes attributes that don't exist in local config when you are running `syncDb`. Also updated the database and collection selection, so it won't try and fetch the collections and databases that don't exist (ones you picked from local config) and error
+- 0.9.91: Fixed another webpack error, screw you react (but you're supported now so I guess not-screw-you)
+- 0.9.90: Fixed Webpack errors (why tf does webpack add an extra `default`...???)
 - 0.9.80: Fixed collections not being unique between local and remote
 - 0.9.79: Fixed local collections not being considered for the synchronization unless all de-selected
 - 0.9.78: Added colored text! And also added a lot more customization options as to what to wipe, update, etc.
