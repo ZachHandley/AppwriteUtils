@@ -88,13 +88,20 @@ export const getFilePreviewUrl = (
   },
 ) => {
   const queryParams = new URLSearchParams();
+  
+  if (jwt) {
+    queryParams.set('jwt', jwt.jwt);
+  }
+
   if (options) {
     Object.entries(options).forEach(([key, value]) => {
       if (value !== undefined && value !== null)
         queryParams.set(key, value.toString());
     });
   }
+
+  const additionalParams = queryParams.toString();
   return `${endpoint}/storage/buckets/${bucketId}/files/${fileId}/preview?project=${projectId}${
-    jwt ? `&jwt=${jwt.jwt}` : ""
-  }${queryParams.toString()}`;
+    additionalParams.length > 0 ? '&' + additionalParams : ''
+  }`;
 };

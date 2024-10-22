@@ -125,6 +125,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.80: Fixed collections not being unique between local and remote
 - 0.9.79: Fixed local collections not being considered for the synchronization unless all de-selected
 - 0.9.78: Added colored text! And also added a lot more customization options as to what to wipe, update, etc.
 - 0.9.75: Fixed attribute bug

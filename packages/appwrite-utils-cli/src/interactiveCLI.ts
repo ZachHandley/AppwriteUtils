@@ -152,7 +152,9 @@ export class InteractiveCLI {
       databasesClient
     );
     const configCollections = this.getLocalCollections();
-    const allCollections = Array.from(new Set([...collections, ...configCollections]));
+    const collectionNames = collections.map((c) => c.name).concat(configCollections.map((c) => c.name));
+    const allCollectionNamesUnique = Array.from(new Set(collectionNames));
+    const allCollections = allCollectionNamesUnique.map((name) => configCollections.find((c) => c.name === name) ?? collections.find((c) => c.name === name)).filter((v) => v !== undefined);
     const choices = allCollections.map((collection) => ({
       name: collection.name,
       value: collection,
