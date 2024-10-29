@@ -14,7 +14,12 @@ import {
 } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
-import { parseAttribute, PermissionToAppwritePermission, type AppwriteConfig, type ConfigDatabases } from "appwrite-utils";
+import {
+  parseAttribute,
+  PermissionToAppwritePermission,
+  type AppwriteConfig,
+  type ConfigDatabases,
+} from "appwrite-utils";
 import { ulid } from "ulidx";
 import chalk from "chalk";
 import { DateTime } from "luxon";
@@ -38,12 +43,16 @@ enum CHOICES {
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
 
-  constructor(private currentDir: string) { }
+  constructor(private currentDir: string) {}
 
   async run(): Promise<void> {
-    console.log(chalk.green("Welcome to Appwrite Utils CLI Tool by Zach Handley"));
     console.log(
-      chalk.blue("For more information, visit https://github.com/zachhandley/AppwriteUtils")
+      chalk.green("Welcome to Appwrite Utils CLI Tool by Zach Handley")
+    );
+    console.log(
+      chalk.blue(
+        "For more information, visit https://github.com/zachhandley/AppwriteUtils"
+      )
     );
 
     while (true) {
@@ -124,16 +133,41 @@ export class InteractiveCLI {
   ): Promise<Models.Database[]> {
     await this.initControllerIfNeeded();
     const configDatabases = this.getLocalDatabases();
-    const allDatabases = [...databases, ...configDatabases].reduce((acc, db) => {
-      if (!acc.find(d => d.name === db.name)) {
-        acc.push(db);
-      }
-      return acc;
-    }, [] as Models.Database[]);
+    const allDatabases = [...databases, ...configDatabases]
+      .reduce((acc, db) => {
+        // Local config takes precedence - if a database with same name exists, use local version
+        const existingIndex = acc.findIndex((d) => d.name === db.name);
+        if (existingIndex >= 0) {
+          if (configDatabases.some((cdb) => cdb.name === db.name)) {
+            acc[existingIndex] = db; // Replace with local version
+          }
+        } else {
+          acc.push(db);
+        }
+        return acc;
+      }, [] as Models.Database[])
+      .filter((db) => db.name.toLowerCase() !== "migrations");
+
+    const hasLocalAndRemote =
+      allDatabases.some((db) =>
+        configDatabases.some((c) => c.name === db.name)
+      ) &&
+      allDatabases.some(
+        (db) => !configDatabases.some((c) => c.name === db.name)
+      );
 
     const choices = allDatabases
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((db) => ({ name: db.name, value: db }))
+      .map((db) => ({
+        name:
+          db.name +
+          (hasLocalAndRemote
+            ? configDatabases.some((c) => c.name === db.name)
+              ? " (Local)"
+              : " (Remote)"
+            : ""),
+        value: db,
+      }))
       .filter((db) => db.name.toLowerCase() !== "migrations");
 
     const { selectedDatabases } = await inquirer.prompt([
@@ -154,27 +188,67 @@ export class InteractiveCLI {
     database: Models.Database,
     databasesClient: Databases,
     message: string,
-    multiSelect = true
+    multiSelect = true,
+    preferLocal = false
   ): Promise<Models.Collection[]> {
     await this.initControllerIfNeeded();
-    const dbExists = await databasesClient.list([Query.equal("name", database.name)]);
-    let collections: Models.Collection[] = [];
+
+    const configCollections = this.getLocalCollections();
+    let remoteCollections: Models.Collection[] = [];
+
+    const dbExists = await databasesClient.list([
+      Query.equal("name", database.name),
+    ]);
     if (dbExists.total === 0) {
-      console.log(chalk.red(`Database "${database.name}" does not exist, using only local collection options`));
+      console.log(
+        chalk.red(
+          `Database "${database.name}" does not exist, using only local collection options`
+        )
+      );
     } else {
-      collections = await fetchAllCollections(
+      remoteCollections = await fetchAllCollections(
         database.$id,
         databasesClient
       );
     }
-    const configCollections = this.getLocalCollections();
-    const collectionNames = collections.map((c) => c.name).concat(configCollections.map((c) => c.name));
-    const allCollectionNamesUnique = Array.from(new Set(collectionNames));
-    const allCollections = allCollectionNamesUnique.map((name) => configCollections.find((c) => c.name === name) ?? collections.find((c) => c.name === name)).filter((v) => v !== undefined);
-    const choices = allCollections.map((collection) => ({
-      name: collection.name,
-      value: collection,
-    }));
+
+    const allCollections = preferLocal
+      ? remoteCollections.reduce(
+          (acc, remoteCollection) => {
+            if (!acc.some((c) => c.name === remoteCollection.name)) {
+              acc.push(remoteCollection);
+            }
+            return acc;
+          },
+          [...configCollections]
+        )
+      : [
+          ...remoteCollections,
+          ...configCollections.filter(
+            (c) => !remoteCollections.some((rc) => rc.name === c.name)
+          ),
+        ];
+
+    const hasLocalAndRemote =
+      allCollections.some((coll) =>
+        configCollections.some((c) => c.name === coll.name)
+      ) &&
+      allCollections.some(
+        (coll) => !configCollections.some((c) => c.name === coll.name)
+      );
+
+    const choices = allCollections
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((collection) => ({
+        name:
+          collection.name +
+          (hasLocalAndRemote
+            ? configCollections.some((c) => c.name === collection.name)
+              ? " (Local)"
+              : " (Remote)"
+            : ""),
+        value: collection,
+      }));
 
     const { selectedCollections } = await inquirer.prompt([
       {
@@ -224,7 +298,9 @@ export class InteractiveCLI {
           input.trim() !== "" || "Collection name cannot be empty.",
       },
     ]);
-    console.log(chalk.green(`Creating collection config file for '${collectionName}'...`));
+    console.log(
+      chalk.green(`Creating collection config file for '${collectionName}'...`)
+    );
     createEmptyCollection(collectionName);
   }
 
@@ -243,12 +319,23 @@ export class InteractiveCLI {
 
     // If there are no buckets, ask to create one for each database
     if (allBuckets.total === 0) {
-      for (const database of databases ?? config.databases) {
+      const databasesToUse = databases ?? config.databases;
+      for (const database of databasesToUse) {
+        // If database has bucket config in local config, use that
+        const localDatabase = this.controller!.config?.databases.find(
+          (db) => db.name === database.name
+        );
+        if (localDatabase?.bucket) {
+          database.bucket = localDatabase.bucket;
+          continue;
+        }
         const { wantCreateBucket } = await inquirer.prompt([
           {
             type: "confirm",
             name: "wantCreateBucket",
-            message: chalk.blue(`There are no buckets. Do you want to create a bucket for the database "${database.name}"?`),
+            message: chalk.blue(
+              `There are no buckets. Do you want to create a bucket for the database "${database.name}"?`
+            ),
             default: true,
           },
         ]);
@@ -455,13 +542,14 @@ export class InteractiveCLI {
     const databases = await this.selectDatabases(
       await fetchAllDatabases(this.controller!.database!),
       chalk.blue("Select databases to synchronize:"),
-      true,
+      true
     );
     const collections = await this.selectCollections(
       databases[0],
       this.controller!.database!,
       chalk.blue("Select collections to synchronize:"),
       true,
+      true // prefer local
     );
     await this.controller!.syncDb(databases, collections);
     console.log(chalk.green("Database sync completed."));
@@ -607,13 +695,19 @@ export class InteractiveCLI {
       ]);
 
       if (confirm) {
-        console.log(chalk.yellow(`Wiping selected collections from ${database.name}...`));
+        console.log(
+          chalk.yellow(`Wiping selected collections from ${database.name}...`)
+        );
         for (const collection of collections) {
           await this.controller!.wipeCollection(database, collection);
-          console.log(chalk.green(`Collection ${collection.name} wiped successfully.`));
+          console.log(
+            chalk.green(`Collection ${collection.name} wiped successfully.`)
+          );
         }
       } else {
-        console.log(chalk.blue(`Wipe operation cancelled for ${database.name}.`));
+        console.log(
+          chalk.blue(`Wipe operation cancelled for ${database.name}.`)
+        );
       }
     }
     console.log(chalk.green("Wipe collections operation completed."));
@@ -661,7 +755,7 @@ export class InteractiveCLI {
 
     const options = {
       databases,
-      collections: collections.map(c => c.name),
+      collections: collections.map((c) => c.name),
       doBackup,
       importData: true,
       shouldWriteFile,
@@ -697,10 +791,10 @@ export class InteractiveCLI {
     let targetDatabases: Models.Database[];
     let remoteOptions:
       | {
-        transferEndpoint: string;
-        transferProject: string;
-        transferKey: string;
-      }
+          transferEndpoint: string;
+          transferProject: string;
+          transferKey: string;
+        }
       | undefined;
 
     if (isRemote) {
@@ -760,7 +854,9 @@ export class InteractiveCLI {
     const selectedCollections = await this.selectCollections(
       fromDb,
       sourceClient,
-      "Select collections to transfer:"
+      "Select collections to transfer:",
+      true,
+      false // don't prefer local for transfers
     );
 
     const { transferStorage } = await inquirer.prompt([
@@ -778,12 +874,12 @@ export class InteractiveCLI {
       const sourceStorage = new Storage(this.controller!.appwriteServer!);
       const targetStorage = isRemote
         ? new Storage(
-          getClient(
-            remoteOptions!.transferEndpoint,
-            remoteOptions!.transferProject,
-            remoteOptions!.transferKey
+            getClient(
+              remoteOptions!.transferEndpoint,
+              remoteOptions!.transferProject,
+              remoteOptions!.transferKey
+            )
           )
-        )
         : sourceStorage;
 
       const sourceBuckets = await listBuckets(sourceStorage);
@@ -829,11 +925,10 @@ export class InteractiveCLI {
     console.log(chalk.green("Data transfer completed."));
   }
 
-
   private getLocalCollections(): Models.Collection[] {
     const configCollections = this.controller!.config?.collections || [];
     // @ts-expect-error - appwrite invalid types
-    return configCollections.map(c => ({
+    return configCollections.map((c) => ({
       $id: c.$id || ulid(),
       $createdAt: DateTime.now().toISO(),
       $updatedAt: DateTime.now().toISO(),
@@ -849,7 +944,7 @@ export class InteractiveCLI {
 
   private getLocalDatabases(): Models.Database[] {
     const configDatabases = this.controller!.config?.databases || [];
-    return configDatabases.map(db => ({
+    return configDatabases.map((db) => ({
       $id: db.$id || ulid(),
       $createdAt: DateTime.now().toISO(),
       $updatedAt: DateTime.now().toISO(),
