@@ -125,6 +125,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.95: Updated to include new version of `appwrite-utils`
 - 0.9.93: Updated `selectDatabases` and `selectCollections` from the interactive CLI to prefer local collections or databases when synchronizing the databases
 - 0.9.92: Fixed `createOrUpdateAttributes` so it deletes attributes that don't exist in local config when you are running `syncDb`. Also updated the database and collection selection, so it won't try and fetch the collections and databases that don't exist (ones you picked from local config) and error
 - 0.9.91: Fixed another webpack error, screw you react (but you're supported now so I guess not-screw-you)

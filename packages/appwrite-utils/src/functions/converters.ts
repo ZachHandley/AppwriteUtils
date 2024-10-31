@@ -490,13 +490,27 @@ export const converterFunctions = {
       "yyyy/MM/dd",
       "yyyy/MM/dd HH:mm",
       "yyyy-MM-dd HH:mm",
-      "M/d/yyyy h:mm:ss tt", // U.S. style with 12-hour clock
-      "d/M/yyyy h:mm:ss tt", // Rest of the world style with 12-hour clock
-      "h:mm tt", // Time only with 12-hour clock
+      // 12-hour clock formats with and without spaces
+      "M/d/yyyy h:mm:ss a", // U.S. style with 12-hour clock
+      "M/d/yyyy h:mm:ss tt", // Alternative AM/PM format
+      "M/d/yyyy h:mma", // Compact format without seconds
+      "M/d/yyyy h:mm a", // With space
+      "d/M/yyyy h:mm:ss a", // Rest of world with 12-hour clock
+      "d/M/yyyy h:mm:ss tt",
+      "d/M/yyyy h:mma",
+      "d/M/yyyy h:mm a",
+      "h:mm:ss a", // Time only with 12-hour clock
+      "h:mm:ss tt",
+      "h:mma",
+      "h:mm a",
       "HH:mm:ss", // Time only with 24-hour clock
       "HH:mm", // Time only without seconds, 24-hour clock
-      "h:mm tt M/d/yyyy", // 12-hour clock time followed by U.S. style date
-      "h:mm tt d/M/yyyy", // 12-hour clock time followed by Rest of the world style date
+      "h:mm a M/d/yyyy", // 12-hour clock time followed by U.S. style date
+      "h:mma M/d/yyyy",
+      "h:mm tt M/d/yyyy",
+      "h:mm a d/M/yyyy", // 12-hour clock time followed by Rest of world style date
+      "h:mma d/M/yyyy",
+      "h:mm tt d/M/yyyy",
       "yyyy-MM-dd'T'HH:mm:ss.SSSZ", // ISO 8601 with timezone offset
       "yyyy-MM-dd'T'HH:mm:ssZ", // ISO 8601 without milliseconds but with timezone offset
       "E, dd MMM yyyy HH:mm:ss z", // RFC 2822 format
@@ -505,6 +519,11 @@ export const converterFunctions = {
       "yyyy-MM-dd'T'HH:mm:ssXXX", // ISO 8601 without milliseconds but with extended timezone offset
       "dd-MMM-yyyy", // Textual month with day and year
     ];
+
+    // Normalize input string to handle various AM/PM formats
+    let normalizedInput = String(input)
+      .replace(/(\d)(AM|PM)/i, "$1 $2") // Add space between time and AM/PM if missing
+      .replace(/(\d)([AaPp])([Mm])?/, "$1 $2M"); // Normalize 'a' or 'p' to 'AM' or 'PM'
 
     // Attempt to parse as a timestamp first if input is a number
     if (typeof input === "number") {
@@ -515,13 +534,13 @@ export const converterFunctions = {
     }
 
     // Attempt to parse as an ISO string or SQL string
-    let date = DateTime.fromISO(String(input));
-    if (!date.isValid) date = DateTime.fromSQL(String(input));
+    let date = DateTime.fromISO(normalizedInput);
+    if (!date.isValid) date = DateTime.fromSQL(normalizedInput);
 
     // Try each custom format if still not valid
     for (const format of formats) {
       if (!date.isValid) {
-        date = DateTime.fromFormat(String(input), format);
+        date = DateTime.fromFormat(normalizedInput, format);
       }
     }
 

@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.95: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
 - 0.3.94: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT
 - 0.3.93: Forgot to export it 👁👄👁
 - 0.3.92: Added a `getFilePreviewUrl` which allows you to modify image files, or just get a preview of a file, without downloading it (creates a URL instead of an `ArrayBuffer`)
