@@ -100,6 +100,7 @@ export class ImportController {
           this.config,
           this.setupOptions.shouldWriteFile
         );
+        await dataLoader.setupMaps(db.$id);
         await dataLoader.start(db.$id);
         await this.importCollections(db, dataLoader, specificCollections);
         await resolveAndUpdateRelationships(db.$id, this.database, this.config);

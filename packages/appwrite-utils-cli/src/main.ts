@@ -206,27 +206,9 @@ async function main() {
       }
     }
 
-    if (parsedArgv.push || parsedArgv.sync) {
-      const databases =
-        options.databases || (await fetchAllDatabases(controller.database!));
-      let collections: Models.Collection[] = [];
-
-      if (options.collections) {
-        for (const db of databases) {
-          const dbCollections = await fetchAllCollections(
-            db.$id,
-            controller.database!
-          );
-          collections = collections.concat(
-            dbCollections.filter((c) => options.collections!.includes(c.$id))
-          );
-        }
-      }
-
-      if (parsedArgv.push) {
-        await controller.syncDb(databases, collections);
-      } else if (parsedArgv.sync) {
-        await controller.synchronizeConfigurations(databases);
+    if (options.doBackup && options.databases) {
+      for (const db of options.databases) {
+        await controller.backupDatabase(db);
       }
     }
 
@@ -265,11 +247,30 @@ async function main() {
       }
     }
 
-    if (options.doBackup && options.databases) {
-      for (const db of options.databases) {
-        await controller.backupDatabase(db);
+    if (parsedArgv.push || parsedArgv.sync) {
+      const databases =
+        options.databases || (await fetchAllDatabases(controller.database!));
+      let collections: Models.Collection[] = [];
+
+      if (options.collections) {
+        for (const db of databases) {
+          const dbCollections = await fetchAllCollections(
+            db.$id,
+            controller.database!
+          );
+          collections = collections.concat(
+            dbCollections.filter((c) => options.collections!.includes(c.$id))
+          );
+        }
+      }
+
+      if (parsedArgv.push) {
+        await controller.syncDb(databases, collections);
+      } else if (parsedArgv.sync) {
+        await controller.synchronizeConfigurations(databases);
       }
     }
+
 
     if (options.generateSchemas) {
       await controller.generateSchemas();

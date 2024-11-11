@@ -253,7 +253,6 @@ export class UtilsController {
       options,
       options.databases
     );
-
     await importController.run(options.collections);
   }
 

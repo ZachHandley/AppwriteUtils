@@ -60,6 +60,10 @@ export const loadConfig = async (
       const collectionModule = (await import(fileUrl));
       const collection: Collection | undefined = collectionModule.default?.default || collectionModule.default || collectionModule;
       if (collection) {
+        // Ensure importDefs are properly loaded
+        if (collectionModule.importDefs || collection.importDefs) {
+          collection.importDefs = collectionModule.importDefs || collection.importDefs;
+        }
         config.collections.push(collection);
       }
     }

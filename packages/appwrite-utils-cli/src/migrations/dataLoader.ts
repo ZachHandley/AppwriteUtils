@@ -24,6 +24,7 @@ import { AuthUserCreateSchema } from "../schemas/authUser.js";
 import _ from "lodash";
 import { UsersController } from "./users.js";
 import { finalizeByAttributeMap } from "../utils/helperFunctions.js";
+
 // Define a schema for the structure of collection import data using Zod for validation
 export const CollectionImportDataSchema = z.object({
   // Optional collection creation schema
@@ -182,8 +183,9 @@ export class DataLoader {
 
   // Method to load data from a file specified in the import definition
   loadData(importDef: ImportDef): any[] {
-    // Resolve the file path and check if the file exists
+    // Simply join appwriteFolderPath with the importDef.filePath
     const filePath = path.resolve(this.appwriteFolderPath, importDef.filePath);
+    console.log(`Loading data from: ${filePath}`); // Add logging
     if (!fs.existsSync(filePath)) {
       console.error(`File not found: ${filePath}`);
       return [];
@@ -191,9 +193,12 @@ export class DataLoader {
 
     // Read the file and parse the JSON data
     const rawData = fs.readFileSync(filePath, "utf8");
-    return importDef.basePath
+    const parsedData = importDef.basePath
       ? JSON.parse(rawData)[importDef.basePath]
       : JSON.parse(rawData);
+
+    console.log(`Loaded ${parsedData?.length || 0} items from ${filePath}`);
+    return parsedData;
   }
 
   // Helper method to check if a new ID already exists in the old-to-new ID map
@@ -932,7 +937,7 @@ export class DataLoader {
   ): Promise<void> {
     // Load the raw data based on the import definition
     const rawData = this.loadData(importDef);
-    const operationId = this.collectionImportOperations.get(
+    let operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
     // Initialize a new map for old ID to new ID mappings
@@ -946,9 +951,17 @@ export class DataLoader {
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMap)
         .get(this.getCollectionKey(collection.name));
     if (!operationId) {
-      throw new Error(
-        `No import operation found for collection ${collection.name}`
+      const collectionImportOperation = await findOrCreateOperation(
+        this.database,
+        collection.$id,
+        "importData"
       );
+      // Store the operation ID in the map
+      this.collectionImportOperations.set(
+        this.getCollectionKey(collection.name),
+        collectionImportOperation.$id
+      );
+      operationId = collectionImportOperation.$id;
     }
     await updateOperation(this.database, operationId, {
       status: "ready",
@@ -1160,13 +1173,21 @@ export class DataLoader {
   ): Promise<void> {
     // Load the raw data based on the import definition
     const rawData = this.loadData(importDef);
-    const operationId = this.collectionImportOperations.get(
+    let operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
     if (!operationId) {
-      throw new Error(
-        `No import operation found for collection ${collection.name}`
+      const collectionImportOperation = await findOrCreateOperation(
+        this.database,
+        collection.$id,
+        "importData"
       );
+      // Store the operation ID in the map
+      this.collectionImportOperations.set(
+        this.getCollectionKey(collection.name),
+        collectionImportOperation.$id
+      );
+      operationId = collectionImportOperation.$id;
     }
     await updateOperation(this.database, operationId, {
       status: "ready",
