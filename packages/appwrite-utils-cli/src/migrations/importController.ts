@@ -147,14 +147,13 @@ export class ImportController {
 
     for (const collection of this.config.collections || []) {
       if (collectionsToImport.includes(collection.name)) {
-        let isUsersCollection =
-          dataLoader.getCollectionKey(this.config.usersCollectionName) ===
-          dataLoader.getCollectionKey(collection.name);
+        let isUsersCollection = this.config.usersCollectionName && (dataLoader.getCollectionKey(this.config.usersCollectionName) ===
+            dataLoader.getCollectionKey(collection.name));
         const importOperationId = dataLoader.collectionImportOperations.get(
           dataLoader.getCollectionKey(collection.name)
         );
         const createBatches = (finalData: CollectionImportData["data"]) => {
-          let maxBatchLength = 100;
+          let maxBatchLength = 50;
           const finalBatches: CollectionImportData["data"][] = [];
           for (let i = 0; i < finalData.length; i++) {
             if (i % maxBatchLength === 0) {

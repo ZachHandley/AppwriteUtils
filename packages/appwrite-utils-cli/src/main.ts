@@ -68,7 +68,8 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("wipeCollections", {
     type: "boolean",
-    description: "Wipe collections, uses collectionIds option to get the collections to wipe",
+    description:
+      "Wipe collections, uses collectionIds option to get the collections to wipe",
   })
   .option("generate", {
     type: "boolean",
@@ -159,7 +160,6 @@ const argv = yargs(hideBin(process.argv))
   .parse() as ParsedArgv;
 
 async function main() {
-  
   if (argv.it) {
     const cli = new InteractiveCLI(process.cwd());
     await cli.run();
@@ -189,14 +189,37 @@ async function main() {
       wipeCollections: parsedArgv.wipeCollections,
     };
 
+    // Add default databases if not specified
+    if (!options.databases || options.databases.length === 0) {
+      const allDatabases = await fetchAllDatabases(controller.database!);
+      options.databases = allDatabases.filter(
+        (db) => db.name.toLowerCase() !== "migrations"
+      );
+    }
+
+    // Add default collections if not specified
+    if (!options.collections || options.collections.length === 0) {
+      if (controller.config && controller.config.collections) {
+        options.collections = controller.config.collections.map((c) => c.name);
+      } else {
+        options.collections = [];
+      }
+    }
+
     if (parsedArgv.push || parsedArgv.sync) {
-      const databases = options.databases || await fetchAllDatabases(controller.database!);
+      const databases =
+        options.databases || (await fetchAllDatabases(controller.database!));
       let collections: Models.Collection[] = [];
-      
+
       if (options.collections) {
         for (const db of databases) {
-          const dbCollections = await fetchAllCollections(db.$id, controller.database!);
-          collections = collections.concat(dbCollections.filter(c => options.collections!.includes(c.$id)));
+          const dbCollections = await fetchAllCollections(
+            db.$id,
+            controller.database!
+          );
+          collections = collections.concat(
+            dbCollections.filter((c) => options.collections!.includes(c.$id))
+          );
         }
       }
 
@@ -228,8 +251,13 @@ async function main() {
       }
       if (options.wipeCollections && options.databases) {
         for (const db of options.databases) {
-          const dbCollections = await fetchAllCollections(db.$id, controller.database!);
-          const collectionsToWipe = dbCollections.filter(c => options.collections!.includes(c.$id));
+          const dbCollections = await fetchAllCollections(
+            db.$id,
+            controller.database!
+          );
+          const collectionsToWipe = dbCollections.filter((c) =>
+            options.collections!.includes(c.$id)
+          );
           for (const collection of collectionsToWipe) {
             await controller.wipeCollection(db, collection);
           }

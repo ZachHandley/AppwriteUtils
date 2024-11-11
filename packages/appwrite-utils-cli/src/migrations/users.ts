@@ -53,19 +53,23 @@ export class UsersController {
     };
 
     let usersDeleted = 0;
-    const batchedUserPromises = createBatches(allUsers, 50); // Batch size of 10
+    if (allUsers.length > 0) {
+      const batchedUserPromises = createBatches(allUsers, 25); // Batch size of 25
 
-    for (const batch of batchedUserPromises) {
-      console.log(`Deleting ${batch.length} users...`);
-      await Promise.all(
-        batch.map((user) =>
-          tryAwaitWithRetry(async () => await this.users.delete(user.$id))
-        )
-      );
-      usersDeleted += batch.length;
-      if (usersDeleted % 100 === 0) {
-        console.log(`Deleted ${usersDeleted} users...`);
+      for (const batch of batchedUserPromises) {
+        console.log(`Deleting ${batch.length} users...`);
+        await Promise.all(
+          batch.map((user) =>
+            tryAwaitWithRetry(async () => await this.users.delete(user.$id))
+          )
+        );
+        usersDeleted += batch.length;
+        if (usersDeleted % 100 === 0) {
+          console.log(`Deleted ${usersDeleted} users...`);
+        }
       }
+    } else {
+      console.log("No users to delete");
     }
   }
 
