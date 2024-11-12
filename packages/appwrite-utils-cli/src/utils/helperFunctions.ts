@@ -149,15 +149,21 @@ export const tryAwaitWithRetry = async <T>(
     return await createFunction();
   } catch (error) {
     if (
-      error instanceof AppwriteException &&
+      (error instanceof AppwriteException &&
       (error.message.toLowerCase().includes("fetch failed") ||
-        error.message.toLowerCase().includes("server error"))
+        error.message.toLowerCase().includes("server error"))) ||
+      ((error as any).code === 522 || (error as any).code === "522")
     ) {
+      if ((error as any).code === 522) {
+        console.log("Cloudflare error. Retrying...");
+      } else {
+        console.log(`Fetch failed on attempt ${attemptNum}. Retrying...`);
+      }
       numTimesFailedTotal++;
-      console.log(`Fetch failed on attempt ${attemptNum}. Retrying...`);
       if (attemptNum > 5) {
         throw error;
       }
+      await delay(1000);
       return tryAwaitWithRetry(createFunction, attemptNum + 1);
     }
     if (throwError) {

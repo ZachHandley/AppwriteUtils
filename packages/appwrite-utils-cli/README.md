@@ -125,6 +125,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.981: Try fixing `tryAwaitWithRetry` to catch `522` errors from Cloudflare, they were appearing for some users, also added a 1000ms delay to `tryAwaitWithRetry`
 - 0.9.98: Fixing some import errors reported by users
 - 0.9.95: Updated to include new version of `appwrite-utils`
 - 0.9.93: Updated `selectDatabases` and `selectCollections` from the interactive CLI to prefer local collections or databases when synchronizing the databases
