@@ -13,8 +13,8 @@ import { createOrUpdateAttribute } from "../collections/attributes.js";
 import { parseAttribute } from "appwrite-utils";
 
 export interface TransferOptions {
-  fromDb: Models.Database;
-  targetDb: Models.Database;
+  fromDb: Models.Database | undefined;
+  targetDb: Models.Database | undefined;
   isRemote: boolean;
   collections?: string[];
   transferEndpoint?: string;

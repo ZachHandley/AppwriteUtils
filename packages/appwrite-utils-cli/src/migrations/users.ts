@@ -111,44 +111,34 @@ export class UsersController {
     return users;
   }
 
-  async createUserAndReturn(item: AuthUserCreate, numAttempts?: number) {
+  async createUserAndReturn(item: AuthUserCreate) {
     try {
-      const user = await this.users.create(
-        item.userId || ID.unique(),
-        item.email || undefined,
-        item.phone && item.phone.length < 15 && item.phone.startsWith("+")
-          ? item.phone
-          : undefined,
-        `changeMe${item.email?.toLowerCase()}` || `changeMePlease`,
-        item.name || undefined
-      );
-      if (item.labels) {
-        await this.users.updateLabels(user.$id, item.labels);
-      }
-      if (item.prefs) {
-        await this.users.updatePrefs(user.$id, item.prefs);
-      }
+      const user = await tryAwaitWithRetry(async () => {
+        const createdUser = await this.users.create(
+          item.userId || ID.unique(),
+          item.email || undefined,
+          item.phone && item.phone.length < 15 && item.phone.startsWith("+")
+            ? item.phone
+            : undefined,
+          `changeMe${item.email?.toLowerCase()}` || `changeMePlease`,
+          item.name || undefined
+        );
+  
+        if (item.labels) {
+          await this.users.updateLabels(createdUser.$id, item.labels);
+        }
+        if (item.prefs) {
+          await this.users.updatePrefs(createdUser.$id, item.prefs);
+        }
+        
+        return createdUser;
+      }); // Set throwError to true since we want to handle errors
+  
       return user;
     } catch (e) {
-      if (e instanceof AppwriteException) {
-        if (
-          e.message.toLowerCase().includes("fetch failed") ||
-          e.message.toLowerCase().includes("server error")
-        ) {
-          const numberOfAttempts = numAttempts || 0;
-          if (numberOfAttempts > 5) {
-            throw e;
-          }
-          const user: Models.User<Models.Preferences> =
-            await this.createUserAndReturn(item, numberOfAttempts + 1);
-          return user;
-        }
-      }
       if (e instanceof Error) {
         logger.error("FAILED CREATING USER: ", e.message, item);
       }
-      console.log("FAILED CREATING USER: ", e, item);
-      throw e;
     }
   }
 

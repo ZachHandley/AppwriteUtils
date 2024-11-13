@@ -163,7 +163,7 @@ export const tryAwaitWithRetry = async <T>(
       if (attemptNum > 5) {
         throw error;
       }
-      await delay(1000);
+      await delay(2500);
       return tryAwaitWithRetry(createFunction, attemptNum + 1);
     }
     if (throwError) {

@@ -271,7 +271,6 @@ async function main() {
       }
     }
 
-
     if (options.generateSchemas) {
       await controller.generateSchemas();
     }
@@ -281,65 +280,91 @@ async function main() {
     }
 
     if (parsedArgv.transfer) {
-      const isRemote = !!parsedArgv.remoteEndpoint;
-      const fromDb = await controller.getDatabasesByIds([parsedArgv.fromDbId!]);
-      let toDb: Models.Database | undefined;
-      let targetDatabases: Databases | undefined;
-      let targetStorage: Storage | undefined;
+      if (parsedArgv.transfer) {
+        const isRemote = !!parsedArgv.remoteEndpoint;
+        let fromDb, toDb: Models.Database | undefined;
+        let targetDatabases: Databases | undefined;
+        let targetStorage: Storage | undefined;
 
-      if (isRemote) {
-        if (
-          !parsedArgv.remoteEndpoint ||
-          !parsedArgv.remoteProjectId ||
-          !parsedArgv.remoteApiKey
-        ) {
-          throw new Error("Remote transfer details are missing");
+        // Only fetch databases if database IDs are provided
+        if (parsedArgv.fromDbId && parsedArgv.toDbId) {
+          fromDb = (
+            await controller.getDatabasesByIds([parsedArgv.fromDbId])
+          )[0];
+
+          if (isRemote) {
+            if (
+              !parsedArgv.remoteEndpoint ||
+              !parsedArgv.remoteProjectId ||
+              !parsedArgv.remoteApiKey
+            ) {
+              throw new Error("Remote transfer details are missing");
+            }
+            const remoteClient = getClient(
+              parsedArgv.remoteEndpoint,
+              parsedArgv.remoteProjectId,
+              parsedArgv.remoteApiKey
+            );
+            targetDatabases = new Databases(remoteClient);
+            targetStorage = new Storage(remoteClient);
+            const remoteDbs = await fetchAllDatabases(targetDatabases);
+            toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
+          } else {
+            toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))[0];
+          }
+
+          if (!fromDb || !toDb) {
+            throw new Error("Source or target database not found");
+          }
         }
-        const remoteClient = getClient(
-          parsedArgv.remoteEndpoint,
-          parsedArgv.remoteProjectId,
-          parsedArgv.remoteApiKey
-        );
-        targetDatabases = new Databases(remoteClient);
-        targetStorage = new Storage(remoteClient);
-        const remoteDbs = await fetchAllDatabases(targetDatabases);
-        toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
-      } else {
-        toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId!]))[0];
-      }
 
-      if (!fromDb[0] || !toDb) {
-        throw new Error("Source or target database not found");
-      }
-
-      let sourceBucket, targetBucket;
-      if (parsedArgv.fromBucketId) {
-        sourceBucket = await controller.storage?.getBucket(
-          parsedArgv.fromBucketId
-        );
-      }
-      if (parsedArgv.toBucketId) {
-        if (isRemote) {
-          targetBucket = await targetStorage?.getBucket(parsedArgv.toBucketId);
-        } else {
-          targetBucket = await controller.storage?.getBucket(
-            parsedArgv.toBucketId
+        // Handle storage setup
+        let sourceBucket, targetBucket;
+        if (parsedArgv.fromBucketId) {
+          sourceBucket = await controller.storage?.getBucket(
+            parsedArgv.fromBucketId
           );
         }
+        if (parsedArgv.toBucketId) {
+          if (isRemote) {
+            if (!targetStorage) {
+              const remoteClient = getClient(
+                parsedArgv.remoteEndpoint!,
+                parsedArgv.remoteProjectId!,
+                parsedArgv.remoteApiKey!
+              );
+              targetStorage = new Storage(remoteClient);
+            }
+            targetBucket = await targetStorage?.getBucket(
+              parsedArgv.toBucketId
+            );
+          } else {
+            targetBucket = await controller.storage?.getBucket(
+              parsedArgv.toBucketId
+            );
+          }
+        }
+
+        // Validate that at least one transfer type is specified
+        if (!fromDb && !sourceBucket) {
+          throw new Error(
+            "No source database or bucket specified for transfer"
+          );
+        }
+
+        const transferOptions: TransferOptions = {
+          isRemote,
+          fromDb,
+          targetDb: toDb,
+          transferEndpoint: parsedArgv.remoteEndpoint,
+          transferProject: parsedArgv.remoteProjectId,
+          transferKey: parsedArgv.remoteApiKey,
+          sourceBucket: sourceBucket,
+          targetBucket: targetBucket,
+        };
+
+        await controller.transferData(transferOptions);
       }
-
-      const transferOptions: TransferOptions = {
-        isRemote,
-        fromDb: fromDb[0],
-        targetDb: toDb,
-        transferEndpoint: parsedArgv.remoteEndpoint,
-        transferProject: parsedArgv.remoteProjectId,
-        transferKey: parsedArgv.remoteApiKey,
-        sourceBucket: sourceBucket,
-        targetBucket: targetBucket,
-      };
-
-      await controller.transferData(transferOptions);
     }
   }
 }

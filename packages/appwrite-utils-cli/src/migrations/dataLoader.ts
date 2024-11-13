@@ -1086,6 +1086,7 @@ export class DataLoader {
         }
       }
       // Update the attribute mappings with any actions that need to be performed post-import
+      // We added the basePath to get the folder from the filePath
       const mappingsWithActions = this.getAttributeMappingsWithActions(
         importDef.attributeMappings,
         context,
@@ -1247,6 +1248,7 @@ export class DataLoader {
         continue;
       }
       // Update the attribute mappings with any actions that need to be performed post-import
+      // We added the basePath to get the folder from the filePath
       const mappingsWithActions = this.getAttributeMappingsWithActions(
         importDef.attributeMappings,
         context,
@@ -1462,6 +1464,7 @@ export class DataLoader {
       }
 
       // Update the attribute mappings with any actions that need to be performed post-import
+      // We added the basePath to get the folder from the filePath
       const mappingsWithActions = this.getAttributeMappingsWithActions(
         importDef.attributeMappings,
         context,
@@ -1480,26 +1483,42 @@ export class DataLoader {
           transformedData
         );
         itemDataToUpdate.context = context;
-        // Merge existing importDef with new importDef, focusing only on postImportActions
-        itemDataToUpdate.importDef = {
-          ...itemDataToUpdate.importDef,
-          attributeMappings:
-            itemDataToUpdate.importDef?.attributeMappings.map(
-              (attrMapping, index) => ({
-                ...attrMapping,
-                postImportActions: [
-                  ...(attrMapping.postImportActions || []),
-                  ...(newImportDef.attributeMappings[index]
-                    ?.postImportActions || []),
-                ],
-              })
-            ) || [],
-        } as ImportDef;
 
-        if (collection.name.toLowerCase() === "councils") {
-          console.log(
-            `Mappings in update councils: ${JSON.stringify(
-              itemDataToUpdate.importDef.attributeMappings,
+        // Fix: Ensure we properly merge the attribute mappings and their actions
+        const mergedAttributeMappings = newImportDef.attributeMappings.map(
+          (newMapping) => {
+            const existingMapping =
+              itemDataToUpdate.importDef?.attributeMappings.find(
+                (m) => m.targetKey === newMapping.targetKey
+              );
+
+            return {
+              ...newMapping,
+              postImportActions: [
+                ...(existingMapping?.postImportActions || []),
+                ...(newMapping.postImportActions || []),
+              ],
+            };
+          }
+        );
+
+        itemDataToUpdate.importDef = {
+          ...newImportDef,
+          attributeMappings: mergedAttributeMappings,
+        };
+
+        // Debug logging
+        if (
+          mergedAttributeMappings.some((m) => m.postImportActions?.length > 0)
+        ) {
+          logger.info(
+            `Post-import actions for ${collection.name}: ${JSON.stringify(
+              mergedAttributeMappings
+                .filter((m) => m.postImportActions?.length > 0)
+                .map((m) => ({
+                  targetKey: m.targetKey,
+                  actions: m.postImportActions,
+                })),
               null,
               2
             )}`
@@ -1603,10 +1622,42 @@ export class DataLoader {
         );
         // Ensure the file path is absolute if it doesn't start with "http"
         if (!mappingFilePath.toLowerCase().startsWith("http")) {
-          mappingFilePath = path.resolve(
-            this.appwriteFolderPath,
-            mappingFilePath
-          );
+          // First try the direct path
+          let fullPath = path.resolve(this.appwriteFolderPath, mappingFilePath);
+
+          // If file doesn't exist, search in subdirectories
+          if (!fs.existsSync(fullPath)) {
+            const findFileInDir = (dir: string): string | null => {
+              const files = fs.readdirSync(dir);
+
+              for (const file of files) {
+                const filePath = path.join(dir, file);
+                const stat = fs.statSync(filePath);
+
+                if (stat.isDirectory()) {
+                  // Recursively search subdirectories
+                  const found = findFileInDir(filePath);
+                  if (found) return found;
+                } else if (file === path.basename(mappingFilePath)) {
+                  return filePath;
+                }
+              }
+              return null;
+            };
+
+            const foundPath = findFileInDir(this.appwriteFolderPath);
+            if (foundPath) {
+              mappingFilePath = foundPath;
+            } else {
+              logger.warn(
+                `File not found in any subdirectory: ${mappingFilePath}`
+              );
+              // Keep the original resolved path as fallback
+              mappingFilePath = fullPath;
+            }
+          } else {
+            mappingFilePath = fullPath;
+          }
         }
         // Define the after-import action to create a file and update the field
         const afterImportAction = {

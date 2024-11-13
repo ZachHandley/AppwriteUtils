@@ -119,27 +119,38 @@ export class ImportController {
     updatedDb: Models.Database,
     targetDb: Models.Database
   ) {
-    await transferDatabaseLocalToLocal(
-      this.database,
-      updatedDb.$id,
-      targetDb.$id
-    );
-
-    // Find the corresponding database configs
-    const updatedDbConfig = this.config.databases.find(
-      (db) => db.$id === updatedDb.$id
-    );
-    const targetDbConfig = this.config.databases.find(
-      (db) => db.$id === targetDb.$id
-    );
-
-    // Transfer database-specific bucket if both databases have a bucket defined
-    if (updatedDbConfig?.bucket && targetDbConfig?.bucket) {
-      await transferStorageLocalToLocal(
-        this.storage,
-        updatedDbConfig.bucket.$id,
-        targetDbConfig.bucket.$id
+    if (this.database) {
+      await transferDatabaseLocalToLocal(
+        this.database,
+        updatedDb.$id,
+        targetDb.$id
       );
+    }
+
+    if (this.storage) {
+      // Find the corresponding database configs
+      const updatedDbConfig = this.config.databases.find(
+        (db) => db.$id === updatedDb.$id
+      );
+      const targetDbConfig = this.config.databases.find(
+        (db) => db.$id === targetDb.$id
+      );
+
+      const sourceBucketId = updatedDbConfig?.bucket?.$id || 
+        (this.config.documentBucketId && 
+          `${this.config.documentBucketId}_${updatedDb.$id.toLowerCase().trim().replace(" ", "")}`);
+      
+      const targetBucketId = targetDbConfig?.bucket?.$id || 
+        (this.config.documentBucketId && 
+          `${this.config.documentBucketId}_${targetDb.$id.toLowerCase().trim().replace(" ", "")}`);
+
+      if (sourceBucketId && targetBucketId) {
+        await transferStorageLocalToLocal(
+          this.storage,
+          sourceBucketId,
+          targetBucketId
+        );
+      }
     }
   }
 
@@ -298,11 +309,13 @@ export class ImportController {
   }
 
   async executePostImportActions(dbId: string, dataLoader: DataLoader, specificCollections?: string[]) {
-    const collectionsToProcess = specificCollections || Array.from(dataLoader.importMap.keys());
-
+    console.log("Executing post-import actions...");
+    const collectionsToProcess = specificCollections && specificCollections.length > 0 ? specificCollections : (this.config.collections ? this.config.collections.map(c => c.name) : Array.from(dataLoader.importMap.keys()));
+    console.log("Collections to process:", collectionsToProcess);
     // Iterate over each collection in the importMap
     for (const [collectionKey, collectionData] of dataLoader.importMap.entries()) {
-      if (collectionsToProcess.includes(collectionKey)) {
+      const allCollectionKeys = collectionsToProcess.map(c => dataLoader.getCollectionKey(c));
+      if (allCollectionKeys.includes(collectionKey)) {
         console.log(
           `Processing post-import actions for collection: ${collectionKey}`
         );
@@ -330,6 +343,8 @@ export class ImportController {
             }
           }
         }
+      } else {
+        console.log(`Skipping collection: ${collectionKey} because it's not valid for post-import actions`);
       }
     }
   }

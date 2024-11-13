@@ -145,6 +145,7 @@ export class UtilsController {
   async getDatabasesByIds(ids: string[]) {
     await this.init();
     if (!this.database) throw new Error("Database not initialized");
+    if (ids.length === 0) return [];
     const dbs = await this.database.list([
       Query.limit(500),
       Query.equal("$id", ids),
@@ -289,16 +290,11 @@ export class UtilsController {
   }
 
   async transferData(options: TransferOptions): Promise<void> {
-    if (!this.database) {
-      throw new Error(
-        "Database is not initialized, is the config file correct & created?"
-      );
-    }
-
+    // Remove database requirement check
     let sourceClient = this.database;
-    let targetClient: Databases;
-    let sourceDatabases: Models.Database[];
-    let targetDatabases: Models.Database[];
+    let targetClient: Databases | undefined;
+    let sourceDatabases: Models.Database[] = [];
+    let targetDatabases: Models.Database[] = [];
 
     if (options.isRemote) {
       if (
@@ -314,63 +310,76 @@ export class UtilsController {
         options.transferProject,
         options.transferKey
       );
-      targetClient = new Databases(remoteClient);
-
-      sourceDatabases = await fetchAllDatabases(sourceClient);
-      targetDatabases = await fetchAllDatabases(targetClient);
-    } else {
+      
+      if (this.database) {
+        targetClient = new Databases(remoteClient);
+        sourceDatabases = await fetchAllDatabases(sourceClient!);
+        targetDatabases = await fetchAllDatabases(targetClient);
+      }
+    } else if (this.database) {
       targetClient = sourceClient;
-      sourceDatabases = targetDatabases = await fetchAllDatabases(sourceClient);
+      sourceDatabases = targetDatabases = await fetchAllDatabases(sourceClient!);
     }
 
-    // Validate that the provided databases exist in the fetched lists
-    const fromDb = sourceDatabases.find((db) => db.$id === options.fromDb.$id);
-    const targetDb = targetDatabases.find(
-      (db) => db.$id === options.targetDb.$id
-    );
-
-    if (!fromDb || !targetDb) {
-      throw new Error("Source or target database not found");
-    }
-
-    if (options.isRemote) {
-      // Remote transfer
-      await transferDatabaseLocalToRemote(
-        sourceClient,
-        options.transferEndpoint!,
-        options.transferProject!,
-        options.transferKey!,
-        fromDb.$id,
-        targetDb.$id
+    // Only validate databases if they're provided in options
+    if (options.fromDb && options.targetDb) {
+      const fromDb = sourceDatabases.find((db) => db.$id === options.fromDb!.$id);
+      const targetDb = targetDatabases.find(
+        (db) => db.$id === options.targetDb!.$id
       );
 
-      if (this.storage && options.sourceBucket && options.targetBucket) {
-        await transferStorageLocalToRemote(
-          this.storage,
+      if (!fromDb || !targetDb) {
+        throw new Error("Source or target database not found");
+      }
+
+      if (options.isRemote && targetClient) {
+        await transferDatabaseLocalToRemote(
+          sourceClient!,
           options.transferEndpoint!,
           options.transferProject!,
           options.transferKey!,
-          options.sourceBucket.$id,
-          options.targetBucket.$id
+          fromDb.$id,
+          targetDb.$id
         );
-      }
-    } else {
-      // Local transfer
-      await transferDatabaseLocalToLocal(
-        sourceClient,
-        fromDb.$id,
-        targetDb.$id
-      );
-
-      if (this.storage && options.sourceBucket && options.targetBucket) {
-        await transferStorageLocalToLocal(
-          this.storage,
-          options.sourceBucket.$id,
-          options.targetBucket.$id
+      } else if (targetClient) {
+        await transferDatabaseLocalToLocal(
+          sourceClient!,
+          fromDb.$id,
+          targetDb.$id
         );
       }
     }
 
-    console.log("Data transfer completed");
+    // Handle storage transfer separately
+    if (this.storage && (options.sourceBucket || options.fromDb)) {
+      const sourceBucketId = options.sourceBucket?.$id || 
+        (options.fromDb && this.config?.documentBucketId && 
+          `${this.config.documentBucketId}_${options.fromDb.$id.toLowerCase().trim().replace(" ", "")}`);
+      
+      const targetBucketId = options.targetBucket?.$id || 
+        (options.targetDb && this.config?.documentBucketId && 
+          `${this.config.documentBucketId}_${options.targetDb.$id.toLowerCase().trim().replace(" ", "")}`);
+
+      if (sourceBucketId && targetBucketId) {
+        if (options.isRemote) {
+          await transferStorageLocalToRemote(
+            this.storage,
+            options.transferEndpoint!,
+            options.transferProject!,
+            options.transferKey!,
+            sourceBucketId,
+            targetBucketId
+          );
+        } else {
+          await transferStorageLocalToLocal(
+            this.storage,
+            sourceBucketId,
+            targetBucketId
+          );
+        }
+      }
+    }
+
+    console.log("Transfer completed");
   }
 }
