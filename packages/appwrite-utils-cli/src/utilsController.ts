@@ -179,10 +179,34 @@ export class UtilsController {
     );
   }
 
-  async wipeDatabase(database: Models.Database) {
+  async wipeDatabase(database: Models.Database, wipeBucket: boolean = false) {
     await this.init();
     if (!this.database) throw new Error("Database not initialized");
-    return await wipeDatabase(this.database, database.$id);
+    await wipeDatabase(this.database, database.$id);
+    if (wipeBucket) {
+      await this.wipeBucketFromDatabase(database);
+    }
+  }
+
+  async wipeBucketFromDatabase(database: Models.Database) {
+    // Check configured bucket in database config
+    const configuredBucket = this.config?.databases?.find(db => db.$id === database.$id)?.bucket;
+    if (configuredBucket?.$id) {
+      await this.wipeDocumentStorage(configuredBucket.$id);
+    }
+
+    // Also check for document bucket ID pattern
+    if (this.config?.documentBucketId) {
+      const documentBucketId = `${this.config.documentBucketId}_${database.$id.toLowerCase().trim().replace(/\s+/g, "")}`;
+      try {
+        await this.wipeDocumentStorage(documentBucketId);
+      } catch (error: any) {
+        // Ignore if bucket doesn't exist
+        if (error?.type !== 'storage_bucket_not_found') {
+          throw error;
+        }
+      }
+    }
   }
 
   async wipeCollection(database: Models.Database, collection: Models.Collection) {

@@ -125,6 +125,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.990: Fixed `transferFilesLocalToLocal` and `remote` if a document exists with that `$id`, also fixed wipe `"all"` option also wiping the associated buckets
 - 0.9.983: Fixed `afterImportActions` not resolving
 - 0.9.981: Try fixing `tryAwaitWithRetry` to catch `522` errors from Cloudflare, they were appearing for some users, also added a 1000ms delay to `tryAwaitWithRetry`
 - 0.9.98: Fixing some import errors reported by users

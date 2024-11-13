@@ -64,15 +64,20 @@ export const transferStorageLocalToLocal = async (
         file.name
       );
       console.log(`Creating file: ${file.name}`);
-      tryAwaitWithRetry(
-        async () =>
+      try {
+        await tryAwaitWithRetry(
+          async () =>
           await storage.createFile(
             toBucketId,
             file.$id,
             fileToCreate,
             file.$permissions
           )
-      );
+        );
+      } catch (error: any) {
+        // File already exists, so we can skip it
+        continue;
+      }
       numberOfFiles++;
     }
   } else {
@@ -167,15 +172,20 @@ export const transferStorageLocalToRemote = async (
       new Uint8Array(fileData),
       file.name
     );
-    await tryAwaitWithRetry(
-      async () =>
+    try {
+      await tryAwaitWithRetry(
+        async () =>
         await remoteStorage.createFile(
           toBucketId,
           file.$id,
           fileToCreate,
           file.$permissions
         )
-    );
+      );
+    } catch (error: any) {
+      // File already exists, so we can skip it
+      continue;
+    }
     numberOfFiles++;
   }
   console.log(

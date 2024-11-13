@@ -16,7 +16,7 @@ interface CliOptions {
   dbIds?: string;
   collectionIds?: string;
   bucketIds?: string;
-  wipe?: "all" | "docs" | "users";
+  wipe?: "all" | "storage" | "docs" | "users";
   wipeCollections?: boolean;
   generate?: boolean;
   import?: boolean;
@@ -181,7 +181,7 @@ async function main() {
       collections: parsedArgv.collectionIds?.split(","),
       doBackup: parsedArgv.backup,
       wipeDatabase: parsedArgv.wipe === "all" || parsedArgv.wipe === "docs",
-      wipeDocumentStorage: parsedArgv.wipe === "all",
+      wipeDocumentStorage: parsedArgv.wipe === "all" || parsedArgv.wipe === "storage",
       wipeUsers: parsedArgv.wipe === "all" || parsedArgv.wipe === "users",
       generateSchemas: parsedArgv.generate,
       importData: parsedArgv.import,
@@ -220,7 +220,7 @@ async function main() {
     ) {
       if (options.wipeDatabase && options.databases) {
         for (const db of options.databases) {
-          await controller.wipeDatabase(db);
+          await controller.wipeDatabase(db, options.wipeDocumentStorage);
         }
       }
       if (options.wipeDocumentStorage && parsedArgv.bucketIds) {

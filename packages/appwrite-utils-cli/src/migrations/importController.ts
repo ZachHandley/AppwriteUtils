@@ -136,13 +136,29 @@ export class ImportController {
         (db) => db.$id === targetDb.$id
       );
 
-      const sourceBucketId = updatedDbConfig?.bucket?.$id || 
-        (this.config.documentBucketId && 
-          `${this.config.documentBucketId}_${updatedDb.$id.toLowerCase().trim().replace(" ", "")}`);
-      
-      const targetBucketId = targetDbConfig?.bucket?.$id || 
-        (this.config.documentBucketId && 
-          `${this.config.documentBucketId}_${targetDb.$id.toLowerCase().trim().replace(" ", "")}`);
+      const allBuckets = await this.storage.listBuckets([Query.limit(1000)]);
+      const bucketsWithDbIdInThem = allBuckets.buckets.filter(bucket => bucket.name.toLowerCase().includes(updatedDb.$id.toLowerCase()));
+      const configuredUpdatedBucketId = `${this.config.documentBucketId}_${updatedDb.$id.toLowerCase().trim().replace(" ", "")}`;
+      const configuredTargetBucketId = `${this.config.documentBucketId}_${targetDb.$id.toLowerCase().trim().replace(" ", "")}`;
+
+      let sourceBucketId: string | undefined;
+      let targetBucketId: string | undefined;
+
+      if (bucketsWithDbIdInThem.find(bucket => bucket.$id === configuredUpdatedBucketId)) {
+        sourceBucketId = configuredUpdatedBucketId;
+      } else if (bucketsWithDbIdInThem.find(bucket => bucket.$id === configuredTargetBucketId)) {
+        targetBucketId = configuredTargetBucketId;
+      }
+
+      if (!sourceBucketId) {
+        sourceBucketId = updatedDbConfig?.bucket?.$id ||
+          bucketsWithDbIdInThem[0]?.$id;
+      }
+
+      if (!targetBucketId) {
+        targetBucketId = targetDbConfig?.bucket?.$id ||
+          bucketsWithDbIdInThem[0]?.$id;
+      }
 
       if (sourceBucketId && targetBucketId) {
         await transferStorageLocalToLocal(
