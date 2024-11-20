@@ -181,7 +181,8 @@ async function main() {
       collections: parsedArgv.collectionIds?.split(","),
       doBackup: parsedArgv.backup,
       wipeDatabase: parsedArgv.wipe === "all" || parsedArgv.wipe === "docs",
-      wipeDocumentStorage: parsedArgv.wipe === "all" || parsedArgv.wipe === "storage",
+      wipeDocumentStorage:
+        parsedArgv.wipe === "all" || parsedArgv.wipe === "storage",
       wipeUsers: parsedArgv.wipe === "all" || parsedArgv.wipe === "users",
       generateSchemas: parsedArgv.generate,
       importData: parsedArgv.import,
@@ -218,19 +219,29 @@ async function main() {
       options.wipeUsers ||
       options.wipeCollections
     ) {
-      if (options.wipeDatabase && options.databases) {
-        for (const db of options.databases) {
-          await controller.wipeDatabase(db, options.wipeDocumentStorage);
+      if (parsedArgv.wipe === "all") {
+        if (options.databases) {
+          for (const db of options.databases) {
+            await controller.wipeDatabase(db, true); // true to wipe associated buckets
+          }
         }
-      }
-      if (options.wipeDocumentStorage && parsedArgv.bucketIds) {
-        for (const bucketId of parsedArgv.bucketIds.split(",")) {
-          await controller.wipeDocumentStorage(bucketId);
+        await controller.wipeUsers();
+      } else if (parsedArgv.wipe === "docs") {
+        if (options.databases) {
+          for (const db of options.databases) {
+            await controller.wipeBucketFromDatabase(db);
+          }
         }
-      }
-      if (options.wipeUsers) {
+        if (parsedArgv.bucketIds) {
+          for (const bucketId of parsedArgv.bucketIds.split(",")) {
+            await controller.wipeDocumentStorage(bucketId);
+          }
+        }
+      } else if (parsedArgv.wipe === "users") {
         await controller.wipeUsers();
       }
+
+      // Handle specific collection wipes
       if (options.wipeCollections && options.databases) {
         for (const db of options.databases) {
           const dbCollections = await fetchAllCollections(

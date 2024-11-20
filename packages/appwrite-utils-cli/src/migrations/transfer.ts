@@ -109,15 +109,20 @@ export const transferStorageLocalToLocal = async (
         new Uint8Array(fileData),
         file.name
       );
-      await tryAwaitWithRetry(
-        async () =>
+      try {
+        await tryAwaitWithRetry(
+          async () =>
           await storage.createFile(
             toBucketId,
             file.$id,
             fileToCreate,
             file.$permissions
           )
-      );
+        );
+      } catch (error: any) {
+        // File already exists, so we can skip it
+        continue;
+      }
       numberOfFiles++;
     }
   }
