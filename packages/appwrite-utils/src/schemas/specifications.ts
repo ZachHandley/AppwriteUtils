@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const SPECIFICATIONS = {
   HALF_CPU_HALF_GIG_RAM: "s-0.5vcpu-512mb",
+  ONE_CPU_HALF_GIG_RAM: "s-1vcpu-512mb",
   ONE_CPU_ONE_GIG_RAM: "s-1vcpu-1gb",
   TWO_CPU_TWO_GIG_RAM: "s-2vcpu-2gb",
   TWO_CPU_FOUR_GIG_RAM: "s-2vcpu-4gb",

@@ -149,6 +149,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.993: Fixed `updateFunctionSpecifications` resetting functions to default with undefined values (oops)
 - 0.9.992: Added `updateFunctionSpecifications` which lists functions and specifications to allow you to update your functions max CPU and RAM usage per-function
 - 0.9.990: Fixed `transferFilesLocalToLocal` and `remote` if a document exists with that `$id`, also fixed wipe `"all"` option also wiping the associated buckets
 - 0.9.983: Fixed `afterImportActions` not resolving
