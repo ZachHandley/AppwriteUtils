@@ -109,3 +109,4 @@ export {
 } from "./schemas/authUser.js";
 export { tryAwaitWithRetry } from "./functions/helpers.js";
 export { getAppwriteClient } from "./functions/appwriteHelpers.js";
+export { SpecificationSchema, type Specification } from "./schemas/specifications.js";

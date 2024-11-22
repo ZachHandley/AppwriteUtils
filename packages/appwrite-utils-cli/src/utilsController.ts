@@ -1,5 +1,5 @@
 import { Client, Databases, Query, Storage, type Models } from "node-appwrite";
-import { type AppwriteConfig } from "appwrite-utils";
+import { type AppwriteConfig, type Specification } from "appwrite-utils";
 import { loadConfig, findAppwriteConfig } from "./utils/loadConfigs.js";
 import { UsersController } from "./migrations/users.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
@@ -42,6 +42,8 @@ import {
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
 import { fetchAllDatabases } from "./migrations/databases.js";
+import { updateFunctionSpecifications } from "./functions/methods.js";
+import chalk from "chalk";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -404,6 +406,14 @@ export class UtilsController {
       }
     }
 
-    console.log("Transfer completed");
+    console.log(chalk.green("Transfer completed"));
+  }
+
+  async updateFunctionSpecifications(functionId: string, specification: Specification) {
+    await this.init();
+    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
+    console.log(chalk.green(`Updating function specifications for ${functionId} to ${specification}`));
+    await updateFunctionSpecifications(this.appwriteServer, functionId, specification);
+    console.log(chalk.green(`Successfully updated function specifications for ${functionId} to ${specification}`));
   }
 }

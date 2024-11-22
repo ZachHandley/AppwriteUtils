@@ -23,6 +23,7 @@ import {
 import { ulid } from "ulidx";
 import chalk from "chalk";
 import { DateTime } from "luxon";
+import { listFunctions, listSpecifications } from "./functions/methods.js";
 
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
@@ -37,6 +38,7 @@ enum CHOICES {
   GENERATE_SCHEMAS = "Generate schemas",
   IMPORT_DATA = "Import data",
   RELOAD_CONFIG = "Reload configuration files",
+  UPDATE_FUNCTION_SPEC = "Update function specifications",
   EXIT = "Exit",
 }
 
@@ -112,6 +114,10 @@ export class InteractiveCLI {
           await this.initControllerIfNeeded();
           await this.reloadConfig();
           break;
+        case CHOICES.UPDATE_FUNCTION_SPEC:
+          await this.initControllerIfNeeded();
+          await this.updateFunctionSpec();
+          break;
         case CHOICES.EXIT:
           console.log(chalk.green("Goodbye!"));
           return;
@@ -176,7 +182,7 @@ export class InteractiveCLI {
         name: "selectedDatabases",
         message: chalk.blue(message),
         choices,
-        loop: false,
+        loop: true,
         pageSize: 10,
       },
     ]);
@@ -256,7 +262,7 @@ export class InteractiveCLI {
         name: "selectedCollections",
         message: chalk.blue(message),
         choices,
-        loop: false,
+        loop: true,
         pageSize: 10,
       },
     ]);
@@ -960,6 +966,47 @@ export class InteractiveCLI {
       console.log(chalk.green("Configuration files reloaded successfully."));
     } catch (error) {
       console.error(chalk.red("Error reloading configuration files:"), error);
+    }
+  }
+
+  private async updateFunctionSpec(): Promise<void> {
+    const functions = await listFunctions(this.controller!.appwriteServer!, [
+      Query.limit(1000),
+    ]);
+    
+    const functionsToUpdate = await inquirer.prompt([
+      {
+        type: 'checkbox',
+        name: 'functionId',
+        message: 'Select functions to update:',
+        choices: functions.functions.map(f => ({
+          name: `${f.name} (${f.$id})`,
+          value: f.$id
+        })),
+        loop: true,
+      }
+    ]);
+
+    const specifications = await listSpecifications(this.controller!.appwriteServer!);
+    const { specification } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'specification',
+        message: 'Select new specification:',
+        choices: specifications.specifications.map((s) => ({
+          name: `${s.slug}`,
+          value: s.slug
+        })),
+      }
+    ]);
+  
+    try { 
+      for (const functionId of functionsToUpdate.functionId) {
+        await this.controller!.updateFunctionSpecifications(functionId, specification);
+        console.log(chalk.green(`Successfully updated function specification to ${specification}`));
+      }
+    } catch (error) {
+      console.error(chalk.red('Error updating function specification:'), error);
     }
   }
 }

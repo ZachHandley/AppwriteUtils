@@ -10,6 +10,9 @@ import { getClient } from "./utils/getClientFromConfig.js";
 import { fetchAllDatabases } from "./migrations/databases.js";
 import { setupDirsFiles } from "./utils/setupFiles.js";
 import { fetchAllCollections } from "./collections/methods.js";
+import type { Specification } from "appwrite-utils";
+import chalk from "chalk";
+import { listSpecifications } from "./functions/methods.js";
 
 interface CliOptions {
   it?: boolean;
@@ -38,6 +41,9 @@ interface CliOptions {
   remoteProjectId?: string;
   remoteApiKey?: string;
   setup?: boolean;
+  updateFunctionSpec?: boolean;
+  functionId?: string;
+  specification?: string;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -157,6 +163,28 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "Setup directories and files",
   })
+  .option("updateFunctionSpec", {
+    type: "boolean",
+    description: "Update function specifications",
+  })
+  .option("functionId", {
+    type: "string",
+    description: "Function ID to update",
+  })
+  .option("specification", {
+    type: "string",
+    description: "New function specification (e.g., 's-1vcpu-1gb')",
+    choices: [
+      "s-0.5vcpu-512mb",
+      "s-1vcpu-1gb",
+      "s-2vcpu-2gb",
+      "s-2vcpu-4gb",
+      "s-4vcpu-4gb",
+      "s-4vcpu-8gb",
+      "s-8vcpu-4gb",
+      "s-8vcpu-8gb"
+    ],
+  })
   .parse() as ParsedArgv;
 
 async function main() {
@@ -189,6 +217,19 @@ async function main() {
       shouldWriteFile: parsedArgv.writeData,
       wipeCollections: parsedArgv.wipeCollections,
     };
+
+    if (parsedArgv.updateFunctionSpec) {
+      if (!parsedArgv.functionId || !parsedArgv.specification) {
+        throw new Error("Function ID and specification are required for updating function specs");
+      }
+      console.log(chalk.yellow(`Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}, checking if specification exists...`));
+      const specifications = await listSpecifications(controller.appwriteServer!);
+      if (!specifications.specifications.some((s: { slug: string }) => s.slug === parsedArgv.specification)) {
+        console.log(chalk.red(`Specification ${parsedArgv.specification} not found`));
+        return;
+      }
+      await controller.updateFunctionSpecifications(parsedArgv.functionId, parsedArgv.specification as Specification);
+    }
 
     // Add default databases if not specified
     if (!options.databases || options.databases.length === 0) {

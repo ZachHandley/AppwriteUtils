@@ -82,6 +82,11 @@ Available options:
 - `--remoteProjectId`: Set the remote Appwrite project ID for transfers
 - `--remoteApiKey`: Set the remote Appwrite API key for transfers
 - `--setup`: Create setup files
+- `--updateFunctionSpec`: Update function specifications
+- `--functionId`: Function ID to update
+- `--specification`: New function specification (one of: s-0.5vcpu-512mb, s-1vcpu-1gb, s-2vcpu-2gb, s-2vcpu-4gb, s-4vcpu-4gb, s-4vcpu-8gb, s-8vcpu-4gb, s-8vcpu-8gb)
+
+
 
 ## Examples
 
@@ -109,6 +114,25 @@ Transfer files between buckets:
 npx appwrite-utils-cli appwrite-migrate --transfer --fromBucketId sourceBucketId --toBucketId targetBucketId --remoteEndpoint https://appwrite.otherserver.com --remoteProjectId yourProjectId --remoteApiKey yourApiKey
 ```
 
+### Update Function Specifications
+
+Update the CPU and RAM specifications for a function:
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --updateFunctionSpec --functionId yourFunctionId --specification s-1vcpu-1gb
+```
+
+Available specifications:
+
+- s-0.5vcpu-512mb: 0.5 vCPU, 512MB RAM
+- s-1vcpu-1gb: 1 vCPU, 1GB RAM
+- s-2vcpu-2gb: 2 vCPU, 2GB RAM
+- s-2vcpu-4gb: 2 vCPU, 4GB RAM
+- s-4vcpu-4gb: 4 vCPU, 4GB RAM
+- s-4vcpu-8gb: 4 vCPU, 8GB RAM
+- s-8vcpu-4gb: 8 vCPU, 4GB RAM
+- s-8vcpu-8gb: 8 vCPU, 8GB RAM
+
 ## Additional Notes
 
 - If you run out of RAM during large data imports, you can increase Node's memory allocation:
@@ -125,6 +149,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.992: Added `updateFunctionSpecifications` which lists functions and specifications to allow you to update your functions max CPU and RAM usage per-function
 - 0.9.990: Fixed `transferFilesLocalToLocal` and `remote` if a document exists with that `$id`, also fixed wipe `"all"` option also wiping the associated buckets
 - 0.9.983: Fixed `afterImportActions` not resolving
 - 0.9.981: Try fixing `tryAwaitWithRetry` to catch `522` errors from Cloudflare, they were appearing for some users, also added a 1000ms delay to `tryAwaitWithRetry`
