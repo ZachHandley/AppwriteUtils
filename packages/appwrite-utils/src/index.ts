@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FunctionScopes } from "./schemas/functionScopes.js";
 
 export { areCollectionNamesSame } from "./functions/collections.js";
 export {
@@ -110,3 +111,9 @@ export {
 export { tryAwaitWithRetry } from "./functions/helpers.js";
 export { getAppwriteClient } from "./functions/appwriteHelpers.js";
 export { SpecificationSchema, type Specification } from "./schemas/specifications.js";
+export { AppwriteRequest } from "./schemas/appwriteRequest.js";
+export { AppwriteResponse } from "./schemas/appwriteResponse.js";
+export { AppwriteFunctionSchema, type AppwriteFunction } from "./schemas/functions.js";
+export { FunctionScopes, type FunctionScope } from "./schemas/functionScopes.js";
+export { FunctionSpecifications, type FunctionSpecification } from "./schemas/functionSpecifications.js";
+export { RuntimeSchema, type Runtime } from "./schemas/runtime.js";

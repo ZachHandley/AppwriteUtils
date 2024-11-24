@@ -1,6 +1,6 @@
 import { Client, Databases, Query, Storage, type Models } from "node-appwrite";
-import { type AppwriteConfig, type Specification } from "appwrite-utils";
-import { loadConfig, findAppwriteConfig } from "./utils/loadConfigs.js";
+import { type AppwriteConfig, type AppwriteFunction, type Specification } from "appwrite-utils";
+import { loadConfig, findAppwriteConfig, findFunctionsDir } from "./utils/loadConfigs.js";
 import { UsersController } from "./migrations/users.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
@@ -42,8 +42,10 @@ import {
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
 import { fetchAllDatabases } from "./migrations/databases.js";
-import { updateFunctionSpecifications } from "./functions/methods.js";
+import { listFunctions, updateFunctionSpecifications } from "./functions/methods.js";
 import chalk from "chalk";
+import { deployLocalFunction } from "./functions/deployments.js";
+import fs from "node:fs";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -179,6 +181,64 @@ export class UtilsController {
       database.$id,
       this.storage
     );
+  }
+
+  async listAllFunctions() {
+    await this.init();
+    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
+    const { functions } = await listFunctions(this.appwriteServer, [Query.limit(1000)]);
+    return functions;
+  }
+
+  async findFunctionDirectories() {
+    const functionsDir = findFunctionsDir(this.appwriteFolderPath);
+    if (!functionsDir) return new Map();
+  
+    const functionDirMap = new Map<string, string>();
+    const entries = fs.readdirSync(functionsDir, { withFileTypes: true });
+  
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const functionPath = path.join(functionsDir, entry.name);
+        // Match with config functions by name
+        if (this.config?.functions) {
+          const matchingFunc = this.config.functions.find(
+            f => f.name.toLowerCase() === entry.name.toLowerCase()
+          );
+          if (matchingFunc) {
+            functionDirMap.set(matchingFunc.name, functionPath);
+          }
+        }
+      }
+    }
+    return functionDirMap;
+  }
+
+  async deployFunction(functionName: string, functionPath?: string, functionConfig?: AppwriteFunction) {
+    await this.init();
+    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
+    
+    if (!functionConfig) {
+      functionConfig = this.config?.functions?.find(f => f.name === functionName);
+    }
+    if (!functionConfig) throw new Error(`Function ${functionName} not found in config`);
+    
+    await deployLocalFunction(this.appwriteServer, functionName, functionConfig, functionPath);
+  }
+  
+  async syncFunctions() {
+    await this.init();
+    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
+    
+    const localFunctions = this.config?.functions || [];
+    const remoteFunctions = await listFunctions(this.appwriteServer, [Query.limit(1000)]);
+    
+    for (const localFunction of localFunctions) {
+      console.log(chalk.blue(`Syncing function ${localFunction.name}...`));
+      await this.deployFunction(localFunction.name);
+    }
+    
+    console.log(chalk.green("✨ All functions synchronized successfully!"));
   }
 
   async wipeDatabase(database: Models.Database, wipeBucket: boolean = false) {

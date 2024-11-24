@@ -9,6 +9,7 @@ import fs from "fs";
 import path from "path";
 import { dump } from "js-yaml";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
+import { ulid } from "ulidx";
 
 interface RelationshipDetail {
   parentCollection: string;
@@ -32,7 +33,9 @@ export class SchemaGenerator {
 
   public updateTsSchemas(): void {
     const collections = this.config.collections;
+    const functions = this.config.functions || [];
     delete this.config.collections;
+    delete this.config.functions;
 
     const configPath = path.join(this.appwriteFolderPath, "appwriteConfig.ts");
     const configContent = `import { type AppwriteConfig } from "appwrite-utils";
@@ -48,8 +51,31 @@ export class SchemaGenerator {
     enableMockData: ${this.config.enableMockData},
     documentBucketId: "${this.config.documentBucketId}",
     usersCollectionName: "${this.config.usersCollectionName}",
-    databases: ${JSON.stringify(this.config.databases)},
-    buckets: ${JSON.stringify(this.config.buckets)}
+    databases: ${JSON.stringify(this.config.databases, null, 2)},
+    buckets: ${JSON.stringify(this.config.buckets, null, 2)},
+    functions: ${JSON.stringify(functions.map(func => ({
+      functionId: func.$id || ulid(),
+      name: func.name,
+      runtime: func.runtime,
+      path: func.dirPath || `functions/${func.name}`,
+      entrypoint: func.entrypoint || 'src/index.ts',
+      execute: func.execute,
+      events: func.events || [],
+      schedule: func.schedule || '',
+      timeout: func.timeout || 15,
+      enabled: func.enabled !== false,
+      logging: func.logging !== false,
+      commands: func.commands || 'npm install',
+      scopes: func.scopes || [],
+      installationId: func.installationId,
+      providerRepositoryId: func.providerRepositoryId,
+      providerBranch: func.providerBranch,
+      providerSilentMode: func.providerSilentMode,
+      providerRootDirectory: func.providerRootDirectory,
+      specification: func.specification,
+      ...(func.predeployCommands ? { predeployCommands: func.predeployCommands } : {}),
+      ...(func.deployDir ? { deployDir: func.deployDir } : {})
+    })), null, 2)}
   };
   
   export default appwriteConfig;

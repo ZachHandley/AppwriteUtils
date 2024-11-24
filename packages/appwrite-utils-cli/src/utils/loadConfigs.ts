@@ -3,6 +3,7 @@ import fs from "fs";
 import { type AppwriteConfig, type Collection } from "appwrite-utils";
 import { register } from "tsx/esm/api"; // Import the register function
 import { pathToFileURL } from "node:url";
+import chalk from "chalk";
 
 /**
  * Recursively searches for a file named 'appwriteConfig.ts' starting from the given directory.
@@ -72,4 +73,27 @@ export const loadConfig = async (
   } finally {
     unregister(); // Unregister tsx when done
   }
+};
+
+export const findFunctionsDir = (dir: string): string | null => {
+  if (dir === "node_modules") {
+    return null;
+  }
+  
+  const files = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of files) {
+    if (!entry.isDirectory() || entry.name === "node_modules") {
+      continue;
+    }
+
+    if (entry.name === "functions") {
+      return path.join(dir, entry.name);
+    }
+
+    const result = findFunctionsDir(path.join(dir, entry.name));
+    if (result) return result;
+  }
+
+  return null;
 };

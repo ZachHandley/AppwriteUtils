@@ -21,9 +21,12 @@ import {
   attributesSchema,
   indexesSchema,
   parseAttribute,
+  type Runtime,
+  type Specification,
 } from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 import { listBuckets } from "../storage/methods.js";
+import { listFunctions } from "../functions/methods.js";
 
 export class AppwriteToX {
   config: AppwriteConfig;
@@ -222,7 +225,47 @@ export class AppwriteToX {
       antivirus: bucket.antivirus,
     }));
 
-    this.updatedConfig = updatedConfig;
+    const remoteFunctions = await listFunctions(this.config.appwriteClient!, [
+      Query.limit(1000),
+    ]);
+    const functionDeployments = await Promise.all(
+      remoteFunctions.functions.map(async (func) => {
+        const deployments =
+          await this.config.appwriteClient!.functions.listDeployments(
+            func.$id,
+            [Query.orderDesc("$createdAt"), Query.limit(1)]
+          );
+        return {
+          function: func,
+          schemaStrings: deployments.deployments[0]?.schemaStrings || [],
+        };
+      })
+    );
+
+    this.updatedConfig.functions = functionDeployments.map(
+      ({ function: func, schemaStrings }) => ({
+        $id: func.$id,
+        name: func.name,
+        runtime: func.runtime as Runtime,
+        execute: func.execute,
+        events: func.events || [],
+        schedule: func.schedule || "",
+        timeout: func.timeout || 15,
+        enabled: func.enabled !== false,
+        logging: func.logging !== false,
+        entrypoint: func.entrypoint || "src/index.ts",
+        commands: func.commands || "npm install",
+        dirPath: `functions/${func.name}`,
+        specification: func.specification as Specification,
+        schemaStrings,
+      })
+    );
+
+    // Make sure to update the config with all changes
+    this.updatedConfig = {
+      ...updatedConfig,
+      functions: this.updatedConfig.functions,
+    };
   }
 
   async toSchemas(databases?: Models.Database[]) {

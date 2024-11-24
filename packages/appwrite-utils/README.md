@@ -72,6 +72,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 ### Changelog
 
+- 0.3.97: Added function deployment through Appwrite Utils CLI, specified through AppwriteConfig, as the current deployment for Appwrite ignored specifications and I wanted to add an `evalSync` to run commands pre-build. That means you can deploy a `TypeScript Node` project, and build it first, programmatically! These are just types, and only defined in `AppwriteUtils` to try to keep some semblence of usefulness in both. I also added `FunctionSpecifications` type defs, `FunctionScopes`, `AppwriteRequest` (A type definition for the request incoming to the Appwrite Function), `AppwriteResponse` (A type definition for the response of course)
 - 0.3.96: Added `SpecificationSchema, type Specification` type defs to support updating function specifications
 - 0.3.95: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
 - 0.3.94: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT

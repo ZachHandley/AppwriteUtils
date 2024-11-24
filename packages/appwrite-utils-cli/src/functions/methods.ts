@@ -4,14 +4,12 @@ import {
   Functions,
   Query,
   Runtime,
-  type Models,
 } from "node-appwrite";
-import { InputFile } from "node-appwrite/file";
-import { create as createTarball } from "tar";
 import { join } from "node:path";
 import fs from "node:fs";
 import { type Specification } from "appwrite-utils";
 import chalk from "chalk";
+import { extract as extractTar } from "tar";
 
 export const listFunctions = async (
   client: Client,
@@ -27,6 +25,58 @@ export const getFunction = async (client: Client, functionId: string) => {
   const functions = new Functions(client);
   const functionResponse = await functions.get(functionId);
   return functionResponse;
+};
+
+export const downloadLatestFunctionDeployment = async (
+  client: Client,
+  functionId: string,
+  basePath: string = process.cwd()
+) => {
+  const functions = new Functions(client);
+  const functionInfo = await getFunction(client, functionId);
+  const functionDeployments = await functions.listDeployments(functionId, [
+    Query.orderDesc("$createdAt"),
+  ]);
+
+  if (functionDeployments.deployments.length === 0) {
+    throw new Error("No deployments found for function");
+  }
+
+  const latestDeployment = functionDeployments.deployments[0];
+  const deploymentData = await functions.getDeploymentDownload(
+    functionId,
+    latestDeployment.$id
+  );
+
+  // Create function directory using provided basePath
+  const functionDir = join(
+    basePath,
+    functionInfo.name.toLowerCase().replace(/\s+/g, "-")
+  );
+  await fs.promises.mkdir(functionDir, { recursive: true });
+
+  // Create temporary file for tar extraction
+  const tarPath = join(functionDir, "temp.tar.gz");
+  const uint8Array = new Uint8Array(deploymentData);
+  await fs.promises.writeFile(tarPath, uint8Array);
+
+  try {
+    // Extract tar file
+    extractTar({
+      C: functionDir,
+      file: tarPath,
+      sync: true,
+    });
+
+    return {
+      path: functionDir,
+      function: functionInfo,
+      deployment: latestDeployment,
+    };
+  } finally {
+    // Clean up tar file
+    await fs.promises.unlink(tarPath).catch(() => {});
+  }
 };
 
 export const deleteFunction = async (client: Client, functionId: string) => {
@@ -191,45 +241,55 @@ export const updateFunction = async (
   return functionResponse;
 };
 
-export const deployFunction = async (
-  client: Client,
-  functionId: string,
-  codePath: string,
-  activate: boolean = true,
-  entrypoint: string = "index.js",
-  commands: string = "npm install"
+export const createFunctionTemplate = async (
+  templateType: "typescript-node" | "poetry" | "count-docs-in-collection",
+  functionName: string,
+  basePath: string = "./functions"
 ) => {
-  const functions = new Functions(client);
+  const functionPath = join(basePath, functionName);
+  const templatesPath = join(__dirname, "templates", templateType);
 
-  // Create temporary tar.gz file
-  const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
-  await createTarball(
-    {
-      gzip: true,
-      file: tarPath,
-      cwd: codePath,
-    },
-    ["."] // Include all files from codePath
-  );
+  // Create function directory
+  await fs.promises.mkdir(functionPath, { recursive: true });
 
-  // Read the tar.gz file and create a File object
-  const fileBuffer = await fs.promises.readFile(tarPath);
-  const fileObject = InputFile.fromBuffer(
-    new Uint8Array(fileBuffer),
-    `function-${functionId}.tar.gz`
-  );
+  // Copy template files recursively
+  const copyTemplateFiles = async (sourcePath: string, targetPath: string) => {
+    const entries = await fs.promises.readdir(sourcePath, {
+      withFileTypes: true,
+    });
 
-  // Create deployment with the File object
-  const functionResponse = await functions.createDeployment(
-    functionId,
-    fileObject,
-    activate,
-    entrypoint,
-    commands
-  );
+    for (const entry of entries) {
+      const srcPath = join(sourcePath, entry.name);
+      const destPath = join(targetPath, entry.name);
 
-  // Clean up the temporary tar file
-  await fs.promises.unlink(tarPath);
+      if (entry.isDirectory()) {
+        await fs.promises.mkdir(destPath, { recursive: true });
+        await copyTemplateFiles(srcPath, destPath);
+      } else {
+        let content = await fs.promises.readFile(srcPath, "utf-8");
 
-  return functionResponse;
+        // Replace template variables
+        content = content
+          .replace(/\{\{functionName\}\}/g, functionName)
+          .replace(/\{\{databaseId\}\}/g, "{{databaseId}}")
+          .replace(/\{\{collectionId\}\}/g, "{{collectionId}}");
+
+        await fs.promises.writeFile(destPath, content);
+      }
+    }
+  };
+
+  try {
+    await copyTemplateFiles(templatesPath, functionPath);
+    console.log(
+      chalk.green(
+        `✨ Created ${templateType} function template at ${functionPath}`
+      )
+    );
+  } catch (error) {
+    console.error(chalk.red(`Failed to create function template: ${error}`));
+    throw error;
+  }
+
+  return functionPath;
 };

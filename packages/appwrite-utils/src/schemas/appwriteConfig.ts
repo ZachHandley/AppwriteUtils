@@ -5,6 +5,7 @@ import {
   type Collection,
 } from "./collection.js";
 import { BucketSchema } from "./bucket.js";
+import { AppwriteFunctionSchema } from "./functions.js";
 
 export const AppwriteConfigSchema = z.object({
   appwriteEndpoint: z.string().default("https://cloud.appwrite.io/v1"),
@@ -65,6 +66,10 @@ export const AppwriteConfigSchema = z.object({
     .describe(
       "Collections to create, $id is the id of the collection, it'll always check by collection name and $id for existing before creating another"
     ),
+  functions: z
+    .array(AppwriteFunctionSchema)
+    .optional()
+    .describe("Functions to create"),
 });
 
 export type AppwriteConfig = z.infer<typeof AppwriteConfigSchema>;

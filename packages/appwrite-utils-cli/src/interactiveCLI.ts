@@ -11,26 +11,42 @@ import {
   type Models,
   Compression,
   Query,
+  Functions,
 } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
 import {
+  AppwriteFunctionSchema,
   parseAttribute,
   PermissionToAppwritePermission,
+  RuntimeSchema,
+  permissionSchema,
   type AppwriteConfig,
+  type AppwriteFunction,
   type ConfigDatabases,
 } from "appwrite-utils";
 import { ulid } from "ulidx";
 import chalk from "chalk";
 import { DateTime } from "luxon";
-import { listFunctions, listSpecifications } from "./functions/methods.js";
+import {
+  createFunctionTemplate,
+  deleteFunction,
+  downloadLatestFunctionDeployment,
+  listFunctions,
+  listSpecifications,
+} from "./functions/methods.js";
+import { deployLocalFunction } from "./functions/deployments.js";
+import { join } from "node:path";
 
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
+  CREATE_FUNCTION = "Create a new function, from scratch or using a template",
+  DEPLOY_FUNCTION = "Deploy function",
+  DELETE_FUNCTION = "Delete function",
   SETUP_DIRS_FILES = "Setup directories and files",
   SETUP_DIRS_FILES_WITH_EXAMPLE_DATA = "Setup directories and files with example data",
   SYNC_DB = "Push local config to Appwrite",
-  SYNCHRONIZE_CONFIGURATIONS = "Synchronize configurations",
+  SYNCHRONIZE_CONFIGURATIONS = "Synchronize configurations - Pull from Appwrite and write to local config",
   TRANSFER_DATA = "Transfer data",
   BACKUP_DATABASE = "Backup database",
   WIPE_DATABASE = "Wipe database",
@@ -71,6 +87,18 @@ export class InteractiveCLI {
         case CHOICES.CREATE_COLLECTION_CONFIG:
           await this.initControllerIfNeeded();
           await this.createCollectionConfig();
+          break;
+        case CHOICES.CREATE_FUNCTION:
+          await this.initControllerIfNeeded();
+          await this.createFunction();
+          break;
+        case CHOICES.DEPLOY_FUNCTION:
+          await this.initControllerIfNeeded();
+          await this.deployFunction();
+          break;
+        case CHOICES.DELETE_FUNCTION:
+          await this.initControllerIfNeeded();
+          await this.deleteFunction();
           break;
         case CHOICES.SETUP_DIRS_FILES:
           await setupDirsFiles(false, this.currentDir);
@@ -270,6 +298,234 @@ export class InteractiveCLI {
     return selectedCollections;
   }
 
+  private async createFunction(): Promise<void> {
+    const { name } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "name",
+        message: "Function name:",
+        validate: (input) => input.length > 0,
+      },
+    ]);
+
+    const { template } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "template",
+        message: "Select a template:",
+        choices: [
+          "typescript-node",
+          "poetry",
+          "count-docs-in-collection",
+          "none",
+        ],
+      },
+    ]);
+
+    const { runtime } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "runtime",
+        message: "Select runtime:",
+        choices: Object.values(RuntimeSchema.Values),
+      },
+    ]);
+
+    const specifications = await listSpecifications(
+      this.controller!.appwriteServer!
+    );
+    const { specification } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "specification",
+        message: "Select specification:",
+        choices: [
+          { name: "None", value: undefined },
+          ...specifications.specifications.map((s) => ({
+            name: s.slug,
+            value: s.slug,
+          })),
+        ],
+      },
+    ]);
+
+    const functionConfig: AppwriteFunction = {
+      $id: ulid(),
+      name,
+      runtime,
+      events: [],
+      execute: ["any"],
+      enabled: true,
+      logging: true,
+      entrypoint: template === "none" ? "src/index.ts" : undefined,
+      specification,
+      predeployCommands: template.includes("typescript")
+        ? ["npm install", "npm run build"]
+        : undefined,
+      deployDir: template.includes("typescript") ? "dist" : undefined,
+    };
+
+    if (template !== "none") {
+      await createFunctionTemplate(
+        template as "typescript-node" | "poetry" | "count-docs-in-collection",
+        name,
+        "./functions"
+      );
+    }
+
+    // Add to config
+    if (!this.controller!.config!.functions) {
+      this.controller!.config!.functions = [];
+    }
+    this.controller!.config!.functions.push(functionConfig);
+
+    console.log(chalk.green("✨ Function created successfully!"));
+  }
+
+  private async deployFunction(): Promise<void> {
+    const functions = await this.selectFunctions(
+      "Select function to deploy:",
+      false,
+      true
+    );
+
+    if (!functions.length) {
+      console.log(chalk.red("No function selected"));
+      return;
+    }
+
+    const functionConfig = functions[0];
+    await deployLocalFunction(
+      this.controller!.appwriteServer!,
+      functionConfig.name,
+      functionConfig
+    );
+  }
+
+  private async deleteFunction(): Promise<void> {
+    const functions = await this.selectFunctions(
+      "Select functions to delete:",
+      true,
+      false
+    );
+
+    if (!functions.length) {
+      console.log(chalk.red("No functions selected"));
+      return;
+    }
+
+    for (const func of functions) {
+      try {
+        await deleteFunction(this.controller!.appwriteServer!, func.$id);
+        console.log(
+          chalk.green(`✨ Function ${func.name} deleted successfully!`)
+        );
+      } catch (error) {
+        console.error(
+          chalk.red(`Failed to delete function ${func.name}:`),
+          error
+        );
+      }
+    }
+  }
+
+  private async selectFunctions(
+    message: string,
+    multiSelect = true,
+    preferLocal = false
+  ): Promise<AppwriteFunction[]> {
+    await this.initControllerIfNeeded();
+
+    const configFunctions = this.getLocalFunctions();
+    let remoteFunctions: Models.Function[] = [];
+
+    try {
+      const functions = await this.controller!.listAllFunctions();
+      remoteFunctions = functions;
+    } catch (error) {
+      console.log(
+        chalk.red(
+          `Error fetching remote functions, using only local function options: ${error}`
+        )
+      );
+    }
+
+    const allFunctions = preferLocal
+      ? remoteFunctions.reduce(
+          (acc, remoteFunction) => {
+            if (!acc.some((f) => f.name === remoteFunction.name)) {
+              acc.push(AppwriteFunctionSchema.parse(remoteFunction));
+            }
+            return acc;
+          },
+          [...configFunctions]
+        )
+      : [
+          ...remoteFunctions,
+          ...configFunctions.filter(
+            (f) => !remoteFunctions.some((rf) => rf.name === f.name)
+          ),
+        ];
+
+    const hasLocalAndRemote =
+      allFunctions.some((func) =>
+        configFunctions.some((f) => f.name === func.name)
+      ) &&
+      allFunctions.some(
+        (func) => !configFunctions.some((f) => f.name === func.name)
+      );
+
+    const choices = allFunctions
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((func) => ({
+        name:
+          func.name +
+          (hasLocalAndRemote
+            ? configFunctions.some((f) => f.name === func.name)
+              ? " (Local)"
+              : " (Remote)"
+            : ""),
+        value: func,
+      }));
+
+    const { selectedFunctions } = await inquirer.prompt([
+      {
+        type: multiSelect ? "checkbox" : "list",
+        name: "selectedFunctions",
+        message: chalk.blue(message),
+        choices,
+        loop: true,
+        pageSize: 10,
+      },
+    ]);
+
+    return selectedFunctions;
+  }
+
+  private getLocalFunctions(): AppwriteFunction[] {
+    const configFunctions = this.controller!.config?.functions || [];
+    return configFunctions.map((f) => ({
+      $id: f.$id || ulid(),
+      $createdAt: DateTime.now().toISO(),
+      $updatedAt: DateTime.now().toISO(),
+      name: f.name,
+      runtime: f.runtime,
+      execute: f.execute || ["any"],
+      events: f.events || [],
+      schedule: f.schedule || "",
+      timeout: f.timeout || 15,
+      enabled: f.enabled !== false,
+      logging: f.logging !== false,
+      entrypoint: f.entrypoint || "src/index.ts",
+      commands: f.commands || "npm install",
+      path: f.dirPath || `functions/${f.name}`,
+      ...(f.specification ? { specification: f.specification } : {}),
+      ...(f.predeployCommands
+        ? { predeployCommands: f.predeployCommands }
+        : {}),
+      ...(f.deployDir ? { deployDir: f.deployDir } : {}),
+    }));
+  }
   private async selectBuckets(
     buckets: Models.Bucket[],
     message: string,
@@ -407,15 +663,16 @@ export class InteractiveCLI {
         ]);
 
         if (action === "assign") {
-          const [selectedBucket] = await this.selectBuckets(
+          const selectedBuckets = await this.selectBuckets(
             allBuckets.buckets.filter(
               (b) => !globalBuckets.some((gb) => gb.$id === b.$id)
             ),
             `Select a bucket for the database "${database.name}":`,
-            false
+            false // multiSelect = false
           );
 
-          if (selectedBucket) {
+          if (selectedBuckets.length > 0) {
+            const selectedBucket = selectedBuckets[0];
             database.bucket = {
               $id: selectedBucket.$id,
               name: selectedBucket.name,
@@ -425,6 +682,9 @@ export class InteractiveCLI {
               compression: selectedBucket.compression as Compression,
               encryption: selectedBucket.encryption,
               antivirus: selectedBucket.antivirus,
+              permissions: selectedBucket.$permissions.map((p) =>
+                permissionSchema.parse(p)
+              ),
             };
           }
         } else if (action === "create") {
@@ -545,6 +805,7 @@ export class InteractiveCLI {
 
   private async syncDb(): Promise<void> {
     console.log(chalk.yellow("Syncing database..."));
+    const functionsClient = new Functions(this.controller!.appwriteServer!);
     const databases = await this.selectDatabases(
       await fetchAllDatabases(this.controller!.database!),
       chalk.blue("Select databases to synchronize:"),
@@ -557,35 +818,151 @@ export class InteractiveCLI {
       true,
       true // prefer local
     );
-    await this.controller!.syncDb(databases, collections);
+    const answer = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "syncFunctions",
+        message: "Do you want to synchronize functions?",
+        default: false,
+      },
+    ]);
+    if (answer.syncFunctions) {
+      const functions = await this.selectFunctions(
+        chalk.blue("Select functions to synchronize:"),
+        true,
+        true // prefer local
+      );
+      await this.controller!.syncDb(databases, collections);
+      for (const func of functions) {
+        await deployLocalFunction(
+          this.controller!.appwriteServer!,
+          func.dirPath || `functions/${func.name}`,
+          func
+        );
+      }
+    }
     console.log(chalk.green("Database sync completed."));
   }
 
   private async synchronizeConfigurations(): Promise<void> {
-    if (!this.controller!.database) {
-      throw new Error(
-        "Database is not initialized. Is the config file correct and created?"
+    console.log(chalk.blue("Synchronizing configurations..."));
+    await this.controller!.init();
+    // Sync databases and buckets first
+    const { syncDatabases } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "syncDatabases",
+        message: "Do you want to synchronize databases and their buckets?",
+        default: true,
+      },
+    ]);
+
+    if (syncDatabases) {
+      const remoteDatabases = await fetchAllDatabases(
+        this.controller!.database!
       );
+      const localDatabases = this.controller!.config?.databases || [];
+
+      // Update config with remote databases that don't exist locally
+      const updatedConfig = await this.configureBuckets({
+        ...this.controller!.config!,
+        databases: [
+          ...localDatabases,
+          ...remoteDatabases.filter(
+            (rd) => !localDatabases.some((ld) => ld.name === rd.name)
+          ),
+        ],
+      });
+
+      this.controller!.config = updatedConfig;
     }
-    const databases = await fetchAllDatabases(this.controller!.database);
 
-    const selectedDatabases = await this.selectDatabases(
-      databases,
-      "Select databases to synchronize:"
-    );
+    // Then sync functions
+    const { syncFunctions } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "syncFunctions",
+        message: "Do you want to synchronize functions?",
+        default: true,
+      },
+    ]);
 
-    console.log(chalk.yellow("Configuring storage buckets..."));
-    const updatedConfig = await this.configureBuckets(
-      this.controller!.config!,
-      selectedDatabases
-    );
+    if (syncFunctions) {
+      const remoteFunctions = await this.controller!.listAllFunctions();
+      const localFunctions = this.controller!.config?.functions || [];
 
-    console.log(chalk.yellow("Synchronizing configurations..."));
-    await this.controller!.synchronizeConfigurations(
-      selectedDatabases,
-      updatedConfig
-    );
-    console.log(chalk.green("Configuration synchronization completed."));
+      const allFunctions = [
+        ...remoteFunctions,
+        ...localFunctions.filter(
+          (f) => !remoteFunctions.some((rf) => rf.$id === f.$id)
+        ),
+      ];
+
+      for (const func of allFunctions) {
+        const hasLocal = localFunctions.some((lf) => lf.$id === func.$id);
+        const hasRemote = remoteFunctions.some((rf) => rf.$id === func.$id);
+
+        if (hasLocal && hasRemote) {
+          const { preference } = await inquirer.prompt([
+            {
+              type: "list",
+              name: "preference",
+              message: `Function "${func.name}" exists both locally and remotely. What would you like to do?`,
+              choices: [
+                {
+                  name: "Keep local version (deploy to remote)",
+                  value: "local",
+                },
+                { name: "Use remote version (download)", value: "remote" },
+                { name: "Skip this function", value: "skip" },
+              ],
+            },
+          ]);
+
+          if (preference === "local") {
+            await this.controller!.deployFunction(func.name);
+          } else if (preference === "remote") {
+            await downloadLatestFunctionDeployment(
+              this.controller!.appwriteServer!,
+              func.$id,
+              join(this.controller!.getAppwriteFolderPath(), "functions")
+            );
+          }
+        } else if (hasLocal) {
+          const { deploy } = await inquirer.prompt([
+            {
+              type: "confirm",
+              name: "deploy",
+              message: `Function "${func.name}" exists only locally. Deploy to remote?`,
+              default: true,
+            },
+          ]);
+
+          if (deploy) {
+            await this.controller!.deployFunction(func.name);
+          }
+        } else if (hasRemote) {
+          const { download } = await inquirer.prompt([
+            {
+              type: "confirm",
+              name: "download",
+              message: `Function "${func.name}" exists only remotely. Download locally?`,
+              default: true,
+            },
+          ]);
+
+          if (download) {
+            await downloadLatestFunctionDeployment(
+              this.controller!.appwriteServer!,
+              func.$id,
+              join(this.controller!.getAppwriteFolderPath(), "functions")
+            );
+          }
+        }
+      }
+    }
+
+    console.log(chalk.green("✨ Configurations synchronized successfully!"));
   }
 
   private async backupDatabase(): Promise<void> {
@@ -970,43 +1347,65 @@ export class InteractiveCLI {
   }
 
   private async updateFunctionSpec(): Promise<void> {
-    const functions = await listFunctions(this.controller!.appwriteServer!, [
-      Query.limit(1000),
-    ]);
-    
+    const remoteFunctions = await listFunctions(
+      this.controller!.appwriteServer!,
+      [Query.limit(1000)]
+    );
+    const localFunctions = this.getLocalFunctions();
+
+    const allFunctions = [
+      ...remoteFunctions.functions,
+      ...localFunctions.filter(
+        (f) => !remoteFunctions.functions.some((rf) => rf.name === f.name)
+      ),
+    ];
+
     const functionsToUpdate = await inquirer.prompt([
       {
-        type: 'checkbox',
-        name: 'functionId',
-        message: 'Select functions to update:',
-        choices: functions.functions.map(f => ({
-          name: `${f.name} (${f.$id})`,
-          value: f.$id
+        type: "checkbox",
+        name: "functionId",
+        message: "Select functions to update:",
+        choices: allFunctions.map((f) => ({
+          name: `${f.name} (${f.$id})${
+            localFunctions.some((lf) => lf.name === f.name)
+              ? " (Local)"
+              : " (Remote)"
+          }`,
+          value: f.$id,
         })),
         loop: true,
-      }
+      },
     ]);
 
-    const specifications = await listSpecifications(this.controller!.appwriteServer!);
+    const specifications = await listSpecifications(
+      this.controller!.appwriteServer!
+    );
     const { specification } = await inquirer.prompt([
       {
-        type: 'list',
-        name: 'specification',
-        message: 'Select new specification:',
+        type: "list",
+        name: "specification",
+        message: "Select new specification:",
         choices: specifications.specifications.map((s) => ({
           name: `${s.slug}`,
-          value: s.slug
+          value: s.slug,
         })),
-      }
+      },
     ]);
-  
-    try { 
+
+    try {
       for (const functionId of functionsToUpdate.functionId) {
-        await this.controller!.updateFunctionSpecifications(functionId, specification);
-        console.log(chalk.green(`Successfully updated function specification to ${specification}`));
+        await this.controller!.updateFunctionSpecifications(
+          functionId,
+          specification
+        );
+        console.log(
+          chalk.green(
+            `Successfully updated function specification to ${specification}`
+          )
+        );
       }
     } catch (error) {
-      console.error(chalk.red('Error updating function specification:'), error);
+      console.error(chalk.red("Error updating function specification:"), error);
     }
   }
 }
