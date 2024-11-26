@@ -51,31 +51,37 @@ export class SchemaGenerator {
     enableMockData: ${this.config.enableMockData},
     documentBucketId: "${this.config.documentBucketId}",
     usersCollectionName: "${this.config.usersCollectionName}",
-    databases: ${JSON.stringify(this.config.databases, null, 2)},
-    buckets: ${JSON.stringify(this.config.buckets, null, 2)},
-    functions: ${JSON.stringify(functions.map(func => ({
-      functionId: func.$id || ulid(),
-      name: func.name,
-      runtime: func.runtime,
-      path: func.dirPath || `functions/${func.name}`,
-      entrypoint: func.entrypoint || 'src/index.ts',
-      execute: func.execute,
-      events: func.events || [],
-      schedule: func.schedule || '',
-      timeout: func.timeout || 15,
-      enabled: func.enabled !== false,
-      logging: func.logging !== false,
-      commands: func.commands || 'npm install',
-      scopes: func.scopes || [],
-      installationId: func.installationId,
-      providerRepositoryId: func.providerRepositoryId,
-      providerBranch: func.providerBranch,
-      providerSilentMode: func.providerSilentMode,
-      providerRootDirectory: func.providerRootDirectory,
-      specification: func.specification,
-      ...(func.predeployCommands ? { predeployCommands: func.predeployCommands } : {}),
-      ...(func.deployDir ? { deployDir: func.deployDir } : {})
-    })), null, 2)}
+    databases: ${JSON.stringify(this.config.databases, null, 4)},
+    buckets: ${JSON.stringify(this.config.buckets, null, 4)},
+    functions: ${JSON.stringify(
+      functions.map((func) => ({
+        functionId: func.$id || ulid(),
+        name: func.name,
+        runtime: func.runtime,
+        path: func.dirPath || `functions/${func.name}`,
+        entrypoint: func.entrypoint || "src/index.ts",
+        execute: func.execute,
+        events: func.events || [],
+        schedule: func.schedule || "",
+        timeout: func.timeout || 15,
+        enabled: func.enabled !== false,
+        logging: func.logging !== false,
+        commands: func.commands || "npm install",
+        scopes: func.scopes || [],
+        installationId: func.installationId,
+        providerRepositoryId: func.providerRepositoryId,
+        providerBranch: func.providerBranch,
+        providerSilentMode: func.providerSilentMode,
+        providerRootDirectory: func.providerRootDirectory,
+        specification: func.specification,
+        ...(func.predeployCommands
+          ? { predeployCommands: func.predeployCommands }
+          : {}),
+        ...(func.deployDir ? { deployDir: func.deployDir } : {}),
+      })),
+      null,
+      4
+    )}
   };
   
   export default appwriteConfig;
@@ -164,6 +170,55 @@ export class SchemaGenerator {
       });
       console.log(`Collection schema written to ${collectionFilePath}`);
     });
+  }
+
+  public updateConfig(config: AppwriteConfig): void {
+    const configPath = path.join(this.appwriteFolderPath, "appwriteConfig.ts");
+    const configContent = `import { type AppwriteConfig } from "appwrite-utils";
+
+const appwriteConfig: AppwriteConfig = {
+  appwriteEndpoint: "${config.appwriteEndpoint}",
+  appwriteProject: "${config.appwriteProject}",
+  appwriteKey: "${config.appwriteKey}",
+  enableBackups: ${config.enableBackups},
+  backupInterval: ${config.backupInterval},
+  backupRetention: ${config.backupRetention},
+  enableBackupCleanup: ${config.enableBackupCleanup},
+  enableMockData: ${config.enableMockData},
+  documentBucketId: "${config.documentBucketId}",
+  usersCollectionName: "${config.usersCollectionName}",
+  databases: ${JSON.stringify(config.databases, null, 4)},
+  buckets: ${JSON.stringify(config.buckets, null, 4)},
+  functions: ${JSON.stringify(
+    config.functions?.map((func) => ({
+      $id: func.$id || ulid(),
+      name: func.name,
+      runtime: func.runtime,
+      dirPath: func.dirPath || `functions/${func.name}`,
+      entrypoint: func.entrypoint || "src/index.ts",
+      execute: func.execute || [],
+      events: func.events || [],
+      schedule: func.schedule || "",
+      timeout: func.timeout || 15,
+      enabled: func.enabled !== false,
+      logging: func.logging !== false,
+      commands: func.commands || "npm install",
+      scopes: func.scopes || [],
+      installationId: func.installationId,
+      providerRepositoryId: func.providerRepositoryId,
+      providerBranch: func.providerBranch,
+      providerSilentMode: func.providerSilentMode,
+      providerRootDirectory: func.providerRootDirectory,
+      specification: func.specification,
+    })),
+    null,
+    4
+  )}
+};
+
+export default appwriteConfig;
+`;
+    fs.writeFileSync(configPath, configContent, { encoding: "utf-8" });
   }
 
   private extractRelationships(): void {

@@ -86,8 +86,6 @@ Available options:
 - `--functionId`: Function ID to update
 - `--specification`: New function specification (one of: s-0.5vcpu-512mb, s-1vcpu-1gb, s-2vcpu-2gb, s-2vcpu-4gb, s-4vcpu-4gb, s-4vcpu-8gb, s-8vcpu-4gb, s-8vcpu-8gb)
 
-
-
 ## Examples
 
 ### Transfer Databases
@@ -149,6 +147,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.9.998: Fixed transfer finally, added `--targetDbId` and `--sourceDbId` as aliases
+- 0.9.994: Added function deployment management, in BETA, and fixed document transfer between databases
 - 0.9.993: Fixed `updateFunctionSpecifications` resetting functions to default with undefined values (oops)
 - 0.9.992: Added `updateFunctionSpecifications` which lists functions and specifications to allow you to update your functions max CPU and RAM usage per-function
 - 0.9.990: Fixed `transferFilesLocalToLocal` and `remote` if a document exists with that `$id`, also fixed wipe `"all"` option also wiping the associated buckets

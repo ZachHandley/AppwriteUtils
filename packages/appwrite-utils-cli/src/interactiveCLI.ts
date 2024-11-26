@@ -24,6 +24,9 @@ import {
   type AppwriteConfig,
   type AppwriteFunction,
   type ConfigDatabases,
+  type Runtime,
+  type Specification,
+  type FunctionScope,
 } from "appwrite-utils";
 import { ulid } from "ulidx";
 import chalk from "chalk";
@@ -37,6 +40,8 @@ import {
 } from "./functions/methods.js";
 import { deployLocalFunction } from "./functions/deployments.js";
 import { join } from "node:path";
+import fs from "node:fs";
+import { SchemaGenerator } from "./migrations/schemaStrings.js";
 
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
@@ -382,21 +387,184 @@ export class InteractiveCLI {
     console.log(chalk.green("✨ Function created successfully!"));
   }
 
+  private async findFunctionInSubdirectories(
+    basePath: string,
+    functionName: string
+  ): Promise<string | null> {
+    const queue = [basePath];
+
+    while (queue.length > 0) {
+      const currentPath = queue.shift()!;
+
+      try {
+        const entries = await fs.promises.readdir(currentPath, {
+          withFileTypes: true,
+        });
+
+        // Check if function exists in current directory
+        const functionPath = join(currentPath, functionName);
+        if (fs.existsSync(functionPath)) {
+          return functionPath;
+        }
+
+        // Add subdirectories to queue
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            queue.push(join(currentPath, entry.name));
+          }
+        }
+      } catch (error) {
+        console.log(
+          chalk.yellow(`Skipping inaccessible directory: ${currentPath}`)
+        );
+      }
+    }
+
+    return null;
+  }
+
   private async deployFunction(): Promise<void> {
+    await this.initControllerIfNeeded();
+    if (!this.controller?.config) {
+      console.log(chalk.red("Failed to initialize controller or load config"));
+      return;
+    }
+
     const functions = await this.selectFunctions(
       "Select function to deploy:",
       false,
       true
     );
 
-    if (!functions.length) {
+    if (!functions?.length) {
       console.log(chalk.red("No function selected"));
       return;
     }
 
     const functionConfig = functions[0];
+    if (!functionConfig) {
+      console.log(chalk.red("Invalid function configuration"));
+      return;
+    }
+
+    let functionPath = join(
+      this.controller.getAppwriteFolderPath(),
+      "functions",
+      functionConfig.name
+    );
+
+    if (!fs.existsSync(functionPath)) {
+      console.log(
+        chalk.yellow(
+          `Function not found in primary location, searching subdirectories...`
+        )
+      );
+      const foundPath = await this.findFunctionInSubdirectories(
+        this.controller.getAppwriteFolderPath(),
+        functionConfig.name
+      );
+
+      if (foundPath) {
+        console.log(chalk.green(`Found function at: ${foundPath}`));
+        functionPath = foundPath;
+        functionConfig.dirPath = foundPath;
+      } else {
+        console.log(
+          chalk.yellow(
+            `Function ${functionConfig.name} not found locally in any subdirectory`
+          )
+        );
+
+        const { shouldDownload } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "shouldDownload",
+            message: "Would you like to download the latest deployment?",
+            default: true,
+          },
+        ]);
+
+        if (shouldDownload) {
+          try {
+            console.log(chalk.blue("Downloading latest deployment..."));
+            const { path: downloadedPath, function: remoteFunction } =
+              await downloadLatestFunctionDeployment(
+                this.controller.appwriteServer!,
+                functionConfig.$id,
+                join(this.controller.getAppwriteFolderPath(), "functions")
+              );
+            console.log(
+              chalk.green(`✨ Function downloaded to ${downloadedPath}`)
+            );
+
+            // Update the config and functions array safely
+            this.controller.config.functions =
+              this.controller.config.functions || [];
+
+            const newFunction = {
+              $id: remoteFunction.$id,
+              name: remoteFunction.name,
+              runtime: remoteFunction.runtime as Runtime,
+              execute: remoteFunction.execute || [],
+              events: remoteFunction.events || [],
+              schedule: remoteFunction.schedule || "",
+              timeout: remoteFunction.timeout || 15,
+              enabled: remoteFunction.enabled !== false,
+              logging: remoteFunction.logging !== false,
+              entrypoint: remoteFunction.entrypoint || "src/index.ts",
+              commands: remoteFunction.commands || "npm install",
+              dirPath: downloadedPath,
+              scopes: (remoteFunction.scopes || []) as FunctionScope[],
+              installationId: remoteFunction.installationId,
+              providerRepositoryId: remoteFunction.providerRepositoryId,
+              providerBranch: remoteFunction.providerBranch,
+              providerSilentMode: remoteFunction.providerSilentMode,
+              providerRootDirectory: remoteFunction.providerRootDirectory,
+              specification: remoteFunction.specification as Specification,
+            };
+
+            const existingIndex = this.controller.config.functions.findIndex(
+              (f) => f?.$id === remoteFunction.$id
+            );
+
+            if (existingIndex >= 0) {
+              this.controller.config.functions[existingIndex] = newFunction;
+            } else {
+              this.controller.config.functions.push(newFunction);
+            }
+
+            const schemaGenerator = new SchemaGenerator(
+              this.controller.config,
+              this.controller.getAppwriteFolderPath()
+            );
+            schemaGenerator.updateConfig(this.controller.config);
+            console.log(
+              chalk.green("✨ Updated appwriteConfig.ts with new function")
+            );
+
+            await this.controller.reloadConfig();
+            functionConfig.dirPath = downloadedPath;
+          } catch (error) {
+            console.error(
+              chalk.red("Failed to download function deployment:"),
+              error
+            );
+            return;
+          }
+        } else {
+          console.log(chalk.yellow("Deployment cancelled"));
+          return;
+        }
+      }
+    }
+
+    if (!this.controller.appwriteServer) {
+      console.log(chalk.red("Appwrite server not initialized"));
+      return;
+    }
+
     await deployLocalFunction(
-      this.controller!.appwriteServer!,
+      this.controller.appwriteServer,
       functionConfig.name,
       functionConfig
     );
@@ -444,47 +612,34 @@ export class InteractiveCLI {
       remoteFunctions = functions;
     } catch (error) {
       console.log(
-        chalk.red(
-          `Error fetching remote functions, using only local function options: ${error}`
+        chalk.yellow(
+          `Note: Remote functions not available, using only local functions`
         )
       );
     }
 
+    // Combine functions based on whether we're deploying or not
     const allFunctions = preferLocal
-      ? remoteFunctions.reduce(
-          (acc, remoteFunction) => {
-            if (!acc.some((f) => f.name === remoteFunction.name)) {
-              acc.push(AppwriteFunctionSchema.parse(remoteFunction));
-            }
-            return acc;
-          },
-          [...configFunctions]
-        )
+      ? [
+          ...configFunctions,
+          ...remoteFunctions.map((f) => AppwriteFunctionSchema.parse(f)),
+        ]
       : [
-          ...remoteFunctions,
+          ...remoteFunctions.map((f) => AppwriteFunctionSchema.parse(f)),
           ...configFunctions.filter(
             (f) => !remoteFunctions.some((rf) => rf.name === f.name)
           ),
         ];
 
-    const hasLocalAndRemote =
-      allFunctions.some((func) =>
-        configFunctions.some((f) => f.name === func.name)
-      ) &&
-      allFunctions.some(
-        (func) => !configFunctions.some((f) => f.name === func.name)
-      );
+    if (allFunctions.length === 0) {
+      console.log(chalk.red("No functions available"));
+      return [];
+    }
 
     const choices = allFunctions
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((func) => ({
-        name:
-          func.name +
-          (hasLocalAndRemote
-            ? configFunctions.some((f) => f.name === func.name)
-              ? " (Local)"
-              : " (Remote)"
-            : ""),
+        name: func.name,
         value: func,
       }));
 
@@ -499,7 +654,12 @@ export class InteractiveCLI {
       },
     ]);
 
-    return selectedFunctions;
+    // For single selection, ensure we return an array
+    if (!multiSelect) {
+      return selectedFunctions ? [selectedFunctions] : [];
+    }
+
+    return selectedFunctions || [];
   }
 
   private getLocalFunctions(): AppwriteFunction[] {

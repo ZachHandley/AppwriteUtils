@@ -120,12 +120,12 @@ const argv = yargs(hideBin(process.argv))
     description: "Transfer data between databases or collections",
   })
   .option("fromDbId", {
-    alias: ["fromDb"],
+    alias: ["fromDb", "sourceDbId", "sourceDb"],
     type: "string",
     description: "Set the source database ID for transfer",
   })
   .option("toDbId", {
-    alias: ["toDb"],
+    alias: ["toDb", "targetDbId", "targetDb"],
     type: "string",
     description: "Set the destination database ID for transfer",
   })
@@ -182,7 +182,7 @@ const argv = yargs(hideBin(process.argv))
       "s-4vcpu-4gb",
       "s-4vcpu-8gb",
       "s-8vcpu-4gb",
-      "s-8vcpu-8gb"
+      "s-8vcpu-8gb",
     ],
   })
   .parse() as ParsedArgv;
@@ -220,15 +220,32 @@ async function main() {
 
     if (parsedArgv.updateFunctionSpec) {
       if (!parsedArgv.functionId || !parsedArgv.specification) {
-        throw new Error("Function ID and specification are required for updating function specs");
+        throw new Error(
+          "Function ID and specification are required for updating function specs"
+        );
       }
-      console.log(chalk.yellow(`Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}, checking if specification exists...`));
-      const specifications = await listSpecifications(controller.appwriteServer!);
-      if (!specifications.specifications.some((s: { slug: string }) => s.slug === parsedArgv.specification)) {
-        console.log(chalk.red(`Specification ${parsedArgv.specification} not found`));
+      console.log(
+        chalk.yellow(
+          `Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}, checking if specification exists...`
+        )
+      );
+      const specifications = await listSpecifications(
+        controller.appwriteServer!
+      );
+      if (
+        !specifications.specifications.some(
+          (s: { slug: string }) => s.slug === parsedArgv.specification
+        )
+      ) {
+        console.log(
+          chalk.red(`Specification ${parsedArgv.specification} not found`)
+        );
         return;
       }
-      await controller.updateFunctionSpecifications(parsedArgv.functionId, parsedArgv.specification as Specification);
+      await controller.updateFunctionSpecifications(
+        parsedArgv.functionId,
+        parsedArgv.specification as Specification
+      );
     }
 
     // Add default databases if not specified
@@ -332,91 +349,88 @@ async function main() {
     }
 
     if (parsedArgv.transfer) {
-      if (parsedArgv.transfer) {
-        const isRemote = !!parsedArgv.remoteEndpoint;
-        let fromDb, toDb: Models.Database | undefined;
-        let targetDatabases: Databases | undefined;
-        let targetStorage: Storage | undefined;
+      const isRemote = !!parsedArgv.remoteEndpoint;
+      let fromDb, toDb: Models.Database | undefined;
+      let targetDatabases: Databases | undefined;
+      let targetStorage: Storage | undefined;
 
-        // Only fetch databases if database IDs are provided
-        if (parsedArgv.fromDbId && parsedArgv.toDbId) {
-          fromDb = (
-            await controller.getDatabasesByIds([parsedArgv.fromDbId])
-          )[0];
+      // Only fetch databases if database IDs are provided
+      if (parsedArgv.fromDbId && parsedArgv.toDbId) {
+        console.log(
+          chalk.blue(
+            `Starting database transfer from ${parsedArgv.fromDbId} to ${parsedArgv.toDbId}`
+          )
+        );
+        fromDb = (await controller.getDatabasesByIds([parsedArgv.fromDbId]))[0];
 
-          if (isRemote) {
-            if (
-              !parsedArgv.remoteEndpoint ||
-              !parsedArgv.remoteProjectId ||
-              !parsedArgv.remoteApiKey
-            ) {
-              throw new Error("Remote transfer details are missing");
-            }
-            const remoteClient = getClient(
-              parsedArgv.remoteEndpoint,
-              parsedArgv.remoteProjectId,
-              parsedArgv.remoteApiKey
-            );
-            targetDatabases = new Databases(remoteClient);
-            targetStorage = new Storage(remoteClient);
-            const remoteDbs = await fetchAllDatabases(targetDatabases);
-            toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
-          } else {
-            toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))[0];
+        if (isRemote) {
+          if (
+            !parsedArgv.remoteEndpoint ||
+            !parsedArgv.remoteProjectId ||
+            !parsedArgv.remoteApiKey
+          ) {
+            throw new Error("Remote transfer details are missing");
           }
-
-          if (!fromDb || !toDb) {
-            throw new Error("Source or target database not found");
-          }
-        }
-
-        // Handle storage setup
-        let sourceBucket, targetBucket;
-        if (parsedArgv.fromBucketId) {
-          sourceBucket = await controller.storage?.getBucket(
-            parsedArgv.fromBucketId
+          const remoteClient = getClient(
+            parsedArgv.remoteEndpoint,
+            parsedArgv.remoteProjectId,
+            parsedArgv.remoteApiKey
           );
-        }
-        if (parsedArgv.toBucketId) {
-          if (isRemote) {
-            if (!targetStorage) {
-              const remoteClient = getClient(
-                parsedArgv.remoteEndpoint!,
-                parsedArgv.remoteProjectId!,
-                parsedArgv.remoteApiKey!
-              );
-              targetStorage = new Storage(remoteClient);
-            }
-            targetBucket = await targetStorage?.getBucket(
-              parsedArgv.toBucketId
-            );
-          } else {
-            targetBucket = await controller.storage?.getBucket(
-              parsedArgv.toBucketId
-            );
-          }
+          targetDatabases = new Databases(remoteClient);
+          targetStorage = new Storage(remoteClient);
+          const remoteDbs = await fetchAllDatabases(targetDatabases);
+          toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
+        } else {
+          toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))[0];
         }
 
-        // Validate that at least one transfer type is specified
-        if (!fromDb && !sourceBucket) {
-          throw new Error(
-            "No source database or bucket specified for transfer"
-          );
+        if (!fromDb || !toDb) {
+          throw new Error("Source or target database not found");
         }
-
-        const transferOptions: TransferOptions = {
-          isRemote,
-          fromDb,
-          targetDb: toDb,
-          transferEndpoint: parsedArgv.remoteEndpoint,
-          transferProject: parsedArgv.remoteProjectId,
-          transferKey: parsedArgv.remoteApiKey,
-          sourceBucket: sourceBucket,
-          targetBucket: targetBucket,
-        };
-
-        await controller.transferData(transferOptions);
       }
+
+      // Handle storage setup
+      let sourceBucket, targetBucket;
+      if (parsedArgv.fromBucketId) {
+        sourceBucket = await controller.storage?.getBucket(
+          parsedArgv.fromBucketId
+        );
+      }
+      if (parsedArgv.toBucketId) {
+        if (isRemote) {
+          if (!targetStorage) {
+            const remoteClient = getClient(
+              parsedArgv.remoteEndpoint!,
+              parsedArgv.remoteProjectId!,
+              parsedArgv.remoteApiKey!
+            );
+            targetStorage = new Storage(remoteClient);
+          }
+          targetBucket = await targetStorage?.getBucket(parsedArgv.toBucketId);
+        } else {
+          targetBucket = await controller.storage?.getBucket(
+            parsedArgv.toBucketId
+          );
+        }
+      }
+
+      // Validate that at least one transfer type is specified
+      if (!fromDb && !sourceBucket) {
+        throw new Error("No source database or bucket specified for transfer");
+      }
+
+      const transferOptions: TransferOptions = {
+        isRemote,
+        fromDb,
+        targetDb: toDb,
+        transferEndpoint: parsedArgv.remoteEndpoint,
+        transferProject: parsedArgv.remoteProjectId,
+        transferKey: parsedArgv.remoteApiKey,
+        sourceBucket: sourceBucket,
+        targetBucket: targetBucket,
+      };
+
+      await controller.transferData(transferOptions);
     }
   }
 }

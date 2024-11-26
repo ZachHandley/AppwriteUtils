@@ -1,5 +1,5 @@
 import { Client } from "node-appwrite";
-import { AppwriteRequest, AppwriteResponse } from "appwrite-utils";
+import { AppwriteRequest, type AppwriteResponse } from "appwrite-utils";
 
 export default async function ({
   req,

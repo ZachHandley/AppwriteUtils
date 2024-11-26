@@ -26,10 +26,34 @@ npm install appwrite-utils
 These functions help ensure the integrity and correctness of the data in your Appwrite projects:
 
 ```typescript
-isNumber, isString, isBoolean, isArray, isObject, isNull, isUndefined, isDefined, isDate,
-isEmpty, isInteger, isFloat, isArrayLike, isArrayLikeObject, isFunction, isLength, isMap,
-isSet, isRegExp, isSymbol, isObjectLike, isPlainObject, isSafeInteger, isTypedArray,
-isEqual, isMatch, has, get
+isNumber,
+  isString,
+  isBoolean,
+  isArray,
+  isObject,
+  isNull,
+  isUndefined,
+  isDefined,
+  isDate,
+  isEmpty,
+  isInteger,
+  isFloat,
+  isArrayLike,
+  isArrayLikeObject,
+  isFunction,
+  isLength,
+  isMap,
+  isSet,
+  isRegExp,
+  isSymbol,
+  isObjectLike,
+  isPlainObject,
+  isSafeInteger,
+  isTypedArray,
+  isEqual,
+  isMatch,
+  has,
+  get;
 ```
 
 ### Converter Functions
@@ -37,13 +61,39 @@ isEqual, isMatch, has, get
 Converters are designed to transform data formats or types to suit specific needs within your applications:
 
 ```typescript
-anyToString, anyToNumber, anyToBoolean, anyToAnyArray, anyToStringArray,
-trySplitByDifferentSeparators, removeStartEndQuotes, splitByComma, splitByPipe,
-splitBySemicolon, splitByColon, splitBySlash, splitByBackslash, splitBySpace,
-splitByDot, splitByUnderscore, splitByHyphen, pickFirstElement, pickLastElement,
-stringifyObject, parseObject, safeParseDate, removeInvalidElements, joinValues,
-joinBySpace, joinByComma, joinByPipe, joinBySemicolon, joinByColon, joinBySlash,
-joinByHyphen, convertPhoneStringToUSInternational, validateOrNullEmail
+anyToString,
+  anyToNumber,
+  anyToBoolean,
+  anyToAnyArray,
+  anyToStringArray,
+  trySplitByDifferentSeparators,
+  removeStartEndQuotes,
+  splitByComma,
+  splitByPipe,
+  splitBySemicolon,
+  splitByColon,
+  splitBySlash,
+  splitByBackslash,
+  splitBySpace,
+  splitByDot,
+  splitByUnderscore,
+  splitByHyphen,
+  pickFirstElement,
+  pickLastElement,
+  stringifyObject,
+  parseObject,
+  safeParseDate,
+  removeInvalidElements,
+  joinValues,
+  joinBySpace,
+  joinByComma,
+  joinByPipe,
+  joinBySemicolon,
+  joinByColon,
+  joinBySlash,
+  joinByHyphen,
+  convertPhoneStringToUSInternational,
+  validateOrNullEmail;
 ```
 
 ### File Functions
@@ -51,7 +101,7 @@ joinByHyphen, convertPhoneStringToUSInternational, validateOrNullEmail
 These functions facilitate the management and operation of files within your Appwrite projects:
 
 ```typescript
-getFileViewUrl, getFileDownloadUrl
+getFileViewUrl, getFileDownloadUrl;
 ```
 
 Both `getFileViewUrl` and `getFileDownloadUrl` take parameters like `endpoint`, `projectId`, `bucketId`, `fileId`, and optionally `jwt` to generate accessible URLs for files stored in Appwrite.
@@ -61,18 +111,21 @@ Both `getFileViewUrl` and `getFileDownloadUrl` take parameters like `endpoint`, 
 After installing the package, you can directly import and use the various utilities in your TypeScript or JavaScript code. For example:
 
 ```typescript
-import { isNumber, anyToString } from 'appwrite-utils';
+import { isNumber, anyToString } from "appwrite-utils";
 
 // Use the functions directly in your code
-console.log(isNumber(5));  // Output: true
-console.log(anyToString(1234));  // Output: "1234"
+console.log(isNumber(5)); // Output: true
+console.log(anyToString(1234)); // Output: "1234"
 ```
 
 This setup ensures that your interactions with Appwrite are more robust, less error-prone, and significantly more manageable.
 
 ### Changelog
 
-- 0.3.97: Added function deployment through Appwrite Utils CLI, specified through AppwriteConfig, as the current deployment for Appwrite ignored specifications and I wanted to add an `evalSync` to run commands pre-build. That means you can deploy a `TypeScript Node` project, and build it first, programmatically! These are just types, and only defined in `AppwriteUtils` to try to keep some semblence of usefulness in both. I also added `FunctionSpecifications` type defs, `FunctionScopes`, `AppwriteRequest` (A type definition for the request incoming to the Appwrite Function), `AppwriteResponse` (A type definition for the response of course)
+- 0.3.97: Added function deployment through Appwrite Utils CLI, specified through AppwriteConfig, as the current deployment for Appwrite ignored specifications and I wanted to add an `evalSync` to run commands pre-build. That means you can deploy a `TypeScript Node` project, and build it first, programmatically! These are just types, and only defined in `AppwriteUtils` to try to keep some semblence of usefulness in both. I also added `FunctionSpecifications` type defs, `FunctionScopes`, `AppwriteRequest` (A type definition for the request incoming to the Appwrite Function), `AppwriteResponse` (A type definition for the response of course).
+
+I also fixed `transfer` to actually transfer
+
 - 0.3.96: Added `SpecificationSchema, type Specification` type defs to support updating function specifications
 - 0.3.95: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
 - 0.3.94: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT

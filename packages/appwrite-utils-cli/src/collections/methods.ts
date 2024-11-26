@@ -11,7 +11,7 @@ import { nameToIdMapping, processQueue } from "../migrations/queue.js";
 import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
 import _ from "lodash";
-import { SchemaGenerator } from "../utils/schemaStrings.js";
+import { SchemaGenerator } from "../migrations/schemaStrings.js";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export const documentExists = async (
@@ -124,20 +124,36 @@ export const fetchAndCacheCollectionByName = async (
   }
 };
 
-async function wipeDocumentsFromCollection(database: Databases, databaseId: string, collectionId: string) {
-  const initialDocuments = await database.listDocuments(databaseId, collectionId, [Query.limit(1000)]);
+async function wipeDocumentsFromCollection(
+  database: Databases,
+  databaseId: string,
+  collectionId: string
+) {
+  const initialDocuments = await database.listDocuments(
+    databaseId,
+    collectionId,
+    [Query.limit(1000)]
+  );
   let documents = initialDocuments.documents;
   while (documents.length === 1000) {
-    const docsResponse = await database.listDocuments(databaseId, collectionId, [Query.limit(1000)]);
+    const docsResponse = await database.listDocuments(
+      databaseId,
+      collectionId,
+      [Query.limit(1000)]
+    );
     documents = documents.concat(docsResponse.documents);
   }
-  const batchDeletePromises = documents.map(doc => database.deleteDocument(databaseId, collectionId, doc.$id));
+  const batchDeletePromises = documents.map((doc) =>
+    database.deleteDocument(databaseId, collectionId, doc.$id)
+  );
   const maxStackSize = 100;
   for (let i = 0; i < batchDeletePromises.length; i += maxStackSize) {
     await Promise.all(batchDeletePromises.slice(i, i + maxStackSize));
     await delay(100);
   }
-  console.log(`Deleted ${documents.length} documents from collection ${collectionId}`);
+  console.log(
+    `Deleted ${documents.length} documents from collection ${collectionId}`
+  );
 }
 
 export const wipeDatabase = async (
@@ -167,7 +183,9 @@ export const wipeCollection = async (
   databaseId: string,
   collectionId: string
 ): Promise<void> => {
-  const collections = await database.listCollections(databaseId, [Query.equal("$id", collectionId)]);
+  const collections = await database.listCollections(databaseId, [
+    Query.equal("$id", collectionId),
+  ]);
   if (collections.total === 0) {
     console.log(`Collection ${collectionId} not found`);
     return;
@@ -191,7 +209,8 @@ export const createOrUpdateCollections = async (
   deletedCollections?: { collectionId: string; collectionName: string }[],
   selectedCollections: Models.Collection[] = []
 ): Promise<void> => {
-  const collectionsToProcess = selectedCollections.length > 0 ? selectedCollections : config.collections;
+  const collectionsToProcess =
+    selectedCollections.length > 0 ? selectedCollections : config.collections;
   if (!collectionsToProcess) {
     return;
   }
@@ -204,7 +223,7 @@ export const createOrUpdateCollections = async (
     const permissions: string[] = [];
     if (collection.$permissions && collection.$permissions.length > 0) {
       for (const permission of collection.$permissions) {
-        if (typeof permission === 'string') {
+        if (typeof permission === "string") {
           permissions.push(permission);
         } else {
           switch (permission.permission) {
@@ -319,7 +338,7 @@ export const createOrUpdateCollections = async (
       databaseId,
       database,
       collectionToUse!.$id,
-      (indexes ?? []) as Indexes,
+      (indexes ?? []) as Indexes
     );
 
     // Add delay after creating indexes

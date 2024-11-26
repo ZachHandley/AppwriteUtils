@@ -1,6 +1,14 @@
 import { Client, Databases, Query, Storage, type Models } from "node-appwrite";
-import { type AppwriteConfig, type AppwriteFunction, type Specification } from "appwrite-utils";
-import { loadConfig, findAppwriteConfig, findFunctionsDir } from "./utils/loadConfigs.js";
+import {
+  type AppwriteConfig,
+  type AppwriteFunction,
+  type Specification,
+} from "appwrite-utils";
+import {
+  loadConfig,
+  findAppwriteConfig,
+  findFunctionsDir,
+} from "./utils/loadConfigs.js";
 import { UsersController } from "./migrations/users.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
@@ -42,7 +50,10 @@ import {
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
 import { fetchAllDatabases } from "./migrations/databases.js";
-import { listFunctions, updateFunctionSpecifications } from "./functions/methods.js";
+import {
+  listFunctions,
+  updateFunctionSpecifications,
+} from "./functions/methods.js";
 import chalk from "chalk";
 import { deployLocalFunction } from "./functions/deployments.js";
 import fs from "node:fs";
@@ -106,13 +117,13 @@ export class UtilsController {
   async reloadConfig() {
     this.config = await loadConfig(this.appwriteFolderPath);
     this.appwriteServer = new Client();
-      this.appwriteServer
-        .setEndpoint(this.config.appwriteEndpoint)
-        .setProject(this.config.appwriteProject)
-        .setKey(this.config.appwriteKey);
-      this.database = new Databases(this.appwriteServer);
-      this.storage = new Storage(this.appwriteServer);
-      this.config.appwriteClient = this.appwriteServer;
+    this.appwriteServer
+      .setEndpoint(this.config.appwriteEndpoint)
+      .setProject(this.config.appwriteProject)
+      .setKey(this.config.appwriteKey);
+    this.database = new Databases(this.appwriteServer);
+    this.storage = new Storage(this.appwriteServer);
+    this.config.appwriteClient = this.appwriteServer;
   }
 
   async setupMigrationDatabase() {
@@ -139,8 +150,11 @@ export class UtilsController {
     await this.ensureDatabaseConfigBucketsExist(databases);
     await ensureDatabasesExist(this.config, databases);
   }
-  
-  async ensureCollectionsExist(database: Models.Database, collections?: Models.Collection[]) {
+
+  async ensureCollectionsExist(
+    database: Models.Database,
+    collections?: Models.Collection[]
+  ) {
     await this.init();
     if (!this.config) throw new Error("Config not initialized");
     await ensureCollectionsExist(this.config, database, collections);
@@ -185,25 +199,28 @@ export class UtilsController {
 
   async listAllFunctions() {
     await this.init();
-    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
-    const { functions } = await listFunctions(this.appwriteServer, [Query.limit(1000)]);
+    if (!this.appwriteServer)
+      throw new Error("Appwrite server not initialized");
+    const { functions } = await listFunctions(this.appwriteServer, [
+      Query.limit(1000),
+    ]);
     return functions;
   }
 
   async findFunctionDirectories() {
     const functionsDir = findFunctionsDir(this.appwriteFolderPath);
     if (!functionsDir) return new Map();
-  
+
     const functionDirMap = new Map<string, string>();
     const entries = fs.readdirSync(functionsDir, { withFileTypes: true });
-  
+
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const functionPath = path.join(functionsDir, entry.name);
         // Match with config functions by name
         if (this.config?.functions) {
           const matchingFunc = this.config.functions.find(
-            f => f.name.toLowerCase() === entry.name.toLowerCase()
+            (f) => f.name.toLowerCase() === entry.name.toLowerCase()
           );
           if (matchingFunc) {
             functionDirMap.set(matchingFunc.name, functionPath);
@@ -214,30 +231,46 @@ export class UtilsController {
     return functionDirMap;
   }
 
-  async deployFunction(functionName: string, functionPath?: string, functionConfig?: AppwriteFunction) {
+  async deployFunction(
+    functionName: string,
+    functionPath?: string,
+    functionConfig?: AppwriteFunction
+  ) {
     await this.init();
-    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
-    
+    if (!this.appwriteServer)
+      throw new Error("Appwrite server not initialized");
+
     if (!functionConfig) {
-      functionConfig = this.config?.functions?.find(f => f.name === functionName);
+      functionConfig = this.config?.functions?.find(
+        (f) => f.name === functionName
+      );
     }
-    if (!functionConfig) throw new Error(`Function ${functionName} not found in config`);
-    
-    await deployLocalFunction(this.appwriteServer, functionName, functionConfig, functionPath);
+    if (!functionConfig)
+      throw new Error(`Function ${functionName} not found in config`);
+
+    await deployLocalFunction(
+      this.appwriteServer,
+      functionName,
+      functionConfig,
+      functionPath
+    );
   }
-  
+
   async syncFunctions() {
     await this.init();
-    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
-    
+    if (!this.appwriteServer)
+      throw new Error("Appwrite server not initialized");
+
     const localFunctions = this.config?.functions || [];
-    const remoteFunctions = await listFunctions(this.appwriteServer, [Query.limit(1000)]);
-    
+    const remoteFunctions = await listFunctions(this.appwriteServer, [
+      Query.limit(1000),
+    ]);
+
     for (const localFunction of localFunctions) {
       console.log(chalk.blue(`Syncing function ${localFunction.name}...`));
       await this.deployFunction(localFunction.name);
     }
-    
+
     console.log(chalk.green("✨ All functions synchronized successfully!"));
   }
 
@@ -252,26 +285,34 @@ export class UtilsController {
 
   async wipeBucketFromDatabase(database: Models.Database) {
     // Check configured bucket in database config
-    const configuredBucket = this.config?.databases?.find(db => db.$id === database.$id)?.bucket;
+    const configuredBucket = this.config?.databases?.find(
+      (db) => db.$id === database.$id
+    )?.bucket;
     if (configuredBucket?.$id) {
       await this.wipeDocumentStorage(configuredBucket.$id);
     }
 
     // Also check for document bucket ID pattern
     if (this.config?.documentBucketId) {
-      const documentBucketId = `${this.config.documentBucketId}_${database.$id.toLowerCase().trim().replace(/\s+/g, "")}`;
+      const documentBucketId = `${this.config.documentBucketId}_${database.$id
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, "")}`;
       try {
         await this.wipeDocumentStorage(documentBucketId);
       } catch (error: any) {
         // Ignore if bucket doesn't exist
-        if (error?.type !== 'storage_bucket_not_found') {
+        if (error?.type !== "storage_bucket_not_found") {
           throw error;
         }
       }
     }
   }
 
-  async wipeCollection(database: Models.Database, collection: Models.Collection) {
+  async wipeCollection(
+    database: Models.Database,
+    collection: Models.Collection
+  ) {
     await this.init();
     if (!this.database) throw new Error("Database not initialized");
     await wipeCollection(this.database, database.$id, collection.$id);
@@ -283,7 +324,10 @@ export class UtilsController {
     await wipeDocumentStorage(this.storage, bucketId);
   }
 
-  async createOrUpdateCollectionsForDatabases(databases: Models.Database[], collections: Models.Collection[] = []) {
+  async createOrUpdateCollectionsForDatabases(
+    databases: Models.Database[],
+    collections: Models.Collection[] = []
+  ) {
     await this.init();
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
@@ -359,7 +403,10 @@ export class UtilsController {
     await appwriteToX.toSchemas(databases);
   }
 
-  async syncDb(databases: Models.Database[] = [], collections: Models.Collection[] = []) {
+  async syncDb(
+    databases: Models.Database[] = [],
+    collections: Models.Collection[] = []
+  ) {
     await this.init();
     if (!this.database) throw new Error("Database not initialized");
     if (databases.length === 0) {
@@ -376,11 +423,14 @@ export class UtilsController {
   }
 
   async transferData(options: TransferOptions): Promise<void> {
-    // Remove database requirement check
     let sourceClient = this.database;
     let targetClient: Databases | undefined;
     let sourceDatabases: Models.Database[] = [];
     let targetDatabases: Models.Database[] = [];
+
+    if (!sourceClient) {
+      throw new Error("Source database not initialized");
+    }
 
     if (options.isRemote) {
       if (
@@ -396,20 +446,20 @@ export class UtilsController {
         options.transferProject,
         options.transferKey
       );
-      
-      if (this.database) {
-        targetClient = new Databases(remoteClient);
-        sourceDatabases = await fetchAllDatabases(sourceClient!);
-        targetDatabases = await fetchAllDatabases(targetClient);
-      }
-    } else if (this.database) {
+
+      targetClient = new Databases(remoteClient);
+      sourceDatabases = await fetchAllDatabases(sourceClient);
+      targetDatabases = await fetchAllDatabases(targetClient);
+    } else {
       targetClient = sourceClient;
-      sourceDatabases = targetDatabases = await fetchAllDatabases(sourceClient!);
+      sourceDatabases = targetDatabases = await fetchAllDatabases(sourceClient);
     }
 
-    // Only validate databases if they're provided in options
+    // Always perform database transfer if databases are specified
     if (options.fromDb && options.targetDb) {
-      const fromDb = sourceDatabases.find((db) => db.$id === options.fromDb!.$id);
+      const fromDb = sourceDatabases.find(
+        (db) => db.$id === options.fromDb!.$id
+      );
       const targetDb = targetDatabases.find(
         (db) => db.$id === options.targetDb!.$id
       );
@@ -420,33 +470,49 @@ export class UtilsController {
 
       if (options.isRemote && targetClient) {
         await transferDatabaseLocalToRemote(
-          sourceClient!,
+          sourceClient,
           options.transferEndpoint!,
           options.transferProject!,
           options.transferKey!,
           fromDb.$id,
           targetDb.$id
         );
-      } else if (targetClient) {
+      } else {
         await transferDatabaseLocalToLocal(
-          sourceClient!,
+          sourceClient,
           fromDb.$id,
           targetDb.$id
         );
       }
     }
 
-    // Handle storage transfer separately
+    // Handle storage transfer
     if (this.storage && (options.sourceBucket || options.fromDb)) {
-      const sourceBucketId = options.sourceBucket?.$id || 
-        (options.fromDb && this.config?.documentBucketId && 
-          `${this.config.documentBucketId}_${options.fromDb.$id.toLowerCase().trim().replace(" ", "")}`);
-      
-      const targetBucketId = options.targetBucket?.$id || 
-        (options.targetDb && this.config?.documentBucketId && 
-          `${this.config.documentBucketId}_${options.targetDb.$id.toLowerCase().trim().replace(" ", "")}`);
+      const sourceBucketId =
+        options.sourceBucket?.$id ||
+        (options.fromDb &&
+          this.config?.documentBucketId &&
+          `${this.config.documentBucketId}_${options.fromDb.$id
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, "")}`);
+
+      const targetBucketId =
+        options.targetBucket?.$id ||
+        (options.targetDb &&
+          this.config?.documentBucketId &&
+          `${this.config.documentBucketId}_${options.targetDb.$id
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, "")}`);
 
       if (sourceBucketId && targetBucketId) {
+        console.log(
+          chalk.blue(
+            `Starting storage transfer from ${sourceBucketId} to ${targetBucketId}`
+          )
+        );
+
         if (options.isRemote) {
           await transferStorageLocalToRemote(
             this.storage,
@@ -469,11 +535,27 @@ export class UtilsController {
     console.log(chalk.green("Transfer completed"));
   }
 
-  async updateFunctionSpecifications(functionId: string, specification: Specification) {
+  async updateFunctionSpecifications(
+    functionId: string,
+    specification: Specification
+  ) {
     await this.init();
-    if (!this.appwriteServer) throw new Error("Appwrite server not initialized");
-    console.log(chalk.green(`Updating function specifications for ${functionId} to ${specification}`));
-    await updateFunctionSpecifications(this.appwriteServer, functionId, specification);
-    console.log(chalk.green(`Successfully updated function specifications for ${functionId} to ${specification}`));
+    if (!this.appwriteServer)
+      throw new Error("Appwrite server not initialized");
+    console.log(
+      chalk.green(
+        `Updating function specifications for ${functionId} to ${specification}`
+      )
+    );
+    await updateFunctionSpecifications(
+      this.appwriteServer,
+      functionId,
+      specification
+    );
+    console.log(
+      chalk.green(
+        `Successfully updated function specifications for ${functionId} to ${specification}`
+      )
+    );
   }
 }

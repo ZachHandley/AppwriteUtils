@@ -1,5 +1,5 @@
 import { Client, Databases, Query } from "node-appwrite";
-import { AppwriteRequest, AppwriteResponse } from "appwrite-utils";
+import { AppwriteRequest, type AppwriteResponse } from "appwrite-utils";
 import { requestSchema } from "./request.js";
 
 /**
@@ -11,7 +11,17 @@ import { requestSchema } from "./request.js";
  * @param {Function} params.error - Error logging function.
  * @returns {Promise<Object>} JSON response with count or error message.
  */
-export default async ({ req, res, log, error }: { req: AppwriteRequest, res: AppwriteResponse, log: (message: string) => void, error: (message: string) => void }) => {
+export default async ({
+  req,
+  res,
+  log,
+  error,
+}: {
+  req: AppwriteRequest;
+  res: AppwriteResponse;
+  log: (message: string) => void;
+  error: (message: string) => void;
+}) => {
   // Initialize Appwrite client
   const client = new Client()
     .setEndpoint(process.env["APPWRITE_FUNCTION_ENDPOINT"]!)

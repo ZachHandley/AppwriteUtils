@@ -9,8 +9,17 @@ import {
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { getAppwriteClient } from "../utils/helperFunctions.js";
-import { createOrUpdateAttribute } from "../collections/attributes.js";
+import {
+  createOrUpdateAttribute,
+  createUpdateCollectionAttributes,
+} from "../collections/attributes.js";
 import { parseAttribute } from "appwrite-utils";
+import chalk from "chalk";
+import { fetchAllCollections } from "../collections/methods.js";
+import {
+  createOrUpdateIndex,
+  createOrUpdateIndexes,
+} from "../collections/indexes.js";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;
@@ -67,12 +76,12 @@ export const transferStorageLocalToLocal = async (
       try {
         await tryAwaitWithRetry(
           async () =>
-          await storage.createFile(
-            toBucketId,
-            file.$id,
-            fileToCreate,
-            file.$permissions
-          )
+            await storage.createFile(
+              toBucketId,
+              file.$id,
+              fileToCreate,
+              file.$permissions
+            )
         );
       } catch (error: any) {
         // File already exists, so we can skip it
@@ -112,15 +121,18 @@ export const transferStorageLocalToLocal = async (
       try {
         await tryAwaitWithRetry(
           async () =>
-          await storage.createFile(
-            toBucketId,
-            file.$id,
-            fileToCreate,
-            file.$permissions
-          )
+            await storage.createFile(
+              toBucketId,
+              file.$id,
+              fileToCreate,
+              file.$permissions
+            )
         );
       } catch (error: any) {
         // File already exists, so we can skip it
+        console.log(
+          chalk.yellow(`File ${file.$id} already exists, skipping...`)
+        );
         continue;
       }
       numberOfFiles++;
@@ -180,15 +192,16 @@ export const transferStorageLocalToRemote = async (
     try {
       await tryAwaitWithRetry(
         async () =>
-        await remoteStorage.createFile(
-          toBucketId,
-          file.$id,
-          fileToCreate,
-          file.$permissions
-        )
+          await remoteStorage.createFile(
+            toBucketId,
+            file.$id,
+            fileToCreate,
+            file.$permissions
+          )
       );
     } catch (error: any) {
       // File already exists, so we can skip it
+      console.log(chalk.yellow(`File ${file.$id} already exists, skipping...`));
       continue;
     }
     numberOfFiles++;
@@ -426,69 +439,67 @@ export const transferDatabaseLocalToLocal = async (
   fromDbId: string,
   targetDbId: string
 ) => {
-  let lastCollectionId: string | undefined;
-  let fromCollections = await tryAwaitWithRetry(
-    async () => await localDb.listCollections(fromDbId, [Query.limit(50)])
+  console.log(
+    chalk.blue(`Starting database transfer from ${fromDbId} to ${targetDbId}`)
   );
-  const allFromCollections = fromCollections.collections;
-  if (fromCollections.collections.length < 50) {
-    lastCollectionId = undefined;
-  } else {
-    lastCollectionId =
-      fromCollections.collections[fromCollections.collections.length - 1].$id;
-    while (lastCollectionId) {
-      const collections = await localDb.listCollections(fromDbId, [
-        Query.limit(50),
-        Query.cursorAfter(lastCollectionId),
-      ]);
-      allFromCollections.push(...collections.collections);
-      if (collections.collections.length < 50) {
-        break;
-      }
-      lastCollectionId =
-        collections.collections[collections.collections.length - 1].$id;
-    }
-  }
-  lastCollectionId = undefined;
-  let toCollections = await tryAwaitWithRetry(
-    async () => await localDb.listCollections(targetDbId, [Query.limit(50)])
+  // Get all collections from source database
+  const sourceCollections = await fetchAllCollections(fromDbId, localDb);
+  console.log(
+    chalk.blue(
+      `Found ${sourceCollections.length} collections in source database`
+    )
   );
-  const allToCollections = toCollections.collections;
-  if (toCollections.collections.length < 50) {
-  } else {
-    lastCollectionId =
-      toCollections.collections[toCollections.collections.length - 1].$id;
-    while (lastCollectionId) {
-      const collections = await localDb.listCollections(targetDbId, [
-        Query.limit(50),
-        Query.cursorAfter(lastCollectionId),
-      ]);
-      allToCollections.push(...collections.collections);
-      if (collections.collections.length < 50) {
-        lastCollectionId = undefined;
+
+  // Process each collection
+  for (const collection of sourceCollections) {
+    console.log(
+      chalk.yellow(
+        `Processing collection: ${collection.name} (${collection.$id})`
+      )
+    );
+
+    try {
+      // Create or update collection in target
+      let targetCollection: Models.Collection;
+      const existingCollection = await tryAwaitWithRetry(async () =>
+        localDb.listCollections(targetDbId, [
+          Query.equal("$id", collection.$id),
+        ])
+      );
+
+      if (existingCollection.collections.length > 0) {
+        targetCollection = existingCollection.collections[0];
+        console.log(
+          chalk.green(`Collection ${collection.name} exists in target database`)
+        );
+
+        // Update collection if needed
+        if (
+          targetCollection.name !== collection.name ||
+          targetCollection.$permissions !== collection.$permissions ||
+          targetCollection.documentSecurity !== collection.documentSecurity ||
+          targetCollection.enabled !== collection.enabled
+        ) {
+          targetCollection = await tryAwaitWithRetry(async () =>
+            localDb.updateCollection(
+              targetDbId,
+              collection.$id,
+              collection.name,
+              collection.$permissions,
+              collection.documentSecurity,
+              collection.enabled
+            )
+          );
+          console.log(chalk.green(`Collection ${collection.name} updated`));
+        }
       } else {
-        lastCollectionId =
-          collections.collections[collections.collections.length - 1].$id;
-      }
-    }
-  }
-  for (const collection of allFromCollections) {
-    const toCollection = allToCollections.find((c) => c.$id === collection.$id);
-    if (toCollection) {
-      await transferDocumentsBetweenDbsLocalToLocal(
-        localDb,
-        fromDbId,
-        targetDbId,
-        collection.$id,
-        toCollection.$id
-      );
-    } else {
-      console.log(
-        `Collection ${collection.name} not found in destination database, creating...`
-      );
-      const newCollection = await tryAwaitWithRetry(
-        async () =>
-          await localDb.createCollection(
+        console.log(
+          chalk.yellow(
+            `Creating collection ${collection.name} in target database...`
+          )
+        );
+        targetCollection = await tryAwaitWithRetry(async () =>
+          localDb.createCollection(
             targetDbId,
             collection.$id,
             collection.name,
@@ -496,38 +507,95 @@ export const transferDatabaseLocalToLocal = async (
             collection.documentSecurity,
             collection.enabled
           )
+        );
+      }
+
+      // Handle attributes
+      const existingAttributes = await tryAwaitWithRetry(
+        async () =>
+          await localDb.listAttributes(targetDbId, targetCollection.$id)
       );
-      console.log(`Collection ${newCollection.name} created`);
+
       for (const attribute of collection.attributes) {
-        await tryAwaitWithRetry(
-          async () =>
-            await createOrUpdateAttribute(
+        const parsedAttribute = parseAttribute(attribute as any);
+        const existingAttribute = existingAttributes.attributes.find(
+          (attr: any) => attr.key === parsedAttribute.key
+        );
+
+        if (!existingAttribute) {
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateAttribute(
               localDb,
               targetDbId,
-              newCollection,
-              parseAttribute(attribute as any)
+              targetCollection,
+              parsedAttribute
             )
-        );
-      }
-      for (const index of collection.indexes) {
-        await tryAwaitWithRetry(
-          async () =>
-            await localDb.createIndex(
+          );
+          console.log(chalk.green(`Attribute ${parsedAttribute.key} created`));
+        } else {
+          console.log(
+            chalk.blue(
+              `Attribute ${parsedAttribute.key} exists, checking for updates...`
+            )
+          );
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateAttribute(
+              localDb,
               targetDbId,
-              newCollection.$id,
-              index.key,
-              index.type as IndexType,
-              index.attributes,
-              index.orders
+              targetCollection,
+              parsedAttribute
             )
-        );
+          );
+        }
       }
+
+      // Handle indexes
+      const existingIndexes = await tryAwaitWithRetry(
+        async () => await localDb.listIndexes(targetDbId, targetCollection.$id)
+      );
+
+      for (const index of collection.indexes) {
+        const existingIndex = existingIndexes.indexes.find(
+          (idx) => idx.key === index.key
+        );
+
+        if (!existingIndex) {
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateIndex(
+              targetDbId,
+              localDb,
+              targetCollection.$id,
+              index as any
+            )
+          );
+          console.log(chalk.green(`Index ${index.key} created`));
+        } else {
+          console.log(
+            chalk.blue(`Index ${index.key} exists, checking for updates...`)
+          );
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateIndex(
+              targetDbId,
+              localDb,
+              targetCollection.$id,
+              index as any
+            )
+          );
+        }
+      }
+
+      // Transfer documents
       await transferDocumentsBetweenDbsLocalToLocal(
         localDb,
         fromDbId,
         targetDbId,
         collection.$id,
-        newCollection.$id
+        targetCollection.$id
+      );
+    } catch (error) {
+      console.error(
+        chalk.red(`Error processing collection ${collection.name}:`),
+        error
       );
     }
   }
@@ -544,53 +612,44 @@ export const transferDatabaseLocalToRemote = async (
   const client = getAppwriteClient(endpoint, projectId, apiKey);
   const remoteDb = new Databases(client);
 
-  let lastCollectionId: string | undefined;
-  let fromCollections = await tryAwaitWithRetry(
-    async () => await localDb.listCollections(fromDbId, [Query.limit(50)])
+  // Get all collections from source database
+  const sourceCollections = await fetchAllCollections(fromDbId, localDb);
+  console.log(
+    chalk.blue(
+      `Found ${sourceCollections.length} collections in source database`
+    )
   );
-  const allFromCollections = fromCollections.collections;
-  if (fromCollections.collections.length >= 50) {
-    lastCollectionId =
-      fromCollections.collections[fromCollections.collections.length - 1].$id;
-    while (lastCollectionId) {
-      const collections = await tryAwaitWithRetry(
-        async () =>
-          await localDb.listCollections(fromDbId, [
-            Query.limit(50),
-            Query.cursorAfter(lastCollectionId!),
-          ])
-      );
-      allFromCollections.push(...collections.collections);
-      if (collections.collections.length < 50) {
-        break;
-      }
-      lastCollectionId =
-        collections.collections[collections.collections.length - 1].$id;
-    }
-  }
 
-  for (const collection of allFromCollections) {
-    let toCollection: Models.Collection;
-    const toCollectionExists = await tryAwaitWithRetry(
-      async () =>
-        await remoteDb.listCollections(toDbId, [
-          Query.equal("$id", collection.$id),
-        ])
+  // Process each collection
+  for (const collection of sourceCollections) {
+    console.log(
+      chalk.yellow(
+        `Processing collection: ${collection.name} (${collection.$id})`
+      )
     );
 
-    if (toCollectionExists.collections.length > 0) {
-      console.log(`Collection ${collection.name} already exists. Updating...`);
-      toCollection = toCollectionExists.collections[0];
-      // Update collection if needed
-      if (
-        toCollection.name !== collection.name ||
-        toCollection.$permissions !== collection.$permissions ||
-        toCollection.documentSecurity !== collection.documentSecurity ||
-        toCollection.enabled !== collection.enabled
-      ) {
-        toCollection = await tryAwaitWithRetry(
-          async () =>
-            await remoteDb.updateCollection(
+    try {
+      // Create or update collection in target
+      let targetCollection: Models.Collection;
+      const existingCollection = await tryAwaitWithRetry(async () =>
+        remoteDb.listCollections(toDbId, [Query.equal("$id", collection.$id)])
+      );
+
+      if (existingCollection.collections.length > 0) {
+        targetCollection = existingCollection.collections[0];
+        console.log(
+          chalk.green(`Collection ${collection.name} exists in remote database`)
+        );
+
+        // Update collection if needed
+        if (
+          targetCollection.name !== collection.name ||
+          targetCollection.$permissions !== collection.$permissions ||
+          targetCollection.documentSecurity !== collection.documentSecurity ||
+          targetCollection.enabled !== collection.enabled
+        ) {
+          targetCollection = await tryAwaitWithRetry(async () =>
+            remoteDb.updateCollection(
               toDbId,
               collection.$id,
               collection.name,
@@ -598,13 +657,17 @@ export const transferDatabaseLocalToRemote = async (
               collection.documentSecurity,
               collection.enabled
             )
+          );
+          console.log(chalk.green(`Collection ${collection.name} updated`));
+        }
+      } else {
+        console.log(
+          chalk.yellow(
+            `Creating collection ${collection.name} in remote database...`
+          )
         );
-        console.log(`Collection ${toCollection.name} updated`);
-      }
-    } else {
-      toCollection = await tryAwaitWithRetry(
-        async () =>
-          await remoteDb.createCollection(
+        targetCollection = await tryAwaitWithRetry(async () =>
+          remoteDb.createCollection(
             toDbId,
             collection.$id,
             collection.name,
@@ -612,77 +675,94 @@ export const transferDatabaseLocalToRemote = async (
             collection.documentSecurity,
             collection.enabled
           )
-      );
-      console.log(`Collection ${toCollection.name} created`);
-    }
+        );
+      }
 
-    // Check and update attributes
-    const existingAttributes = await tryAwaitWithRetry(
-      async () => await remoteDb.listAttributes(toDbId, toCollection.$id)
-    );
-    for (const attribute of collection.attributes) {
-      const parsedAttribute = parseAttribute(attribute as any);
-      const existingAttribute = existingAttributes.attributes.find(
-        // @ts-expect-error
-        (attr) => attr.key === parsedAttribute.key
+      // Handle attributes
+      const existingAttributes = await tryAwaitWithRetry(
+        async () => await remoteDb.listAttributes(toDbId, targetCollection.$id)
       );
-      if (!existingAttribute) {
-        await tryAwaitWithRetry(
-          async () =>
-            await createOrUpdateAttribute(
+
+      for (const attribute of collection.attributes) {
+        const parsedAttribute = parseAttribute(attribute as any);
+        const existingAttribute = existingAttributes.attributes.find(
+          (attr: any) => attr.key === parsedAttribute.key
+        );
+
+        if (!existingAttribute) {
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateAttribute(
               remoteDb,
               toDbId,
-              toCollection,
+              targetCollection,
               parsedAttribute
             )
-        );
-        console.log(`Attribute ${parsedAttribute.key} created`);
-      } else {
-        // Check if attribute needs updating
-        // Note: Appwrite doesn't allow updating most attribute properties
-        // You might need to delete and recreate the attribute if significant changes are needed
-        console.log(`Attribute ${parsedAttribute.key} already exists`);
-      }
-    }
-
-    // Check and update indexes
-    const existingIndexes = await tryAwaitWithRetry(
-      async () => await remoteDb.listIndexes(toDbId, toCollection.$id)
-    );
-    for (const index of collection.indexes) {
-      const existingIndex = existingIndexes.indexes.find(
-        (idx) => idx.key === index.key
-      );
-      if (!existingIndex) {
-        await tryAwaitWithRetry(
-          async () =>
-            await remoteDb.createIndex(
-              toDbId,
-              toCollection.$id,
-              index.key,
-              index.type as IndexType,
-              index.attributes,
-              index.orders
+          );
+          console.log(chalk.green(`Attribute ${parsedAttribute.key} created`));
+        } else {
+          console.log(
+            chalk.blue(
+              `Attribute ${parsedAttribute.key} exists, checking for updates...`
             )
-        );
-        console.log(`Index ${index.key} created`);
-      } else {
-        // Check if index needs updating
-        // Note: Appwrite doesn't allow updating indexes
-        // You might need to delete and recreate the index if changes are needed
-        console.log(`Index ${index.key} already exists`);
+          );
+          await tryAwaitWithRetry(async () =>
+            createOrUpdateAttribute(
+              remoteDb,
+              toDbId,
+              targetCollection,
+              parsedAttribute
+            )
+          );
+        }
       }
-    }
 
-    await transferDocumentsBetweenDbsLocalToRemote(
-      localDb,
-      endpoint,
-      projectId,
-      apiKey,
-      fromDbId,
-      toDbId,
-      collection.$id,
-      toCollection.$id
-    );
+      // Handle indexes
+      const existingIndexes = await tryAwaitWithRetry(
+        async () => await remoteDb.listIndexes(toDbId, targetCollection.$id)
+      );
+
+      for (const index of collection.indexes) {
+        const existingIndex = existingIndexes.indexes.find(
+          (idx) => idx.key === index.key
+        );
+
+        if (!existingIndex) {
+          await createOrUpdateIndex(
+            toDbId,
+            remoteDb,
+            targetCollection.$id,
+            index as any
+          );
+          console.log(chalk.green(`Index ${index.key} created`));
+        } else {
+          console.log(
+            chalk.blue(`Index ${index.key} exists, checking for updates...`)
+          );
+          await createOrUpdateIndex(
+            toDbId,
+            remoteDb,
+            targetCollection.$id,
+            index as any
+          );
+        }
+      }
+
+      // Transfer documents
+      await transferDocumentsBetweenDbsLocalToRemote(
+        localDb,
+        endpoint,
+        projectId,
+        apiKey,
+        fromDbId,
+        toDbId,
+        collection.$id,
+        targetCollection.$id
+      );
+    } catch (error) {
+      console.error(
+        chalk.red(`Error processing collection ${collection.name}:`),
+        error
+      );
+    }
   }
 };
