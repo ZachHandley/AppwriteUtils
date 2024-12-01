@@ -154,7 +154,7 @@ export class InteractiveCLI {
           break;
         case CHOICES.EXIT:
           console.log(chalk.green("Goodbye!"));
-          return;
+          process.exit(0);
       }
     }
   }
@@ -533,7 +533,6 @@ export class InteractiveCLI {
       );
 
       if (foundPath) {
-        console.log(chalk.green(`Found function at: ${foundPath}`));
         functionPath = foundPath;
         functionConfig.dirPath = foundPath;
       } else {
@@ -977,44 +976,73 @@ export class InteractiveCLI {
   }
 
   private async syncDb(): Promise<void> {
-    console.log(chalk.yellow("Syncing database..."));
-    const functionsClient = new Functions(this.controller!.appwriteServer!);
+    console.log(chalk.blue("Pushing local configuration to Appwrite..."));
+
     const databases = await this.selectDatabases(
-      await fetchAllDatabases(this.controller!.database!),
-      chalk.blue("Select databases to synchronize:"),
+      this.getLocalDatabases(),
+      chalk.blue("Select local databases to push:"),
       true
     );
+
+    if (!databases.length) {
+      console.log(
+        chalk.yellow("No databases selected. Skipping database sync.")
+      );
+      return;
+    }
+
     const collections = await this.selectCollections(
       databases[0],
       this.controller!.database!,
-      chalk.blue("Select collections to synchronize:"),
+      chalk.blue("Select local collections to push:"),
       true,
       true // prefer local
     );
-    const answer = await inquirer.prompt([
+
+    const { syncFunctions } = await inquirer.prompt([
       {
         type: "confirm",
         name: "syncFunctions",
-        message: "Do you want to synchronize functions?",
+        message: "Do you want to push local functions to remote?",
         default: false,
       },
     ]);
-    if (answer.syncFunctions) {
-      const functions = await this.selectFunctions(
-        chalk.blue("Select functions to synchronize:"),
-        true,
-        true // prefer local
-      );
+
+    try {
+      // First sync databases and collections
       await this.controller!.syncDb(databases, collections);
-      for (const func of functions) {
-        await deployLocalFunction(
-          this.controller!.appwriteServer!,
-          func.dirPath || `functions/${func.name}`,
-          func
+      console.log(chalk.green("Database and collections pushed successfully"));
+
+      // Then handle functions if requested
+      if (syncFunctions && this.controller!.config?.functions?.length) {
+        const functions = await this.selectFunctions(
+          chalk.blue("Select local functions to push:"),
+          true,
+          true // prefer local
         );
+
+        for (const func of functions) {
+          try {
+            await this.controller!.deployFunction(func.name);
+            console.log(
+              chalk.green(`Function ${func.name} deployed successfully`)
+            );
+          } catch (error) {
+            console.error(
+              chalk.red(`Failed to deploy function ${func.name}:`),
+              error
+            );
+          }
+        }
       }
+
+      console.log(
+        chalk.green("Local configuration push completed successfully!")
+      );
+    } catch (error) {
+      console.error(chalk.red("Failed to push local configuration:"), error);
+      throw error;
     }
-    console.log(chalk.green("Database sync completed."));
   }
 
   private async synchronizeConfigurations(): Promise<void> {

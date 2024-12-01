@@ -77,7 +77,9 @@ export const deployFunction = async (
 
   try {
     console.log(chalk.blue("🚀 Creating deployment..."));
+    // Start with 1 as default total since we don't know the chunk size yet
     progressBar.start(1, 0);
+
     const functionResponse = await functions.createDeployment(
       functionId,
       fileObject,
@@ -87,12 +89,17 @@ export const deployFunction = async (
       (progress) => {
         const chunks = progress.chunksUploaded;
         const total = progress.chunksTotal;
-        if (chunks !== undefined && total) {
-          if (chunks === 0 && total !== 0) {
-            progressBar.start(total, 0);
+
+        if (chunks !== undefined && total !== undefined) {
+          // First chunk, initialize the bar with correct total
+          if (chunks === 0) {
+            progressBar.start(total || 100, 0);
           } else {
             progressBar.update(chunks);
+
+            // Check if upload is complete
             if (chunks === total) {
+              progressBar.update(total);
               progressBar.stop();
               console.log(chalk.green("✅ Upload complete!"));
             }
@@ -101,8 +108,13 @@ export const deployFunction = async (
       }
     );
 
+    // Ensure progress bar completes even if callback never fired
+    if (progressBar.getProgress() === 0) {
+      progressBar.update(1);
+      progressBar.stop();
+    }
+
     await fs.promises.unlink(tarPath);
-    console.log(chalk.green("✨ Function deployed successfully!"));
     return functionResponse;
   } catch (error) {
     progressBar.stop();

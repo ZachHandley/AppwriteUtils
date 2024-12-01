@@ -147,6 +147,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.04: Fixed stupid progress bar not updating -- also fixed double text
+- 0.10.03: Fixed `syncDb` to push the configurations properly, accidentally hurt it during `synchronizeConfigurations`
 - 0.10.02: Updated `wipeCollection` to handle errors gracefully
 - 0.10.01: Fixed `predeployCommands` to work
 - 0.10.001: Updated `deployFunction` to not updateConfig if it's already present
