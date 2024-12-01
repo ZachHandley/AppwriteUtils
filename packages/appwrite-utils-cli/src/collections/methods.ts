@@ -129,31 +129,68 @@ async function wipeDocumentsFromCollection(
   databaseId: string,
   collectionId: string
 ) {
-  const initialDocuments = await database.listDocuments(
-    databaseId,
-    collectionId,
-    [Query.limit(1000)]
-  );
-  let documents = initialDocuments.documents;
-  while (documents.length === 1000) {
-    const docsResponse = await database.listDocuments(
+  try {
+    const initialDocuments = await database.listDocuments(
       databaseId,
       collectionId,
       [Query.limit(1000)]
     );
-    documents = documents.concat(docsResponse.documents);
+    let documents = initialDocuments.documents;
+    let totalDocuments = documents.length;
+
+    while (documents.length === 1000) {
+      const docsResponse = await database.listDocuments(
+        databaseId,
+        collectionId,
+        [Query.limit(1000)]
+      );
+      documents = documents.concat(docsResponse.documents);
+      totalDocuments = documents.length;
+    }
+
+    console.log(`Found ${totalDocuments} documents to delete`);
+
+    const maxStackSize = 25; // Reduced batch size
+    for (let i = 0; i < documents.length; i += maxStackSize) {
+      const batch = documents.slice(i, i + maxStackSize);
+      const deletePromises = batch.map(async (doc) => {
+        try {
+          await database.deleteDocument(databaseId, collectionId, doc.$id);
+        } catch (error: any) {
+          // Skip if document doesn't exist or other non-critical errors
+          if (
+            !error.message?.includes(
+              "Document with the requested ID could not be found"
+            )
+          ) {
+            console.error(
+              `Failed to delete document ${doc.$id}:`,
+              error.message
+            );
+          }
+        }
+      });
+
+      await Promise.all(deletePromises);
+      await delay(250); // Increased delay between batches
+
+      console.log(
+        `Deleted batch of ${batch.length} documents (${
+          i + batch.length
+        }/${totalDocuments})`
+      );
+    }
+
+    console.log(
+      `Completed deletion of ${totalDocuments} documents from collection ${collectionId}`
+    );
+  } catch (error) {
+    console.error(
+      `Error wiping documents from collection ${collectionId}:`,
+      error
+    );
+    throw error;
   }
-  const batchDeletePromises = documents.map((doc) =>
-    database.deleteDocument(databaseId, collectionId, doc.$id)
-  );
-  const maxStackSize = 100;
-  for (let i = 0; i < batchDeletePromises.length; i += maxStackSize) {
-    await Promise.all(batchDeletePromises.slice(i, i + maxStackSize));
-    await delay(100);
-  }
-  console.log(
-    `Deleted ${documents.length} documents from collection ${collectionId}`
-  );
 }
 
 export const wipeDatabase = async (

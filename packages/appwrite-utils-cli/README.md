@@ -147,6 +147,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.02: Updated `wipeCollection` to handle errors gracefully
 - 0.10.01: Fixed `predeployCommands` to work
 - 0.10.001: Updated `deployFunction` to not updateConfig if it's already present
 - 0.10.0: Fixed `synchronize configurations` for functions, now you do not need to deploy the function first
