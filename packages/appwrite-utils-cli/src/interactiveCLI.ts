@@ -47,7 +47,7 @@ import { SchemaGenerator } from "./migrations/schemaStrings.js";
 enum CHOICES {
   CREATE_COLLECTION_CONFIG = "Create collection config file",
   CREATE_FUNCTION = "Create a new function, from scratch or using a template",
-  DEPLOY_FUNCTION = "Deploy function",
+  DEPLOY_FUNCTION = "Deploy function(s)",
   DELETE_FUNCTION = "Delete function",
   SETUP_DIRS_FILES = "Setup directories and files",
   SETUP_DIRS_FILES_WITH_EXAMPLE_DATA = "Setup directories and files with example data",
@@ -494,8 +494,8 @@ export class InteractiveCLI {
     }
 
     const functions = await this.selectFunctions(
-      "Select function to deploy:",
-      false,
+      "Select function(s) to deploy:",
+      true,
       true
     );
 
@@ -504,106 +504,107 @@ export class InteractiveCLI {
       return;
     }
 
-    const functionConfig = functions[0];
-    if (!functionConfig) {
-      console.log(chalk.red("Invalid function configuration"));
-      return;
-    }
+    for (const functionConfig of functions) {
+      if (!functionConfig) {
+        console.log(chalk.red("Invalid function configuration"));
+        return;
+      }
 
-    // Ensure functions array exists
-    if (!this.controller.config.functions) {
-      this.controller.config.functions = [];
-    }
+      // Ensure functions array exists
+      if (!this.controller.config.functions) {
+        this.controller.config.functions = [];
+      }
 
-    let functionPath = join(
-      this.controller.getAppwriteFolderPath(),
-      "functions",
-      functionConfig.name
-    );
-
-    if (!fs.existsSync(functionPath)) {
-      console.log(
-        chalk.yellow(
-          `Function not found in primary location, searching subdirectories...`
-        )
-      );
-      const foundPath = await this.findFunctionInSubdirectories(
+      let functionPath = join(
         this.controller.getAppwriteFolderPath(),
-        functionConfig.name.toLowerCase()
+        "functions",
+        functionConfig.name
       );
 
-      if (foundPath) {
-        functionPath = foundPath;
-        functionConfig.dirPath = foundPath;
-      } else {
-        const { shouldDownload } = await inquirer.prompt([
-          {
-            type: "confirm",
-            name: "shouldDownload",
-            message:
-              "Function not found locally. Would you like to download the latest deployment?",
-            default: false,
-          },
-        ]);
+      if (!fs.existsSync(functionPath)) {
+        console.log(
+          chalk.yellow(
+            `Function not found in primary location, searching subdirectories...`
+          )
+        );
+        const foundPath = await this.findFunctionInSubdirectories(
+          this.controller.getAppwriteFolderPath(),
+          functionConfig.name.toLowerCase()
+        );
 
-        if (shouldDownload) {
-          try {
-            console.log(chalk.blue("Downloading latest deployment..."));
-            const { path: downloadedPath, function: remoteFunction } =
-              await downloadLatestFunctionDeployment(
-                this.controller.appwriteServer!,
-                functionConfig.$id,
-                join(this.controller.getAppwriteFolderPath(), "functions")
+        if (foundPath) {
+          functionPath = foundPath;
+          functionConfig.dirPath = foundPath;
+        } else {
+          const { shouldDownload } = await inquirer.prompt([
+            {
+              type: "confirm",
+              name: "shouldDownload",
+              message:
+                "Function not found locally. Would you like to download the latest deployment?",
+              default: false,
+            },
+          ]);
+
+          if (shouldDownload) {
+            try {
+              console.log(chalk.blue("Downloading latest deployment..."));
+              const { path: downloadedPath, function: remoteFunction } =
+                await downloadLatestFunctionDeployment(
+                  this.controller.appwriteServer!,
+                  functionConfig.$id,
+                  join(this.controller.getAppwriteFolderPath(), "functions")
+                );
+              console.log(
+                chalk.green(`✨ Function downloaded to ${downloadedPath}`)
               );
-            console.log(
-              chalk.green(`✨ Function downloaded to ${downloadedPath}`)
-            );
 
-            const existingIndex = this.controller.config.functions.findIndex(
-              (f) => f?.$id === remoteFunction.$id
-            );
+              const existingIndex = this.controller.config.functions.findIndex(
+                (f) => f?.$id === remoteFunction.$id
+              );
 
-            if (existingIndex >= 0) {
-              // Only update the dirPath if function exists
-              this.controller.config.functions[existingIndex].dirPath =
-                downloadedPath;
+              if (existingIndex >= 0) {
+                // Only update the dirPath if function exists
+                this.controller.config.functions[existingIndex].dirPath =
+                  downloadedPath;
+              }
+
+              await this.controller.reloadConfig();
+              functionConfig.dirPath = downloadedPath;
+              functionPath = downloadedPath;
+            } catch (error) {
+              console.error(
+                chalk.red("Failed to download function deployment:"),
+                error
+              );
+              return;
             }
-
-            await this.controller.reloadConfig();
-            functionConfig.dirPath = downloadedPath;
-            functionPath = downloadedPath;
-          } catch (error) {
-            console.error(
-              chalk.red("Failed to download function deployment:"),
-              error
+          } else {
+            console.log(
+              chalk.red(
+                `Function ${functionConfig.name} not found locally. Cannot deploy.`
+              )
             );
             return;
           }
-        } else {
-          console.log(
-            chalk.red(
-              `Function ${functionConfig.name} not found locally. Cannot deploy.`
-            )
-          );
-          return;
         }
       }
-    }
 
-    if (!this.controller.appwriteServer) {
-      console.log(chalk.red("Appwrite server not initialized"));
-      return;
-    }
+      if (!this.controller.appwriteServer) {
+        console.log(chalk.red("Appwrite server not initialized"));
+        return;
+      }
 
-    try {
-      await deployLocalFunction(
-        this.controller.appwriteServer,
-        functionConfig.name,
-        functionConfig
-      );
-      console.log(chalk.green("✨ Function deployed successfully!"));
-    } catch (error) {
-      console.error(chalk.red("Failed to deploy function:"), error);
+      try {
+        await deployLocalFunction(
+          this.controller.appwriteServer,
+          functionConfig.name,
+          functionConfig
+        );
+        console.log(chalk.green("✨ Function deployed successfully!"));
+      } catch (error) {
+        console.error(chalk.red("Failed to deploy function:"), error);
+      }
     }
   }
 

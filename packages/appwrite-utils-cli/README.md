@@ -147,6 +147,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.05: Made deploy function into deploy function(s) -- so you can do more than one at a time
 - 0.10.04: Fixed stupid progress bar not updating -- also fixed double text
 - 0.10.03: Fixed `syncDb` to push the configurations properly, accidentally hurt it during `synchronizeConfigurations`
 - 0.10.02: Updated `wipeCollection` to handle errors gracefully
