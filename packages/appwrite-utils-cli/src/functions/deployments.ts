@@ -3,6 +3,7 @@ import { InputFile } from "node-appwrite/file";
 import { create as createTarball } from "tar";
 import { join } from "node:path";
 import fs from "node:fs";
+import { platform } from "node:os";
 import { type AppwriteFunction, type Specification } from "appwrite-utils";
 import chalk from "chalk";
 import cliProgress from "cli-progress";
@@ -76,6 +77,7 @@ export const deployFunction = async (
 
   try {
     console.log(chalk.blue("🚀 Creating deployment..."));
+    progressBar.start(1, 0);
     const functionResponse = await functions.createDeployment(
       functionId,
       fileObject,
@@ -85,15 +87,15 @@ export const deployFunction = async (
       (progress) => {
         const chunks = progress.chunksUploaded;
         const total = progress.chunksTotal;
-        if (chunks && total) {
-          if (chunks === 0) {
+        if (chunks !== undefined && total) {
+          if (chunks === 0 && total !== 0) {
             progressBar.start(total, 0);
-          } else if (chunks === total) {
-            progressBar.update(total);
-            progressBar.stop();
-            console.log(chalk.green("✅ Upload complete!"));
           } else {
             progressBar.update(chunks);
+            if (chunks === total) {
+              progressBar.stop();
+              console.log(chalk.green("✅ Upload complete!"));
+            }
           }
         }
       }
@@ -132,24 +134,34 @@ export const deployLocalFunction = async (
       functionName.toLowerCase().replace(/\s+/g, "-")
     );
 
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Function directory not found at ${resolvedPath}`);
+  }
+
   if (functionConfig.predeployCommands?.length) {
     console.log(chalk.blue("Executing predeploy commands..."));
+    const isWindows = platform() === "win32";
+
     for (const command of functionConfig.predeployCommands) {
       try {
         console.log(chalk.gray(`Executing: ${command}`));
         execSync(command, {
           cwd: resolvedPath,
           stdio: "inherit",
+          shell: isWindows ? "cmd.exe" : "/bin/sh",
+          windowsHide: true,
         });
       } catch (error) {
         console.error(
-          chalk.red(`Failed to execute predeploy command: ${command}`)
+          chalk.red(`Failed to execute predeploy command: ${command}`),
+          error
         );
-        throw error;
+        throw new Error(``);
       }
     }
   }
 
+  // Only create function if it doesn't exist
   if (!functionExists) {
     await createFunction(
       client,

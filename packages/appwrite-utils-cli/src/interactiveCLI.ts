@@ -35,6 +35,7 @@ import {
   createFunctionTemplate,
   deleteFunction,
   downloadLatestFunctionDeployment,
+  getFunction,
   listFunctions,
   listSpecifications,
 } from "./functions/methods.js";
@@ -391,31 +392,93 @@ export class InteractiveCLI {
     basePath: string,
     functionName: string
   ): Promise<string | null> {
-    const queue = [basePath];
+    // Common locations to check first
+    const commonPaths = [
+      join(process.cwd(), "functions", functionName), // ./functions/functionName
+      join(process.cwd(), functionName), // ./functionName
+      join(basePath, "functions", functionName), // appwriteFolder/functions/functionName
+      join(basePath, functionName), // appwriteFolder/functionName
+      join(basePath, functionName.toLowerCase()), // appwriteFolder/functionName.toLowerCase()
+      join(basePath, functionName.toLowerCase().replace(/\s+/g, "")), // appwriteFolder/functionName.toLowerCase().replace(/\s+/g, "")
+      join(process.cwd(), functionName.toLowerCase()), // ./functionName.toLowerCase()
+    ];
+
+    // Create different variations of the function name for comparison
+    const functionNameVariations = new Set([
+      functionName.toLowerCase(),
+      functionName.toLowerCase().replace(/\s+/g, ""),
+      functionName.toLowerCase().replace(/[^a-z0-9]/g, ""),
+      functionName.toLowerCase().replace(/[-_\s]+/g, ""),
+    ]);
+
+    // Check common locations first
+    for (const path of commonPaths) {
+      try {
+        const stats = await fs.promises.stat(path);
+        if (stats.isDirectory()) {
+          console.log(
+            chalk.green(`Found function at common location: ${path}`)
+          );
+          return path;
+        }
+      } catch (error) {
+        // Path doesn't exist, continue to next
+      }
+    }
+
+    // If not found in common locations, do recursive search
+    console.log(
+      chalk.yellow(
+        "Function not found in common locations, searching subdirectories..."
+      )
+    );
+
+    const queue = [process.cwd(), basePath];
+    const searched = new Set<string>();
 
     while (queue.length > 0) {
       const currentPath = queue.shift()!;
+
+      if (searched.has(currentPath)) continue;
+      searched.add(currentPath);
 
       try {
         const entries = await fs.promises.readdir(currentPath, {
           withFileTypes: true,
         });
 
-        // Check if function exists in current directory
-        const functionPath = join(currentPath, functionName);
-        if (fs.existsSync(functionPath)) {
-          return functionPath;
-        }
-
-        // Add subdirectories to queue
         for (const entry of entries) {
-          if (entry.isDirectory()) {
-            queue.push(join(currentPath, entry.name));
+          const fullPath = join(currentPath, entry.name);
+
+          // Skip node_modules and hidden directories
+          if (
+            entry.isDirectory() &&
+            !entry.name.startsWith(".") &&
+            entry.name !== "node_modules"
+          ) {
+            const entryNameVariations = new Set([
+              entry.name.toLowerCase(),
+              entry.name.toLowerCase().replace(/\s+/g, ""),
+              entry.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+              entry.name.toLowerCase().replace(/[-_\s]+/g, ""),
+            ]);
+
+            // Check if any variation of the entry name matches any variation of the function name
+            const hasMatch = [...functionNameVariations].some((fnVar) =>
+              [...entryNameVariations].includes(fnVar)
+            );
+
+            if (hasMatch) {
+              console.log(chalk.green(`Found function at: ${fullPath}`));
+              return fullPath;
+            }
+
+            queue.push(fullPath);
           }
         }
       } catch (error) {
         console.log(
-          chalk.yellow(`Skipping inaccessible directory: ${currentPath}`)
+          chalk.yellow(`Error reading directory ${currentPath}:`, error)
         );
       }
     }
@@ -447,6 +510,11 @@ export class InteractiveCLI {
       return;
     }
 
+    // Ensure functions array exists
+    if (!this.controller.config.functions) {
+      this.controller.config.functions = [];
+    }
+
     let functionPath = join(
       this.controller.getAppwriteFolderPath(),
       "functions",
@@ -461,7 +529,7 @@ export class InteractiveCLI {
       );
       const foundPath = await this.findFunctionInSubdirectories(
         this.controller.getAppwriteFolderPath(),
-        functionConfig.name
+        functionConfig.name.toLowerCase()
       );
 
       if (foundPath) {
@@ -469,18 +537,13 @@ export class InteractiveCLI {
         functionPath = foundPath;
         functionConfig.dirPath = foundPath;
       } else {
-        console.log(
-          chalk.yellow(
-            `Function ${functionConfig.name} not found locally in any subdirectory`
-          )
-        );
-
         const { shouldDownload } = await inquirer.prompt([
           {
             type: "confirm",
             name: "shouldDownload",
-            message: "Would you like to download the latest deployment?",
-            default: true,
+            message:
+              "Function not found locally. Would you like to download the latest deployment?",
+            default: false,
           },
         ]);
 
@@ -497,53 +560,19 @@ export class InteractiveCLI {
               chalk.green(`✨ Function downloaded to ${downloadedPath}`)
             );
 
-            // Update the config and functions array safely
-            this.controller.config.functions =
-              this.controller.config.functions || [];
-
-            const newFunction = {
-              $id: remoteFunction.$id,
-              name: remoteFunction.name,
-              runtime: remoteFunction.runtime as Runtime,
-              execute: remoteFunction.execute || [],
-              events: remoteFunction.events || [],
-              schedule: remoteFunction.schedule || "",
-              timeout: remoteFunction.timeout || 15,
-              enabled: remoteFunction.enabled !== false,
-              logging: remoteFunction.logging !== false,
-              entrypoint: remoteFunction.entrypoint || "src/index.ts",
-              commands: remoteFunction.commands || "npm install",
-              dirPath: downloadedPath,
-              scopes: (remoteFunction.scopes || []) as FunctionScope[],
-              installationId: remoteFunction.installationId,
-              providerRepositoryId: remoteFunction.providerRepositoryId,
-              providerBranch: remoteFunction.providerBranch,
-              providerSilentMode: remoteFunction.providerSilentMode,
-              providerRootDirectory: remoteFunction.providerRootDirectory,
-              specification: remoteFunction.specification as Specification,
-            };
-
             const existingIndex = this.controller.config.functions.findIndex(
               (f) => f?.$id === remoteFunction.$id
             );
 
             if (existingIndex >= 0) {
-              this.controller.config.functions[existingIndex] = newFunction;
-            } else {
-              this.controller.config.functions.push(newFunction);
+              // Only update the dirPath if function exists
+              this.controller.config.functions[existingIndex].dirPath =
+                downloadedPath;
             }
-
-            const schemaGenerator = new SchemaGenerator(
-              this.controller.config,
-              this.controller.getAppwriteFolderPath()
-            );
-            schemaGenerator.updateConfig(this.controller.config);
-            console.log(
-              chalk.green("✨ Updated appwriteConfig.ts with new function")
-            );
 
             await this.controller.reloadConfig();
             functionConfig.dirPath = downloadedPath;
+            functionPath = downloadedPath;
           } catch (error) {
             console.error(
               chalk.red("Failed to download function deployment:"),
@@ -552,7 +581,11 @@ export class InteractiveCLI {
             return;
           }
         } else {
-          console.log(chalk.yellow("Deployment cancelled"));
+          console.log(
+            chalk.red(
+              `Function ${functionConfig.name} not found locally. Cannot deploy.`
+            )
+          );
           return;
         }
       }
@@ -563,11 +596,16 @@ export class InteractiveCLI {
       return;
     }
 
-    await deployLocalFunction(
-      this.controller.appwriteServer,
-      functionConfig.name,
-      functionConfig
-    );
+    try {
+      await deployLocalFunction(
+        this.controller.appwriteServer,
+        functionConfig.name,
+        functionConfig
+      );
+      console.log(chalk.green("✨ Function deployed successfully!"));
+    } catch (error) {
+      console.error(chalk.red("Failed to deploy function:"), error);
+    }
   }
 
   private async deleteFunction(): Promise<void> {
@@ -599,67 +637,42 @@ export class InteractiveCLI {
 
   private async selectFunctions(
     message: string,
-    multiSelect = true,
-    preferLocal = false
+    multiple: boolean = true,
+    includeRemote: boolean = false
   ): Promise<AppwriteFunction[]> {
-    await this.initControllerIfNeeded();
+    const remoteFunctions = includeRemote
+      ? await listFunctions(this.controller!.appwriteServer!, [
+          Query.limit(1000),
+        ])
+      : { functions: [] };
+    const localFunctions = this.getLocalFunctions();
 
-    const configFunctions = this.getLocalFunctions();
-    let remoteFunctions: Models.Function[] = [];
-
-    try {
-      const functions = await this.controller!.listAllFunctions();
-      remoteFunctions = functions;
-    } catch (error) {
-      console.log(
-        chalk.yellow(
-          `Note: Remote functions not available, using only local functions`
-        )
-      );
-    }
-
-    // Combine functions based on whether we're deploying or not
-    const allFunctions = preferLocal
-      ? [
-          ...configFunctions,
-          ...remoteFunctions.map((f) => AppwriteFunctionSchema.parse(f)),
-        ]
-      : [
-          ...remoteFunctions.map((f) => AppwriteFunctionSchema.parse(f)),
-          ...configFunctions.filter(
-            (f) => !remoteFunctions.some((rf) => rf.name === f.name)
-          ),
-        ];
-
-    if (allFunctions.length === 0) {
-      console.log(chalk.red("No functions available"));
-      return [];
-    }
-
-    const choices = allFunctions
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((func) => ({
-        name: func.name,
-        value: func,
-      }));
+    // Combine functions, preferring local ones
+    const allFunctions = [
+      ...localFunctions,
+      ...remoteFunctions.functions.filter(
+        (rf) => !localFunctions.some((lf) => lf.name === rf.name)
+      ),
+    ];
 
     const { selectedFunctions } = await inquirer.prompt([
       {
-        type: multiSelect ? "checkbox" : "list",
+        type: multiple ? "checkbox" : "list",
         name: "selectedFunctions",
-        message: chalk.blue(message),
-        choices,
+        message,
+        choices: allFunctions.map((f) => ({
+          name: `${f.name} (${f.$id})${
+            localFunctions.some((lf) => lf.name === f.name)
+              ? " (Local)"
+              : " (Remote)"
+          }`,
+          value: f,
+        })),
         loop: true,
-        pageSize: 10,
       },
     ]);
 
-    // For single selection, ensure we return an array
-    if (!multiSelect) {
-      return selectedFunctions ? [selectedFunctions] : [];
-    }
-
-    return selectedFunctions || [];
+    return multiple ? selectedFunctions : [selectedFunctions];
   }
 
   private getLocalFunctions(): AppwriteFunction[] {
@@ -1063,23 +1076,54 @@ export class InteractiveCLI {
         const hasRemote = remoteFunctions.some((rf) => rf.$id === func.$id);
 
         if (hasLocal && hasRemote) {
+          // First try to find the function locally
+          let functionPath = join(
+            this.controller!.getAppwriteFolderPath(),
+            "functions",
+            func.name
+          );
+
+          if (!fs.existsSync(functionPath)) {
+            console.log(
+              chalk.yellow(
+                `Function not found in primary location, searching subdirectories...`
+              )
+            );
+            const foundPath = await this.findFunctionInSubdirectories(
+              this.controller!.getAppwriteFolderPath(),
+              func.name
+            );
+
+            if (foundPath) {
+              console.log(chalk.green(`Found function at: ${foundPath}`));
+              functionPath = foundPath;
+            }
+          }
+
           const { preference } = await inquirer.prompt([
             {
               type: "list",
               name: "preference",
-              message: `Function "${func.name}" exists both locally and remotely. What would you like to do?`,
+              message: `Function "${func.name}" ${
+                functionPath ? "found at " + functionPath : "not found locally"
+              }. What would you like to do?`,
               choices: [
-                {
-                  name: "Keep local version (deploy to remote)",
-                  value: "local",
-                },
+                ...(functionPath
+                  ? [
+                      {
+                        name: "Keep local version (deploy to remote)",
+                        value: "local",
+                      },
+                    ]
+                  : []),
                 { name: "Use remote version (download)", value: "remote" },
+                { name: "Update config only", value: "config" },
                 { name: "Skip this function", value: "skip" },
               ],
             },
           ]);
 
-          if (preference === "local") {
+          if (preference === "local" && functionPath) {
             await this.controller!.deployFunction(func.name);
           } else if (preference === "remote") {
             await downloadLatestFunctionDeployment(
@@ -1087,39 +1131,152 @@ export class InteractiveCLI {
               func.$id,
               join(this.controller!.getAppwriteFolderPath(), "functions")
             );
+          } else if (preference === "config") {
+            const remoteFunction = await getFunction(
+              this.controller!.appwriteServer!,
+              func.$id
+            );
+
+            const newFunction = {
+              $id: remoteFunction.$id,
+              name: remoteFunction.name,
+              runtime: remoteFunction.runtime as Runtime,
+              execute: remoteFunction.execute || [],
+              events: remoteFunction.events || [],
+              schedule: remoteFunction.schedule || "",
+              timeout: remoteFunction.timeout || 15,
+              enabled: remoteFunction.enabled !== false,
+              logging: remoteFunction.logging !== false,
+              entrypoint: remoteFunction.entrypoint || "src/index.ts",
+              commands: remoteFunction.commands || "npm install",
+              scopes: (remoteFunction.scopes || []) as FunctionScope[],
+              installationId: remoteFunction.installationId,
+              providerRepositoryId: remoteFunction.providerRepositoryId,
+              providerBranch: remoteFunction.providerBranch,
+              providerSilentMode: remoteFunction.providerSilentMode,
+              providerRootDirectory: remoteFunction.providerRootDirectory,
+              specification: remoteFunction.specification as Specification,
+            };
+
+            const existingIndex = this.controller!.config!.functions!.findIndex(
+              (f) => f.$id === remoteFunction.$id
+            );
+
+            if (existingIndex >= 0) {
+              this.controller!.config!.functions![existingIndex] = newFunction;
+            } else {
+              this.controller!.config!.functions!.push(newFunction);
+            }
+            console.log(
+              chalk.green(`Updated config for function: ${func.name}`)
+            );
           }
         } else if (hasLocal) {
-          const { deploy } = await inquirer.prompt([
+          // Similar check for local-only functions
+          let functionPath = join(
+            this.controller!.getAppwriteFolderPath(),
+            "functions",
+            func.name
+          );
+
+          if (!fs.existsSync(functionPath)) {
+            const foundPath = await this.findFunctionInSubdirectories(
+              this.controller!.getAppwriteFolderPath(),
+              func.name
+            );
+
+            if (foundPath) {
+              functionPath = foundPath;
+            }
+          }
+
+          const { action } = await inquirer.prompt([
             {
-              type: "confirm",
-              name: "deploy",
-              message: `Function "${func.name}" exists only locally. Deploy to remote?`,
-              default: true,
+              type: "list",
+              name: "action",
+              message: `Function "${func.name}" ${
+                functionPath ? "found at " + functionPath : "not found locally"
+              }. What would you like to do?`,
+              choices: [
+                ...(functionPath
+                  ? [
+                      {
+                        name: "Deploy to remote",
+                        value: "deploy",
+                      },
+                    ]
+                  : []),
+                { name: "Skip this function", value: "skip" },
+              ],
             },
           ]);
 
-          if (deploy) {
+          if (action === "deploy" && functionPath) {
             await this.controller!.deployFunction(func.name);
           }
         } else if (hasRemote) {
-          const { download } = await inquirer.prompt([
+          const { action } = await inquirer.prompt([
             {
-              type: "confirm",
-              name: "download",
-              message: `Function "${func.name}" exists only remotely. Download locally?`,
-              default: true,
+              type: "list",
+              name: "action",
+              message: `Function "${func.name}" exists only remotely. What would you like to do?`,
+              choices: [
+                { name: "Update config only", value: "config" },
+                { name: "Download locally", value: "download" },
+                { name: "Skip this function", value: "skip" },
+              ],
             },
           ]);
 
-          if (download) {
+          if (action === "download") {
             await downloadLatestFunctionDeployment(
               this.controller!.appwriteServer!,
               func.$id,
               join(this.controller!.getAppwriteFolderPath(), "functions")
             );
+          } else if (action === "config") {
+            const remoteFunction = await getFunction(
+              this.controller!.appwriteServer!,
+              func.$id
+            );
+
+            const newFunction = {
+              $id: remoteFunction.$id,
+              name: remoteFunction.name,
+              runtime: remoteFunction.runtime as Runtime,
+              execute: remoteFunction.execute || [],
+              events: remoteFunction.events || [],
+              schedule: remoteFunction.schedule || "",
+              timeout: remoteFunction.timeout || 15,
+              enabled: remoteFunction.enabled !== false,
+              logging: remoteFunction.logging !== false,
+              entrypoint: remoteFunction.entrypoint || "src/index.ts",
+              commands: remoteFunction.commands || "npm install",
+              scopes: (remoteFunction.scopes || []) as FunctionScope[],
+              installationId: remoteFunction.installationId,
+              providerRepositoryId: remoteFunction.providerRepositoryId,
+              providerBranch: remoteFunction.providerBranch,
+              providerSilentMode: remoteFunction.providerSilentMode,
+              providerRootDirectory: remoteFunction.providerRootDirectory,
+              specification: remoteFunction.specification as Specification,
+            };
+
+            this.controller!.config!.functions =
+              this.controller!.config!.functions || [];
+            this.controller!.config!.functions.push(newFunction);
+            console.log(
+              chalk.green(`Added config for remote function: ${func.name}`)
+            );
           }
         }
       }
+
+      // Update schemas after all changes
+      const schemaGenerator = new SchemaGenerator(
+        this.controller!.config!,
+        this.controller!.getAppwriteFolderPath()
+      );
+      schemaGenerator.updateConfig(this.controller!.config!);
     }
 
     console.log(chalk.green("✨ Configurations synchronized successfully!"));

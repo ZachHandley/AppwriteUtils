@@ -147,6 +147,10 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.01: Fixed `predeployCommands` to work
+- 0.10.001: Updated `deployFunction` to not updateConfig if it's already present
+- 0.10.0: Fixed `synchronize configurations` for functions, now you do not need to deploy the function first
+- 0.9.999: Fixed Functions, looks for `./functions` in addition to `appwriteConfigFolder/functions`
 - 0.9.998: Fixed transfer finally, added `--targetDbId` and `--sourceDbId` as aliases
 - 0.9.994: Added function deployment management, in BETA, and fixed document transfer between databases
 - 0.9.993: Fixed `updateFunctionSpecifications` resetting functions to default with undefined values (oops)
