@@ -51,6 +51,10 @@ export const AppwriteFunctionSchema = z.object({
   providerBranch: z.string().optional(),
   providerSilentMode: z.boolean().optional(),
   providerRootDirectory: z.string().optional(),
+  templateRepository: z.string().optional(),
+  templateOwner: z.string().optional(),
+  templateRootDirectory: z.string().optional(),
+  templateVersion: z.string().optional(),
   specification: FunctionSpecifications.optional(),
 });
 

@@ -389,19 +389,16 @@ export class InteractiveCLI {
   }
 
   private async findFunctionInSubdirectories(
-    basePath: string,
+    basePaths: string[],
     functionName: string
   ): Promise<string | null> {
     // Common locations to check first
-    const commonPaths = [
-      join(process.cwd(), "functions", functionName), // ./functions/functionName
-      join(process.cwd(), functionName), // ./functionName
-      join(basePath, "functions", functionName), // appwriteFolder/functions/functionName
-      join(basePath, functionName), // appwriteFolder/functionName
-      join(basePath, functionName.toLowerCase()), // appwriteFolder/functionName.toLowerCase()
-      join(basePath, functionName.toLowerCase().replace(/\s+/g, "")), // appwriteFolder/functionName.toLowerCase().replace(/\s+/g, "")
-      join(process.cwd(), functionName.toLowerCase()), // ./functionName.toLowerCase()
-    ];
+    const commonPaths = basePaths.flatMap((basePath) => [
+      join(basePath, "functions", functionName),
+      join(basePath, functionName),
+      join(basePath, functionName.toLowerCase()),
+      join(basePath, functionName.toLowerCase().replace(/\s+/g, "")),
+    ]);
 
     // Create different variations of the function name for comparison
     const functionNameVariations = new Set([
@@ -433,7 +430,7 @@ export class InteractiveCLI {
       )
     );
 
-    const queue = [process.cwd(), basePath];
+    const queue = [...basePaths];
     const searched = new Set<string>();
 
     while (queue.length > 0) {
@@ -515,78 +512,103 @@ export class InteractiveCLI {
         this.controller.config.functions = [];
       }
 
-      let functionPath = join(
-        this.controller.getAppwriteFolderPath(),
-        "functions",
-        functionConfig.name
-      );
+      const functionNameLower = functionConfig.name
+        .toLowerCase()
+        .replace(/\s+/g, "-");
 
-      if (!fs.existsSync(functionPath)) {
+      // Check locations in priority order:
+      const priorityLocations = [
+        // 1. Config dirPath if specified
+        functionConfig.dirPath,
+        // 2. Appwrite config folder/functions/name
+        join(
+          this.controller.getAppwriteFolderPath(),
+          "functions",
+          functionNameLower
+        ),
+        // 3. Current working directory/functions/name
+        join(process.cwd(), "functions", functionNameLower),
+        // 4. Current working directory/name
+        join(process.cwd(), functionNameLower),
+      ].filter((val): val is string => val !== undefined); // Remove undefined entries (in case dirPath is undefined)
+
+      let functionPath: string | null = null;
+
+      // Check each priority location
+      for (const location of priorityLocations) {
+        if (fs.existsSync(location)) {
+          console.log(chalk.green(`Found function at: ${location}`));
+          functionPath = location;
+          break;
+        }
+      }
+
+      // If not found in priority locations, do a broader search
+      if (!functionPath) {
         console.log(
           chalk.yellow(
-            `Function not found in primary location, searching subdirectories...`
+            `Function not found in primary locations, searching subdirectories...`
           )
         );
-        const foundPath = await this.findFunctionInSubdirectories(
-          this.controller.getAppwriteFolderPath(),
-          functionConfig.name.toLowerCase()
+
+        // Search in both appwrite config directory and current working directory
+        functionPath = await this.findFunctionInSubdirectories(
+          [this.controller.getAppwriteFolderPath(), process.cwd()],
+          functionNameLower
         );
+      }
 
-        if (foundPath) {
-          functionPath = foundPath;
-          functionConfig.dirPath = foundPath;
-        } else {
-          const { shouldDownload } = await inquirer.prompt([
-            {
-              type: "confirm",
-              name: "shouldDownload",
-              message:
-                "Function not found locally. Would you like to download the latest deployment?",
-              default: false,
-            },
-          ]);
+      if (!functionPath) {
+        const { shouldDownload } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "shouldDownload",
+            message:
+              "Function not found locally. Would you like to download the latest deployment?",
+            default: false,
+          },
+        ]);
 
-          if (shouldDownload) {
-            try {
-              console.log(chalk.blue("Downloading latest deployment..."));
-              const { path: downloadedPath, function: remoteFunction } =
-                await downloadLatestFunctionDeployment(
-                  this.controller.appwriteServer!,
-                  functionConfig.$id,
-                  join(this.controller.getAppwriteFolderPath(), "functions")
-                );
-              console.log(
-                chalk.green(`✨ Function downloaded to ${downloadedPath}`)
+        if (shouldDownload) {
+          try {
+            console.log(chalk.blue("Downloading latest deployment..."));
+            const { path: downloadedPath, function: remoteFunction } =
+              await downloadLatestFunctionDeployment(
+                this.controller.appwriteServer!,
+                functionConfig.$id,
+                join(this.controller.getAppwriteFolderPath(), "functions")
               );
-
-              const existingIndex = this.controller.config.functions.findIndex(
-                (f) => f?.$id === remoteFunction.$id
-              );
-
-              if (existingIndex >= 0) {
-                // Only update the dirPath if function exists
-                this.controller.config.functions[existingIndex].dirPath =
-                  downloadedPath;
-              }
-
-              await this.controller.reloadConfig();
-              functionConfig.dirPath = downloadedPath;
-              functionPath = downloadedPath;
-            } catch (error) {
-              console.error(
-                chalk.red("Failed to download function deployment:"),
-                error
-              );
-              return;
-            }
-          } else {
             console.log(
-              chalk.red(
-                `Function ${functionConfig.name} not found locally. Cannot deploy.`
-              )
+              chalk.green(`✨ Function downloaded to ${downloadedPath}`)
+            );
+
+            functionPath = downloadedPath;
+            functionConfig.dirPath = downloadedPath;
+
+            const existingIndex = this.controller.config.functions.findIndex(
+              (f) => f?.$id === remoteFunction.$id
+            );
+
+            if (existingIndex >= 0) {
+              this.controller.config.functions[existingIndex].dirPath =
+                downloadedPath;
+            }
+
+            await this.controller.reloadConfig();
+          } catch (error) {
+            console.error(
+              chalk.red("Failed to download function deployment:"),
+              error
             );
             return;
           }
+        } else {
+          console.log(
+            chalk.red(
+              `Function ${functionConfig.name} not found locally. Cannot deploy.`
+            )
+          );
+          return;
         }
       }
 
@@ -599,7 +621,10 @@ export class InteractiveCLI {
         await deployLocalFunction(
           this.controller.appwriteServer,
           functionConfig.name,
-          functionConfig
+          {
+            ...functionConfig,
+            dirPath: functionPath,
+          }
         );
         console.log(chalk.green("✨ Function deployed successfully!"));
       } catch (error) {
@@ -691,7 +716,14 @@ export class InteractiveCLI {
       logging: f.logging !== false,
       entrypoint: f.entrypoint || "src/index.ts",
       commands: f.commands || "npm install",
+      scopes: f.scopes || [], // Add scopes
       path: f.dirPath || `functions/${f.name}`,
+      dirPath: f.dirPath, // Preserve original dirPath
+      installationId: f.installationId || "",
+      providerRepositoryId: f.providerRepositoryId || "",
+      providerBranch: f.providerBranch || "",
+      providerSilentMode: f.providerSilentMode || false,
+      providerRootDirectory: f.providerRootDirectory || "",
       ...(f.specification ? { specification: f.specification } : {}),
       ...(f.predeployCommands
         ? { predeployCommands: f.predeployCommands }
@@ -1119,7 +1151,7 @@ export class InteractiveCLI {
               )
             );
             const foundPath = await this.findFunctionInSubdirectories(
-              this.controller!.getAppwriteFolderPath(),
+              [this.controller!.getAppwriteFolderPath(), process.cwd()],
               func.name
             );
 
@@ -1210,7 +1242,7 @@ export class InteractiveCLI {
 
           if (!fs.existsSync(functionPath)) {
             const foundPath = await this.findFunctionInSubdirectories(
-              this.controller!.getAppwriteFolderPath(),
+              [this.controller!.getAppwriteFolderPath(), process.cwd()],
               func.name
             );
 

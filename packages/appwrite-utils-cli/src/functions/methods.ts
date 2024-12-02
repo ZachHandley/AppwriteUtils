@@ -7,7 +7,11 @@ import {
 } from "node-appwrite";
 import { join } from "node:path";
 import fs from "node:fs";
-import { type Specification } from "appwrite-utils";
+import {
+  type AppwriteFunction,
+  type FunctionScope,
+  type Specification,
+} from "appwrite-utils";
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
 
@@ -87,53 +91,32 @@ export const deleteFunction = async (client: Client, functionId: string) => {
 
 export const createFunction = async (
   client: Client,
-  functionId: string,
-  name: string,
-  runtime: Runtime,
-  execute?: string[],
-  events?: string[],
-  schedule?: string,
-  timeout?: number,
-  enabled?: boolean,
-  logging?: boolean,
-  entrypoint?: string,
-  commands?: string,
-  scopes?: string[],
-  installationId?: string,
-  providerRepositoryId?: string,
-  providerBranch?: string,
-  providerSilentMode?: boolean,
-  providerRootDirectory?: string,
-  templateRepository?: string,
-  templateOwner?: string,
-  templateRootDirectory?: string,
-  templateVersion?: string,
-  specification?: string
+  functionConfig: AppwriteFunction
 ) => {
   const functions = new Functions(client);
   const functionResponse = await functions.create(
-    functionId,
-    name,
-    runtime,
-    execute,
-    events,
-    schedule,
-    timeout,
-    enabled,
-    logging,
-    entrypoint,
-    commands,
-    scopes,
-    installationId,
-    providerRepositoryId,
-    providerBranch,
-    providerSilentMode,
-    providerRootDirectory,
-    templateRepository,
-    templateOwner,
-    templateRootDirectory,
-    templateVersion,
-    specification
+    functionConfig.$id,
+    functionConfig.name,
+    functionConfig.runtime as Runtime,
+    functionConfig.execute,
+    functionConfig.events,
+    functionConfig.schedule,
+    functionConfig.timeout,
+    functionConfig.enabled,
+    functionConfig.logging,
+    functionConfig.entrypoint,
+    functionConfig.commands,
+    functionConfig.scopes,
+    functionConfig.installationId,
+    functionConfig.providerRepositoryId,
+    functionConfig.providerBranch,
+    functionConfig.providerSilentMode,
+    functionConfig.providerRootDirectory,
+    functionConfig.templateRepository,
+    functionConfig.templateOwner,
+    functionConfig.templateRootDirectory,
+    functionConfig.templateVersion,
+    functionConfig.specification
   );
   return functionResponse;
 };
@@ -151,27 +134,12 @@ export const updateFunctionSpecifications = async (
   }
   const functionFound = curFunction.functions[0];
   try {
-    const functionResponse = await updateFunction(
-      client,
-      functionId,
-      functionFound.name,
-      functionFound.runtime as Runtime,
-      functionFound.execute,
-      functionFound.events,
-      functionFound.schedule,
-      functionFound.timeout,
-      functionFound.enabled,
-      functionFound.logging,
-      functionFound.entrypoint,
-      functionFound.commands,
-      functionFound.scopes,
-      functionFound.installationId,
-      functionFound.providerRepositoryId,
-      functionFound.providerBranch,
-      functionFound.providerSilentMode,
-      functionFound.providerRootDirectory,
-      specification
-    );
+    const functionResponse = await updateFunction(client, {
+      ...functionFound,
+      runtime: functionFound.runtime as Runtime,
+      scopes: functionFound.scopes as FunctionScope[],
+      specification: specification,
+    });
     return functionResponse;
   } catch (error) {
     if (
@@ -198,45 +166,29 @@ export const listSpecifications = async (client: Client) => {
 
 export const updateFunction = async (
   client: Client,
-  functionId: string,
-  name: string,
-  runtime?: Runtime,
-  execute?: string[],
-  events?: string[],
-  schedule?: string,
-  timeout?: number,
-  enabled?: boolean,
-  logging?: boolean,
-  entrypoint?: string,
-  commands?: string,
-  scopes?: string[],
-  installationId?: string,
-  providerRepositoryId?: string,
-  providerBranch?: string,
-  providerSilentMode?: boolean,
-  providerRootDirectory?: string,
-  specification?: Specification
+  functionConfig: AppwriteFunction
 ) => {
   const functions = new Functions(client);
+  console.log(functionConfig);
   const functionResponse = await functions.update(
-    functionId,
-    name,
-    runtime,
-    execute,
-    events,
-    schedule,
-    timeout,
-    enabled,
-    logging,
-    entrypoint,
-    commands,
-    scopes,
-    installationId,
-    providerRepositoryId,
-    providerBranch,
-    providerSilentMode,
-    providerRootDirectory,
-    specification
+    functionConfig.$id,
+    functionConfig.name,
+    functionConfig.runtime as Runtime,
+    functionConfig.execute,
+    functionConfig.events,
+    functionConfig.schedule,
+    functionConfig.timeout,
+    functionConfig.enabled,
+    functionConfig.logging,
+    functionConfig.entrypoint,
+    functionConfig.commands,
+    functionConfig.scopes,
+    functionConfig.installationId,
+    functionConfig.providerRepositoryId,
+    functionConfig.providerBranch,
+    functionConfig.providerSilentMode,
+    functionConfig.providerRootDirectory,
+    functionConfig.specification
   );
   return functionResponse;
 };

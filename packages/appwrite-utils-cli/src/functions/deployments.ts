@@ -1,4 +1,4 @@
-import { Client, Functions, Runtime } from "node-appwrite";
+import { Client, Functions, Runtime, type Models } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { create as createTarball } from "tar";
 import { join, relative } from "node:path";
@@ -11,6 +11,7 @@ import { execSync } from "child_process";
 import {
   createFunction,
   getFunction,
+  updateFunction,
   updateFunctionSpecifications,
 } from "./methods.js";
 import ignore from "ignore";
@@ -147,8 +148,9 @@ export const deployLocalFunction = async (
   functionPath?: string
 ) => {
   let functionExists = true;
+  let functionThatExists: Models.Function;
   try {
-    await getFunction(client, functionConfig.$id);
+    functionThatExists = await getFunction(client, functionConfig.$id);
   } catch (error) {
     functionExists = false;
   }
@@ -192,28 +194,10 @@ export const deployLocalFunction = async (
 
   // Only create function if it doesn't exist
   if (!functionExists) {
-    await createFunction(
-      client,
-      functionConfig.$id,
-      functionConfig.name,
-      functionConfig.runtime as Runtime,
-      functionConfig.execute,
-      functionConfig.events,
-      functionConfig.schedule,
-      functionConfig.timeout,
-      functionConfig.enabled,
-      functionConfig.logging,
-      functionConfig.entrypoint,
-      functionConfig.commands
-    );
-  }
-
-  if (functionConfig.specification) {
-    await updateFunctionSpecifications(
-      client,
-      functionConfig.$id,
-      functionConfig.specification
-    );
+    await createFunction(client, functionConfig);
+  } else {
+    console.log(chalk.blue("Updating function..."));
+    await updateFunction(client, functionConfig);
   }
 
   const deployPath = functionConfig.deployDir

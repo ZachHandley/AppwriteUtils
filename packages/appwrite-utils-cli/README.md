@@ -147,6 +147,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.63: My `collectLocalFunctions` function was failing to add the `scopes` and a few others to the function, accidentally, fixed now
+- 0.10.62: Made `Deploy Function(s)` also update the functions, as not all things (timeout, specification, etc.) are updated via deploy
 - 0.10.61: Fixed ignore haha, also added `ignore` to the `Functions` config, to specify what to ignore when creating the `.tar.gz` file
 - 0.10.051: Added `node_modules` and a few others to the ignore
 - 0.10.05: Made deploy function into deploy function(s) -- so you can do more than one at a time
