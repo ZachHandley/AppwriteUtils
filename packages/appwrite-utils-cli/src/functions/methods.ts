@@ -169,7 +169,6 @@ export const updateFunction = async (
   functionConfig: AppwriteFunction
 ) => {
   const functions = new Functions(client);
-  console.log(functionConfig);
   const functionResponse = await functions.update(
     functionConfig.$id,
     functionConfig.name,
