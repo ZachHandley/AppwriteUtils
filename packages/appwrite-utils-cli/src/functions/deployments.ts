@@ -1,7 +1,7 @@
 import { Client, Functions, Runtime } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { create as createTarball } from "tar";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import fs from "node:fs";
 import { platform } from "node:os";
 import { type AppwriteFunction, type Specification } from "appwrite-utils";
@@ -13,6 +13,7 @@ import {
   getFunction,
   updateFunctionSpecifications,
 } from "./methods.js";
+import ignore from "ignore";
 
 const findFunctionDirectory = (
   basePath: string,
@@ -44,10 +45,16 @@ export const deployFunction = async (
   codePath: string,
   activate: boolean = true,
   entrypoint: string = "index.js",
-  commands: string = "npm install"
+  commands: string = "npm install",
+  ignored: string[] = ["node_modules", ".git", ".vscode", ".DS_Store"]
 ) => {
   const functions = new Functions(client);
-  console.log(chalk.blue("📦 Preparing function deployment..."));
+  console.log(chalk.blue("Preparing function deployment..."));
+
+  // Convert ignored patterns to lowercase for case-insensitive comparison
+  const ignoredLower = ignored.map((pattern) => pattern.toLowerCase());
+
+  const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
 
   const progressBar = new cliProgress.SingleBar({
     format:
@@ -59,12 +66,22 @@ export const deployFunction = async (
     hideCursor: true,
   });
 
-  const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
   await createTarball(
     {
       gzip: true,
       file: tarPath,
       cwd: codePath,
+      filter: (path, stat) => {
+        const relativePath = relative(
+          codePath,
+          join(codePath, path)
+        ).toLowerCase();
+        return !ignoredLower.some(
+          (pattern) =>
+            relativePath.startsWith(pattern) ||
+            relativePath.includes(`/${pattern}`)
+        );
+      },
     },
     ["."]
   );
@@ -209,6 +226,7 @@ export const deployLocalFunction = async (
     deployPath,
     true,
     functionConfig.entrypoint,
-    functionConfig.commands
+    functionConfig.commands,
+    functionConfig.ignore
   );
 };

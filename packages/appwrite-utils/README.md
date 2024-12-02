@@ -126,6 +126,7 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 I also fixed `transfer` to actually transfer
 
+- 0.3.98: Updated Function schema to have a `string[]` var called `ignore` -- to ignore files
 - 0.3.96: Added `SpecificationSchema, type Specification` type defs to support updating function specifications
 - 0.3.95: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
 - 0.3.94: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT
