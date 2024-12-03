@@ -57,6 +57,18 @@ export const deployFunction = async (
 
   const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
 
+  // Verify codePath exists and is a directory
+  if (!fs.existsSync(codePath)) {
+    throw new Error(`Function directory not found at ${codePath}`);
+  }
+
+  const stats = await fs.promises.stat(codePath);
+  if (!stats.isDirectory()) {
+    throw new Error(`${codePath} is not a directory`);
+  }
+
+  console.log(chalk.blue(`Creating tarball from ${codePath}`));
+
   const progressBar = new cliProgress.SingleBar({
     format:
       "Uploading |" +
@@ -77,14 +89,22 @@ export const deployFunction = async (
           codePath,
           join(codePath, path)
         ).toLowerCase();
-        return !ignoredLower.some(
-          (pattern) =>
-            relativePath.startsWith(pattern) ||
-            relativePath.includes(`/${pattern}`)
-        );
+        // Skip if path matches any ignored pattern
+        if (
+          ignoredLower.some(
+            (pattern) =>
+              relativePath.startsWith(pattern) ||
+              relativePath.includes(`/${pattern}`) ||
+              relativePath.includes(`\\${pattern}`)
+          )
+        ) {
+          console.log(chalk.gray(`Ignoring ${path}`));
+          return false;
+        }
+        return true;
       },
     },
-    ["."]
+    ["."] // This now only includes contents of codePath since we set cwd to codePath
   );
 
   const fileBuffer = await fs.promises.readFile(tarPath);
