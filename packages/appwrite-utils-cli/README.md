@@ -147,6 +147,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.66: Fixed `ignore` always being an empty array, if not set, so it properly ignores the defaults
 - 0.10.65: Fixed the stupid local functions not caring about the ignore string, and added `__pycache__` and `.venv` to default ignores
 - 0.10.64: Fixed `Deploy Function(s)` not ignoring things properly
 - 0.10.63: My `collectLocalFunctions` function was failing to add the `scopes` and a few others to the function, accidentally, fixed now
