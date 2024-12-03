@@ -147,6 +147,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.65: Fixed the stupid local functions not caring about the ignore string, and added `__pycache__` and `.venv` to default ignores
 - 0.10.64: Fixed `Deploy Function(s)` not ignoring things properly
 - 0.10.63: My `collectLocalFunctions` function was failing to add the `scopes` and a few others to the function, accidentally, fixed now
 - 0.10.62: Made `Deploy Function(s)` also update the functions, as not all things (timeout, specification, etc.) are updated via deploy

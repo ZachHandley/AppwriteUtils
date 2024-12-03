@@ -47,7 +47,14 @@ export const deployFunction = async (
   activate: boolean = true,
   entrypoint: string = "index.js",
   commands: string = "npm install",
-  ignored: string[] = ["node_modules", ".git", ".vscode", ".DS_Store"]
+  ignored: string[] = [
+    "node_modules",
+    ".git",
+    ".vscode",
+    ".DS_Store",
+    "__pycache__",
+    ".venv",
+  ]
 ) => {
   const functions = new Functions(client);
   console.log(chalk.blue("Preparing function deployment..."));

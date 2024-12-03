@@ -712,6 +712,7 @@ export class InteractiveCLI {
       events: f.events || [],
       schedule: f.schedule || "",
       timeout: f.timeout || 15,
+      ignore: f.ignore || [],
       enabled: f.enabled !== false,
       logging: f.logging !== false,
       entrypoint: f.entrypoint || "src/index.ts",
