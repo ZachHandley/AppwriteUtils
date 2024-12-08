@@ -1,4 +1,4 @@
-import { tryAwaitWithRetry } from "appwrite-utils";
+import { converterFunctions, tryAwaitWithRetry } from "appwrite-utils";
 import {
   Client,
   Databases,
@@ -811,11 +811,15 @@ export const transferUsersLocalToRemote = async (
           // User doesn't exist, proceed with creation
         }
 
+        const phone = user.phone
+          ? converterFunctions.convertPhoneStringToUSInternational(user.phone)
+          : undefined;
+
         await tryAwaitWithRetry(async () =>
           remoteUsers.create(
             user.$id,
             user.email,
-            user.phone, // phone - optional
+            phone, // phone - optional
             user.password, // password - cannot transfer hashed passwords
             user.name
           )

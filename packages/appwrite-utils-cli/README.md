@@ -148,6 +148,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.70: Fixed `--transfer-users` phones
 - 0.10.67: Added `--transfer-users` boolean flag to also transfer users between projects
 - 0.10.66: Fixed `ignore` always being an empty array, if not set, so it properly ignores the defaults
 - 0.10.65: Fixed the stupid local functions not caring about the ignore string, and added `__pycache__` and `.venv` to default ignores
