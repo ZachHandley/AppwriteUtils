@@ -21,7 +21,7 @@ import {
   createOrUpdateIndex,
   createOrUpdateIndexes,
 } from "../collections/indexes.js";
-import { getClient } from "src/utils/getClientFromConfig.js";
+import { getClient } from "../utils/getClientFromConfig.js";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;
@@ -774,15 +774,11 @@ export const transferUsersLocalToRemote = async (
   localUsers: Users,
   endpoint: string,
   projectId: string,
-  apiKey: string,
-  options: {
-    limit?: number;
-    offset?: number;
-  } = {}
+  apiKey: string
 ) => {
   console.log(chalk.blue("Starting user transfer to remote instance..."));
 
-  const client = getClient(endpoint, apiKey, projectId);
+  const client = getClient(endpoint, projectId, apiKey);
   const remoteUsers = new Users(client);
 
   let totalTransferred = 0;
