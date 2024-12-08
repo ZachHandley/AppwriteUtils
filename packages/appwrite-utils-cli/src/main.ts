@@ -31,6 +31,7 @@ interface CliOptions {
   projectId?: string;
   apiKey?: string;
   transfer?: boolean;
+  transferUsers?: boolean;
   fromDbId?: string;
   toDbId?: string;
   fromCollectionId?: string;
@@ -76,6 +77,10 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description:
       "Wipe collections, uses collectionIds option to get the collections to wipe",
+  })
+  .option("transferUsers", {
+    type: "boolean",
+    description: "Transfer users between projects",
   })
   .option("generate", {
     type: "boolean",
@@ -216,6 +221,7 @@ async function main() {
       importData: parsedArgv.import,
       shouldWriteFile: parsedArgv.writeData,
       wipeCollections: parsedArgv.wipeCollections,
+      transferUsers: parsedArgv.transferUsers,
     };
 
     if (parsedArgv.updateFunctionSpec) {
@@ -415,7 +421,7 @@ async function main() {
       }
 
       // Validate that at least one transfer type is specified
-      if (!fromDb && !sourceBucket) {
+      if (!fromDb && !sourceBucket && !options.transferUsers) {
         throw new Error("No source database or bucket specified for transfer");
       }
 
@@ -428,6 +434,7 @@ async function main() {
         transferKey: parsedArgv.remoteApiKey,
         sourceBucket: sourceBucket,
         targetBucket: targetBucket,
+        transferUsers: options.transferUsers,
       };
 
       await controller.transferData(transferOptions);

@@ -5,6 +5,7 @@ import {
   IndexType,
   Query,
   Storage,
+  Users,
   type Models,
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
@@ -20,6 +21,7 @@ import {
   createOrUpdateIndex,
   createOrUpdateIndexes,
 } from "../collections/indexes.js";
+import { getClient } from "src/utils/getClientFromConfig.js";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;
@@ -31,6 +33,7 @@ export interface TransferOptions {
   transferKey?: string;
   sourceBucket?: Models.Bucket;
   targetBucket?: Models.Bucket;
+  transferUsers?: boolean;
 }
 
 export const transferStorageLocalToLocal = async (
@@ -765,4 +768,94 @@ export const transferDatabaseLocalToRemote = async (
       );
     }
   }
+};
+
+export const transferUsersLocalToRemote = async (
+  localUsers: Users,
+  endpoint: string,
+  projectId: string,
+  apiKey: string,
+  options: {
+    limit?: number;
+    offset?: number;
+  } = {}
+) => {
+  console.log(chalk.blue("Starting user transfer to remote instance..."));
+
+  const client = getClient(endpoint, apiKey, projectId);
+  const remoteUsers = new Users(client);
+
+  let totalTransferred = 0;
+  let lastId: string | undefined;
+
+  while (true) {
+    const queries = [Query.limit(100)];
+    if (lastId) {
+      queries.push(Query.cursorAfter(lastId));
+    }
+
+    const usersList = await tryAwaitWithRetry(async () =>
+      localUsers.list(queries)
+    );
+
+    if (usersList.users.length === 0) {
+      break;
+    }
+
+    for (const user of usersList.users) {
+      try {
+        // Check if user already exists in remote
+        try {
+          await tryAwaitWithRetry(async () => remoteUsers.get(user.$id));
+          console.log(
+            chalk.yellow(`User ${user.$id} already exists, skipping...`)
+          );
+          continue;
+        } catch (error: any) {
+          // User doesn't exist, proceed with creation
+        }
+
+        await tryAwaitWithRetry(async () =>
+          remoteUsers.create(
+            user.$id,
+            user.email,
+            user.phone, // phone - optional
+            user.password, // password - cannot transfer hashed passwords
+            user.name
+          )
+        );
+
+        // Update user preferences and status
+        await tryAwaitWithRetry(async () =>
+          remoteUsers.updatePrefs(user.$id, user.prefs)
+        );
+
+        if (!user.emailVerification) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updateEmailVerification(user.$id, false)
+          );
+        }
+
+        if (user.status === false) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updateStatus(user.$id, false)
+          );
+        }
+
+        totalTransferred++;
+        console.log(chalk.green(`Transferred user ${user.$id}`));
+      } catch (error) {
+        console.error(chalk.red(`Failed to transfer user ${user.$id}:`), error);
+      }
+    }
+
+    if (usersList.users.length < 100) {
+      break;
+    }
+    lastId = usersList.users[usersList.users.length - 1].$id;
+  }
+
+  console.log(
+    chalk.green(`Successfully transferred ${totalTransferred} users`)
+  );
 };

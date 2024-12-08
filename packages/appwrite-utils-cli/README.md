@@ -72,6 +72,7 @@ Available options:
 - `--projectId`: Set the Appwrite project ID
 - `--apiKey`: Set the Appwrite API key
 - `--transfer`: Transfer data between databases or collections
+- `--transfer-users`: Transfer users between instances (will not overwrite)
 - `--fromDbId`: Set the source database ID for transfer
 - `--toDbId`: Set the destination database ID for transfer
 - `--fromCollectionId`: Set the source collection ID for transfer
@@ -147,6 +148,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.67: Added `--transfer-users` boolean flag to also transfer users between projects
 - 0.10.66: Fixed `ignore` always being an empty array, if not set, so it properly ignores the defaults
 - 0.10.65: Fixed the stupid local functions not caring about the ignore string, and added `__pycache__` and `.venv` to default ignores
 - 0.10.64: Fixed `Deploy Function(s)` not ignoring things properly

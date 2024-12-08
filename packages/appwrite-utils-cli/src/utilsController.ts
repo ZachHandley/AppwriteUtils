@@ -1,4 +1,11 @@
-import { Client, Databases, Query, Storage, type Models } from "node-appwrite";
+import {
+  Client,
+  Databases,
+  Query,
+  Storage,
+  Users,
+  type Models,
+} from "node-appwrite";
 import {
   type AppwriteConfig,
   type AppwriteFunction,
@@ -46,6 +53,7 @@ import {
   transferDatabaseLocalToRemote,
   transferStorageLocalToLocal,
   transferStorageLocalToRemote,
+  transferUsersLocalToRemote,
   type TransferOptions,
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
@@ -66,6 +74,7 @@ export interface SetupOptions {
   wipeCollections?: boolean;
   wipeDocumentStorage?: boolean;
   wipeUsers?: boolean;
+  transferUsers?: boolean;
   generateSchemas?: boolean;
   importData?: boolean;
   checkDuplicates?: boolean;
@@ -483,6 +492,28 @@ export class UtilsController {
           fromDb.$id,
           targetDb.$id
         );
+      }
+    }
+
+    if (options.transferUsers) {
+      if (!options.isRemote) {
+        console.log(
+          chalk.yellow(
+            "User transfer is only supported for remote transfers. Skipping..."
+          )
+        );
+      } else if (!this.appwriteServer) {
+        throw new Error("Appwrite server not initialized");
+      } else {
+        console.log(chalk.blue("Starting user transfer..."));
+        const localUsers = new Users(this.appwriteServer);
+        await transferUsersLocalToRemote(
+          localUsers,
+          options.transferEndpoint!,
+          options.transferProject!,
+          options.transferKey!
+        );
+        console.log(chalk.green("User transfer completed"));
       }
     }
 
