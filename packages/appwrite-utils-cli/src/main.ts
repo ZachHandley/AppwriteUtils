@@ -15,6 +15,7 @@ import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
 
 interface CliOptions {
+  config?: string;
   it?: boolean;
   dbIds?: string;
   collectionIds?: string;
@@ -50,6 +51,10 @@ interface CliOptions {
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
 
 const argv = yargs(hideBin(process.argv))
+  .option("config", {
+    type: "string",
+    description: "Appwrite Config file name",
+  })
   .option("it", {
     alias: ["interactive", "i"],
     type: "boolean",

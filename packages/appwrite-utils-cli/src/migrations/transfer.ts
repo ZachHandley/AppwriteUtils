@@ -158,7 +158,7 @@ export const transferStorageLocalToRemote = async (
   console.log(
     `Transferring files from current storage ${fromBucketId} to ${endpoint} bucket ${toBucketId}`
   );
-  const client = getAppwriteClient(endpoint, apiKey, projectId);
+  const client = getAppwriteClient(endpoint, projectId, apiKey);
   const remoteStorage = new Storage(client);
   let numberOfFiles = 0;
   let lastFileId: string | undefined;
@@ -815,15 +815,41 @@ export const transferUsersLocalToRemote = async (
           ? converterFunctions.convertPhoneStringToUSInternational(user.phone)
           : undefined;
 
-        await tryAwaitWithRetry(async () =>
-          remoteUsers.create(
-            user.$id,
-            user.email,
-            phone, // phone - optional
-            user.password, // password - cannot transfer hashed passwords
-            user.name
-          )
-        );
+        if (user.hash) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.createArgon2User(
+              user.$id,
+              user.email,
+              user.password!, // password - cannot transfer hashed passwords
+              user.name // phone - optional
+            )
+          );
+          if (phone) {
+            await tryAwaitWithRetry(async () =>
+              remoteUsers.updatePhone(user.$id, phone)
+            );
+          }
+          if (user.labels && user.labels.length > 0) {
+            await tryAwaitWithRetry(async () =>
+              remoteUsers.updateLabels(user.$id, user.labels)
+            );
+          }
+        } else {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.create(
+              user.$id,
+              user.email,
+              phone, // phone - optional
+              user.password, // password - cannot transfer hashed passwords
+              user.name
+            )
+          );
+          if (user.labels && user.labels.length > 0) {
+            await tryAwaitWithRetry(async () =>
+              remoteUsers.updateLabels(user.$id, user.labels)
+            );
+          }
+        }
 
         // Update user preferences and status
         await tryAwaitWithRetry(async () =>

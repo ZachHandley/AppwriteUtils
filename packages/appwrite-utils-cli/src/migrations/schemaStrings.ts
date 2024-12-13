@@ -308,7 +308,7 @@ export default appwriteConfig;
     this.config.collections.forEach((collection) => {
       const schemaString = this.createSchemaString(
         collection.name,
-        collection.attributes
+        collection.attributes || []
       );
       const camelCaseName = toCamelCase(collection.name);
       const schemaPath = path.join(

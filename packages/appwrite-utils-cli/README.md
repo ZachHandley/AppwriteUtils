@@ -148,6 +148,10 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.75: Fixed slight issue writing ZOD Schema for collection without any attributes
+- 0.10.74: Fix moving users, should update Labels now
+- 0.10.73: Fix moving users, passwords should work now (from Appwrite, Argon2)
+- 0.10.71: Fix create template function `__dirname`
 - 0.10.70: Fixed `--transfer-users` phones
 - 0.10.67: Added `--transfer-users` boolean flag to also transfer users between projects
 - 0.10.66: Fixed `ignore` always being an empty array, if not set, so it properly ignores the defaults
