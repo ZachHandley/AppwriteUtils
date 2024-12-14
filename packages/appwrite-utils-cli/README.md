@@ -115,6 +115,8 @@ npx appwrite-utils-cli appwrite-migrate --transfer --fromBucketId sourceBucketId
 
 ### Update Function Specifications
 
+**NOTE: IF IT DOES NOT WORK AND YOU ARE SELF-HOSTED, PLEASE SET MAX CPU_PER_FUNCTION AND RAM_PER_FUNCTION IN YOUR ENV VARS TO > 0, THIS IS A BUG IN 1.6.0**
+
 Update the CPU and RAM specifications for a function:
 
 ```bash
@@ -148,6 +150,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.77: Added disclaimer to update function specifications for bug
 - 0.10.76: Updated CLI commands to not require an `appwriteConfig.ts` if you set API Key, ProjectId, and Endpoint
 - 0.10.75: Fixed slight issue writing ZOD Schema for collection without any attributes
 - 0.10.74: Fix moving users, should update Labels now
