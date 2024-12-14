@@ -115,7 +115,7 @@ npx appwrite-utils-cli appwrite-migrate --transfer --fromBucketId sourceBucketId
 
 ### Update Function Specifications
 
-**NOTE: IF IT DOES NOT WORK AND YOU ARE SELF-HOSTED, PLEASE SET MAX CPU_PER_FUNCTION AND RAM_PER_FUNCTION IN YOUR ENV VARS TO > 0, THIS IS A BUG IN 1.6.0**
+**NOTE: IF IT DOES NOT WORK AND YOU ARE SELF-HOSTED, PLEASE SET MAX CPU_PER_FUNCTION AND RAM_PER_FUNCTION IN YOUR ENV VARS TO > 0, THIS IS A BUG IN 1.6.0 -- YOU SET THE FUNCTION RAM IN MB**
 
 Update the CPU and RAM specifications for a function:
 
