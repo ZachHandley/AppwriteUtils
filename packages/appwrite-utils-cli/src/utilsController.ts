@@ -82,8 +82,8 @@ export interface SetupOptions {
 }
 
 export class UtilsController {
-  private appwriteFolderPath: string;
-  private appwriteConfigPath: string;
+  private appwriteFolderPath?: string;
+  private appwriteConfigPath?: string;
   public config?: AppwriteConfig;
   public appwriteServer?: Client;
   public database?: Databases;
@@ -92,39 +92,101 @@ export class UtilsController {
   public validityRuleDefinitions: ValidationRules = validationRules;
   public afterImportActionsDefinitions: AfterImportActions = afterImportActions;
 
-  constructor(currentUserDir: string) {
-    const basePath = currentUserDir;
-    const appwriteConfigFound = findAppwriteConfig(basePath);
-    if (!appwriteConfigFound) {
-      throw new Error("Failed to find appwriteConfig.ts");
+  constructor(
+    currentUserDir: string,
+    directConfig?: {
+      appwriteEndpoint?: string;
+      appwriteProject?: string;
+      appwriteKey?: string;
     }
-    this.appwriteConfigPath = appwriteConfigFound;
-    this.appwriteFolderPath = path.dirname(appwriteConfigFound);
-    if (!this.appwriteFolderPath) {
-      throw new Error("Failed to get appwriteFolderPath");
+  ) {
+    const basePath = currentUserDir;
+
+    if (directConfig) {
+      let hasErrors = false;
+      if (!directConfig.appwriteEndpoint) {
+        console.log(chalk.red("Appwrite endpoint is required"));
+        hasErrors = true;
+      }
+      if (!directConfig.appwriteProject) {
+        console.log(chalk.red("Appwrite project is required"));
+        hasErrors = true;
+      }
+      if (!directConfig.appwriteKey) {
+        console.log(chalk.red("Appwrite key is required"));
+        hasErrors = true;
+      }
+      if (!hasErrors) {
+        // Only set config if we have all required fields
+        this.appwriteFolderPath = basePath;
+        this.config = {
+          appwriteEndpoint: directConfig.appwriteEndpoint!,
+          appwriteProject: directConfig.appwriteProject!,
+          appwriteKey: directConfig.appwriteKey!,
+          enableBackups: false,
+          backupInterval: 0,
+          backupRetention: 0,
+          enableBackupCleanup: false,
+          enableMockData: false,
+          documentBucketId: "",
+          usersCollectionName: "",
+          databases: [],
+          buckets: [],
+          functions: [],
+        };
+      }
+    } else {
+      // Try to find config file
+      const appwriteConfigFound = findAppwriteConfig(basePath);
+      if (!appwriteConfigFound) {
+        console.log(
+          chalk.yellow(
+            "No appwriteConfig.ts found and no direct configuration provided"
+          )
+        );
+        return;
+      }
+      this.appwriteConfigPath = appwriteConfigFound;
+      this.appwriteFolderPath = path.dirname(appwriteConfigFound);
     }
   }
 
   async init() {
     if (!this.config) {
-      console.log("Initializing appwrite client & loading config...");
-      this.config = await loadConfig(this.appwriteFolderPath);
-      if (!this.config) {
-        throw new Error("Failed to load config");
+      if (this.appwriteFolderPath && this.appwriteConfigPath) {
+        console.log("Loading config from file...");
+        this.config = await loadConfig(this.appwriteFolderPath);
+        if (!this.config) {
+          console.log(chalk.red("Failed to load config from file"));
+          return;
+        }
+      } else {
+        console.log(chalk.red("No configuration available"));
+        return;
       }
-      this.appwriteServer = new Client();
-      this.appwriteServer
-        .setEndpoint(this.config.appwriteEndpoint)
-        .setProject(this.config.appwriteProject)
-        .setKey(this.config.appwriteKey);
-      this.database = new Databases(this.appwriteServer);
-      this.storage = new Storage(this.appwriteServer);
-      this.config.appwriteClient = this.appwriteServer;
     }
+
+    this.appwriteServer = new Client();
+    this.appwriteServer
+      .setEndpoint(this.config.appwriteEndpoint)
+      .setProject(this.config.appwriteProject)
+      .setKey(this.config.appwriteKey);
+
+    this.database = new Databases(this.appwriteServer);
+    this.storage = new Storage(this.appwriteServer);
+    this.config.appwriteClient = this.appwriteServer;
   }
 
   async reloadConfig() {
+    if (!this.appwriteFolderPath) {
+      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      return;
+    }
     this.config = await loadConfig(this.appwriteFolderPath);
+    if (!this.config) {
+      console.log(chalk.red("Failed to load config"));
+      return;
+    }
     this.appwriteServer = new Client();
     this.appwriteServer
       .setEndpoint(this.config.appwriteEndpoint)
@@ -137,14 +199,23 @@ export class UtilsController {
 
   async setupMigrationDatabase() {
     await this.init();
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
     await setupMigrationDatabase(this.config);
   }
 
   async ensureDatabaseConfigBucketsExist(databases: Models.Database[] = []) {
     await this.init();
-    if (!this.storage) throw new Error("Storage not initialized");
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.storage) {
+      console.log(chalk.red("Storage not initialized"));
+      return;
+    }
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
     await ensureDatabaseConfigBucketsExist(
       this.storage,
       this.config,
@@ -154,7 +225,10 @@ export class UtilsController {
 
   async ensureDatabasesExist(databases?: Models.Database[]) {
     await this.init();
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
     await this.setupMigrationDatabase();
     await this.ensureDatabaseConfigBucketsExist(databases);
     await ensureDatabasesExist(this.config, databases);
@@ -165,13 +239,19 @@ export class UtilsController {
     collections?: Models.Collection[]
   ) {
     await this.init();
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
     await ensureCollectionsExist(this.config, database, collections);
   }
 
   async getDatabasesByIds(ids: string[]) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
+    if (!this.database) {
+      console.log(chalk.red("Database not initialized"));
+      return;
+    }
     if (ids.length === 0) return [];
     const dbs = await this.database.list([
       Query.limit(500),
@@ -182,22 +262,29 @@ export class UtilsController {
 
   async wipeOtherDatabases(databasesToKeep: Models.Database[]) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
+    if (!this.database) {
+      console.log(chalk.red("Database not initialized"));
+      return;
+    }
     await wipeOtherDatabases(this.database, databasesToKeep);
   }
 
   async wipeUsers() {
     await this.init();
-    if (!this.config || !this.database)
-      throw new Error("Config or database not initialized");
+    if (!this.config || !this.database) {
+      console.log(chalk.red("Config or database not initialized"));
+      return;
+    }
     const usersController = new UsersController(this.config, this.database);
     await usersController.wipeUsers();
   }
 
   async backupDatabase(database: Models.Database) {
     await this.init();
-    if (!this.database || !this.storage || !this.config)
-      throw new Error("Database, storage, or config not initialized");
+    if (!this.database || !this.storage || !this.config) {
+      console.log(chalk.red("Database, storage, or config not initialized"));
+      return;
+    }
     await backupDatabase(
       this.config,
       this.database,
@@ -208,8 +295,10 @@ export class UtilsController {
 
   async listAllFunctions() {
     await this.init();
-    if (!this.appwriteServer)
-      throw new Error("Appwrite server not initialized");
+    if (!this.appwriteServer) {
+      console.log(chalk.red("Appwrite server not initialized"));
+      return [];
+    }
     const { functions } = await listFunctions(this.appwriteServer, [
       Query.limit(1000),
     ]);
@@ -217,8 +306,15 @@ export class UtilsController {
   }
 
   async findFunctionDirectories() {
+    if (!this.appwriteFolderPath) {
+      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      return new Map();
+    }
     const functionsDir = findFunctionsDir(this.appwriteFolderPath);
-    if (!functionsDir) return new Map();
+    if (!functionsDir) {
+      console.log(chalk.red("Failed to find functions directory"));
+      return new Map();
+    }
 
     const functionDirMap = new Map<string, string>();
     const entries = fs.readdirSync(functionsDir, { withFileTypes: true });
@@ -246,16 +342,20 @@ export class UtilsController {
     functionConfig?: AppwriteFunction
   ) {
     await this.init();
-    if (!this.appwriteServer)
-      throw new Error("Appwrite server not initialized");
+    if (!this.appwriteServer) {
+      console.log(chalk.red("Appwrite server not initialized"));
+      return;
+    }
 
     if (!functionConfig) {
       functionConfig = this.config?.functions?.find(
         (f) => f.name === functionName
       );
     }
-    if (!functionConfig)
-      throw new Error(`Function ${functionName} not found in config`);
+    if (!functionConfig) {
+      console.log(chalk.red(`Function ${functionName} not found in config`));
+      return;
+    }
 
     await deployLocalFunction(
       this.appwriteServer,
@@ -267,8 +367,10 @@ export class UtilsController {
 
   async syncFunctions() {
     await this.init();
-    if (!this.appwriteServer)
-      throw new Error("Appwrite server not initialized");
+    if (!this.appwriteServer) {
+      console.log(chalk.red("Appwrite server not initialized"));
+      return;
+    }
 
     const localFunctions = this.config?.functions || [];
     const remoteFunctions = await listFunctions(this.appwriteServer, [
@@ -365,15 +467,35 @@ export class UtilsController {
 
   async generateSchemas() {
     await this.init();
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
+    if (!this.appwriteFolderPath) {
+      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      return;
+    }
     await generateSchemas(this.config, this.appwriteFolderPath);
   }
 
   async importData(options: SetupOptions = {}) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
-    if (!this.storage) throw new Error("Storage not initialized");
-    if (!this.config) throw new Error("Config not initialized");
+    if (!this.database) {
+      console.log(chalk.red("Database not initialized"));
+      return;
+    }
+    if (!this.storage) {
+      console.log(chalk.red("Storage not initialized"));
+      return;
+    }
+    if (!this.config) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
+    if (!this.appwriteFolderPath) {
+      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      return;
+    }
 
     const importDataActions = new ImportDataActions(
       this.database,
@@ -401,9 +523,19 @@ export class UtilsController {
     config?: AppwriteConfig
   ) {
     await this.init();
-    if (!this.storage) throw new Error("Storage not initialized");
+    if (!this.storage) {
+      console.log(chalk.red("Storage not initialized"));
+      return;
+    }
     const configToUse = config || this.config;
-    if (!configToUse) throw new Error("Config not initialized");
+    if (!configToUse) {
+      console.log(chalk.red("Config not initialized"));
+      return;
+    }
+    if (!this.appwriteFolderPath) {
+      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      return;
+    }
     const appwriteToX = new AppwriteToX(
       configToUse,
       this.appwriteFolderPath,
@@ -417,7 +549,10 @@ export class UtilsController {
     collections: Models.Collection[] = []
   ) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
+    if (!this.database) {
+      console.log(chalk.red("Database not initialized"));
+      return;
+    }
     if (databases.length === 0) {
       const allDatabases = await fetchAllDatabases(this.database);
       databases = allDatabases;
@@ -438,7 +573,8 @@ export class UtilsController {
     let targetDatabases: Models.Database[] = [];
 
     if (!sourceClient) {
-      throw new Error("Source database not initialized");
+      console.log(chalk.red("Source database not initialized"));
+      return;
     }
 
     if (options.isRemote) {
@@ -447,7 +583,8 @@ export class UtilsController {
         !options.transferProject ||
         !options.transferKey
       ) {
-        throw new Error("Remote transfer options are missing");
+        console.log(chalk.red("Remote transfer options are missing"));
+        return;
       }
 
       const remoteClient = getClient(
@@ -474,7 +611,8 @@ export class UtilsController {
       );
 
       if (!fromDb || !targetDb) {
-        throw new Error("Source or target database not found");
+        console.log(chalk.red("Source or target database not found"));
+        return;
       }
 
       if (options.isRemote && targetClient) {
@@ -503,7 +641,8 @@ export class UtilsController {
           )
         );
       } else if (!this.appwriteServer) {
-        throw new Error("Appwrite server not initialized");
+        console.log(chalk.red("Appwrite server not initialized"));
+        return;
       } else {
         console.log(chalk.blue("Starting user transfer..."));
         const localUsers = new Users(this.appwriteServer);

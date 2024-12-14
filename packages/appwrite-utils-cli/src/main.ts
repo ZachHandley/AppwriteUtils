@@ -202,11 +202,24 @@ async function main() {
     const cli = new InteractiveCLI(process.cwd());
     await cli.run();
   } else {
-    const controller = new UtilsController(process.cwd());
+    const directConfig =
+      argv.endpoint || argv.projectId || argv.apiKey
+        ? {
+            appwriteEndpoint: argv.endpoint,
+            appwriteProject: argv.projectId,
+            appwriteKey: argv.apiKey,
+          }
+        : undefined;
+    const controller = new UtilsController(process.cwd(), directConfig);
     await controller.init();
 
     if (argv.setup) {
       await setupDirsFiles(false, process.cwd());
+      return;
+    }
+
+    if (!controller.config) {
+      console.log(chalk.red("No Appwrite connection found"));
       return;
     }
 
@@ -372,8 +385,13 @@ async function main() {
             `Starting database transfer from ${parsedArgv.fromDbId} to ${parsedArgv.toDbId}`
           )
         );
-        fromDb = (await controller.getDatabasesByIds([parsedArgv.fromDbId]))[0];
-
+        fromDb = (
+          await controller.getDatabasesByIds([parsedArgv.fromDbId])
+        )?.[0];
+        if (!fromDb) {
+          console.log(chalk.red("Source database not found"));
+          return;
+        }
         if (isRemote) {
           if (
             !parsedArgv.remoteEndpoint ||
@@ -391,12 +409,21 @@ async function main() {
           targetStorage = new Storage(remoteClient);
           const remoteDbs = await fetchAllDatabases(targetDatabases);
           toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
+          if (!toDb) {
+            console.log(chalk.red("Target database not found"));
+            return;
+          }
         } else {
-          toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))[0];
+          toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))?.[0];
+          if (!toDb) {
+            console.log(chalk.red("Target database not found"));
+            return;
+          }
         }
 
         if (!fromDb || !toDb) {
-          throw new Error("Source or target database not found");
+          console.log(chalk.red("Source or target database not found"));
+          return;
         }
       }
 

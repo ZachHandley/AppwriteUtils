@@ -148,6 +148,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.76: Updated CLI commands to not require an `appwriteConfig.ts` if you set API Key, ProjectId, and Endpoint
 - 0.10.75: Fixed slight issue writing ZOD Schema for collection without any attributes
 - 0.10.74: Fix moving users, should update Labels now
 - 0.10.73: Fix moving users, passwords should work now (from Appwrite, Argon2)

@@ -159,9 +159,13 @@ export class InteractiveCLI {
     }
   }
 
-  private async initControllerIfNeeded(): Promise<void> {
+  private async initControllerIfNeeded(directConfig?: {
+    appwriteEndpoint: string;
+    appwriteProject: string;
+    appwriteKey: string;
+  }): Promise<void> {
     if (!this.controller) {
-      this.controller = new UtilsController(this.currentDir);
+      this.controller = new UtilsController(this.currentDir, directConfig);
       await this.controller.init();
     }
   }
@@ -522,7 +526,7 @@ export class InteractiveCLI {
         functionConfig.dirPath,
         // 2. Appwrite config folder/functions/name
         join(
-          this.controller.getAppwriteFolderPath(),
+          this.controller.getAppwriteFolderPath()!,
           "functions",
           functionNameLower
         ),
@@ -553,7 +557,7 @@ export class InteractiveCLI {
 
         // Search in both appwrite config directory and current working directory
         functionPath = await this.findFunctionInSubdirectories(
-          [this.controller.getAppwriteFolderPath(), process.cwd()],
+          [this.controller.getAppwriteFolderPath()!, process.cwd()],
           functionNameLower
         );
       }
@@ -576,7 +580,7 @@ export class InteractiveCLI {
               await downloadLatestFunctionDeployment(
                 this.controller.appwriteServer!,
                 functionConfig.$id,
-                join(this.controller.getAppwriteFolderPath(), "functions")
+                join(this.controller.getAppwriteFolderPath()!, "functions")
               );
             console.log(
               chalk.green(`✨ Function downloaded to ${downloadedPath}`)
@@ -1140,7 +1144,7 @@ export class InteractiveCLI {
         if (hasLocal && hasRemote) {
           // First try to find the function locally
           let functionPath = join(
-            this.controller!.getAppwriteFolderPath(),
+            this.controller!.getAppwriteFolderPath()!,
             "functions",
             func.name
           );
@@ -1152,7 +1156,7 @@ export class InteractiveCLI {
               )
             );
             const foundPath = await this.findFunctionInSubdirectories(
-              [this.controller!.getAppwriteFolderPath(), process.cwd()],
+              [this.controller!.getAppwriteFolderPath()!, process.cwd()],
               func.name
             );
 
@@ -1191,7 +1195,7 @@ export class InteractiveCLI {
             await downloadLatestFunctionDeployment(
               this.controller!.appwriteServer!,
               func.$id,
-              join(this.controller!.getAppwriteFolderPath(), "functions")
+              join(this.controller!.getAppwriteFolderPath()!, "functions")
             );
           } else if (preference === "config") {
             const remoteFunction = await getFunction(
@@ -1236,14 +1240,14 @@ export class InteractiveCLI {
         } else if (hasLocal) {
           // Similar check for local-only functions
           let functionPath = join(
-            this.controller!.getAppwriteFolderPath(),
+            this.controller!.getAppwriteFolderPath()!,
             "functions",
             func.name
           );
 
           if (!fs.existsSync(functionPath)) {
             const foundPath = await this.findFunctionInSubdirectories(
-              [this.controller!.getAppwriteFolderPath(), process.cwd()],
+              [this.controller!.getAppwriteFolderPath()!, process.cwd()],
               func.name
             );
 
@@ -1294,7 +1298,7 @@ export class InteractiveCLI {
             await downloadLatestFunctionDeployment(
               this.controller!.appwriteServer!,
               func.$id,
-              join(this.controller!.getAppwriteFolderPath(), "functions")
+              join(this.controller!.getAppwriteFolderPath()!, "functions")
             );
           } else if (action === "config") {
             const remoteFunction = await getFunction(
@@ -1336,7 +1340,7 @@ export class InteractiveCLI {
       // Update schemas after all changes
       const schemaGenerator = new SchemaGenerator(
         this.controller!.config!,
-        this.controller!.getAppwriteFolderPath()
+        this.controller!.getAppwriteFolderPath()!
       );
       schemaGenerator.updateConfig(this.controller!.config!);
     }
