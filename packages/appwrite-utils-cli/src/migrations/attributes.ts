@@ -13,24 +13,42 @@ const attributesSame = (
   configAttribute: Attribute
 ): boolean => {
   const attributesToCheck = [
-    'key',
-    'type',
-    'array',
-    'encrypted',
-    'required',
-    'size',
-    'min',
-    'max',
-    'xdefault',
-    'elements',
-    'relationType',
-    'twoWay',
-    'twoWayKey',
-    'onDelete',
-    'relatedCollection'
+    "key",
+    "type",
+    "array",
+    "encrypted",
+    "required",
+    "size",
+    "min",
+    "max",
+    "xdefault",
+    "elements",
+    "relationType",
+    "twoWay",
+    "twoWayKey",
+    "onDelete",
+    "relatedCollection",
   ];
 
-  return attributesToCheck.every(attr => {
+  return attributesToCheck.every((attr) => {
+    // Special handling for min/max values
+    if (attr === "min" || attr === "max") {
+      const dbValue = databaseAttribute[attr as keyof typeof databaseAttribute];
+      const configValue = configAttribute[attr as keyof typeof configAttribute];
+
+      // Use type-specific default values when comparing
+      if (databaseAttribute.type === "integer") {
+        const defaultMin = attr === "min" ? -2147483647 : undefined;
+        const defaultMax = attr === "max" ? 2147483647 : undefined;
+        return (dbValue ?? defaultMin) === (configValue ?? defaultMax);
+      }
+      if (databaseAttribute.type === "float") {
+        const defaultMin = attr === "min" ? -2147483647 : undefined;
+        const defaultMax = attr === "max" ? 2147483647 : undefined;
+        return (dbValue ?? defaultMin) === (configValue ?? defaultMax);
+      }
+    }
+
     // Check if both objects have the attribute
     const dbHasAttr = attr in databaseAttribute;
     const configHasAttr = attr in configAttribute;
@@ -41,7 +59,10 @@ const attributesSame = (
       const configValue = configAttribute[attr as keyof typeof configAttribute];
 
       // Consider undefined and null as equivalent
-      if ((dbValue === undefined || dbValue === null) && (configValue === undefined || configValue === null)) {
+      if (
+        (dbValue === undefined || dbValue === null) &&
+        (configValue === undefined || configValue === null)
+      ) {
         return true;
       }
 
@@ -89,21 +110,35 @@ export const createOrUpdateAttribute = async (
     foundAttribute = undefined;
   }
 
-  if (foundAttribute && attributesSame(foundAttribute, attribute) && updateEnabled) {
+  if (
+    foundAttribute &&
+    attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
     finalAttribute = {
       ...attribute,
       ...foundAttribute,
     };
     action = "update";
-  } else if (foundAttribute && !attributesSame(foundAttribute, attribute) && updateEnabled) {
+  } else if (
+    foundAttribute &&
+    !attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
     console.log(
       `Updating attribute with same key ${attribute.key} but different values`
     );
     finalAttribute = attribute;
     action = "update";
-  } else if (!updateEnabled && foundAttribute && !attributesSame(foundAttribute, attribute)) {
+  } else if (
+    !updateEnabled &&
+    foundAttribute &&
+    !attributesSame(foundAttribute, attribute)
+  ) {
     await db.deleteAttribute(dbId, collection.$id, attribute.key);
-    console.log(`Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`);
+    console.log(
+      `Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`
+    );
     return;
   }
 
@@ -166,7 +201,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.size,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false,
               finalAttribute.encrypted
             )
@@ -179,7 +216,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -207,7 +246,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -233,7 +274,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -249,7 +292,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -263,7 +308,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -277,7 +324,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -289,7 +338,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -303,7 +354,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -315,7 +368,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -329,7 +384,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -341,7 +398,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -355,7 +414,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -367,7 +428,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -381,7 +444,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -393,7 +458,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -408,7 +475,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -421,7 +490,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }

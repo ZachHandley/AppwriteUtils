@@ -150,6 +150,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.78: Fixed `attributesSame` so it will properly update attributes that have changed
 - 0.10.77: Added disclaimer to update function specifications for bug
 - 0.10.76: Updated CLI commands to not require an `appwriteConfig.ts` if you set API Key, ProjectId, and Endpoint
 - 0.10.75: Fixed slight issue writing ZOD Schema for collection without any attributes
