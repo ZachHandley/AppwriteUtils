@@ -150,6 +150,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.86: Fixed `selectCollections` not always filtering by `databaseId`
+- 0.10.85: Added logging to `wipeCollection`
 - 0.10.83: Actually fixed the import oops
 - 0.10.82: Fixed the `lodash` import, replaced with `es-toolkit`
 - 0.10.81: Fixed `wipeCollection` -- it wasn't properly deleting all files in a loop

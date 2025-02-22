@@ -18,6 +18,7 @@ import {
   isPlainObject,
   isString,
   isJSONValue,
+  chunk,
 } from "es-toolkit";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
@@ -157,7 +158,7 @@ async function wipeDocumentsFromCollection(
       const docsResponse = await database.listDocuments(
         databaseId,
         collectionId,
-        [Query.limit(1000)]
+        [Query.limit(1000), ...(cursor ? [Query.cursorAfter(cursor)] : [])]
       );
       documents.push(...docsResponse.documents);
       totalDocuments = documents.length;
@@ -165,13 +166,19 @@ async function wipeDocumentsFromCollection(
         docsResponse.documents.length >= 1000
           ? docsResponse.documents[docsResponse.documents.length - 1].$id
           : undefined;
+      if (totalDocuments % 10000 === 0) {
+        console.log(`Found ${totalDocuments} documents...`);
+      }
     }
 
     console.log(`Found ${totalDocuments} documents to delete`);
 
     const maxStackSize = 50; // Reduced batch size
-    for (let i = 0; i < documents.length; i += maxStackSize) {
-      const batch = documents.slice(i, i + maxStackSize);
+    const docBatches = chunk(documents, maxStackSize);
+    const quarterBatchSize = Math.ceil(docBatches.length / 4);
+
+    for (let i = 0; i < docBatches.length; i++) {
+      const batch = docBatches[i];
       const deletePromises = batch.map(async (doc) => {
         try {
           await tryAwaitWithRetry(async () =>
@@ -193,13 +200,19 @@ async function wipeDocumentsFromCollection(
       });
 
       await Promise.all(deletePromises);
-      await delay(100); // Increased delay between batches
+      await delay(50); // Increased delay between batches
 
-      console.log(
-        `Deleted batch of ${batch.length} documents (${
-          i + batch.length
-        }/${totalDocuments})`
-      );
+      // Log at 25%, 50%, 75% and 100% completion
+      if ((i + 1) % quarterBatchSize === 0 || i === docBatches.length - 1) {
+        const percentComplete = Math.round(((i + 1) / docBatches.length) * 100);
+        const documentsProcessed = Math.min(
+          (i + 1) * maxStackSize,
+          totalDocuments
+        );
+        console.log(
+          `Deleted ${documentsProcessed} documents (${percentComplete}% complete)`
+        );
+      }
     }
 
     console.log(

@@ -233,13 +233,13 @@ export class InteractiveCLI {
     databasesClient: Databases,
     message: string,
     multiSelect = true,
-    preferLocal = false
+    preferLocal = false,
+    shouldFilterByDatabase = false
   ): Promise<Models.Collection[]> {
     await this.initControllerIfNeeded();
 
     const configCollections = this.getLocalCollections();
     let remoteCollections: Models.Collection[] = [];
-    let shouldFilterByDatabase = true;
 
     const dbExists = await databasesClient.list([
       Query.equal("name", database.name),
@@ -1454,6 +1454,8 @@ export class InteractiveCLI {
         database,
         this.controller!.database,
         `Select collections to wipe from ${database.name}:`,
+        true,
+        undefined,
         true
       );
 
