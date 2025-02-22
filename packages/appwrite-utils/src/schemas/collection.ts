@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ulid } from "ulidx";
 import { importDefSchemas } from "./importDef.js";
 import { attributeSchema } from "./attribute.js";
 import { indexSchema } from "./index.js";
@@ -9,7 +8,6 @@ export const CollectionSchema = z.object({
   $id: z
     .string()
     .optional()
-    .default(() => ulid())
     .describe("The ID of the collection, auto generated if not provided"),
   enabled: z
     .boolean()

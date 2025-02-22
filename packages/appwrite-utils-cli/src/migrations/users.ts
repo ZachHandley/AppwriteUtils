@@ -12,13 +12,14 @@ import {
   type AuthUser,
   type AuthUserCreate,
 } from "../schemas/authUser.js";
-import _ from "lodash";
 import { logger } from "./logging.js";
 import { splitIntoBatches } from "./migrationHelper.js";
 import {
   getAppwriteClient,
   tryAwaitWithRetry,
 } from "../utils/helperFunctions.js";
+import { isUndefined } from "es-toolkit/compat";
+import { isEmpty } from "es-toolkit/compat";
 
 export class UsersController {
   private config: AppwriteConfig;
@@ -123,17 +124,17 @@ export class UsersController {
           `changeMe${item.email?.toLowerCase()}` || `changeMePlease`,
           item.name || undefined
         );
-  
+
         if (item.labels) {
           await this.users.updateLabels(createdUser.$id, item.labels);
         }
         if (item.prefs) {
           await this.users.updatePrefs(createdUser.$id, item.prefs);
         }
-        
+
         return createdUser;
       }); // Set throwError to true since we want to handle errors
-  
+
       return user;
     } catch (e) {
       if (e instanceof Error) {
@@ -181,8 +182,8 @@ export class UsersController {
         if (
           item.email &&
           item.email !== userToReturn.email &&
-          !_.isEmpty(item.email) &&
-          !_.isUndefined(item.email)
+          !isEmpty(item.email) &&
+          !isUndefined(item.email)
         ) {
           const emailExists = await this.users.list([
             Query.equal("email", item.email),
@@ -213,7 +214,7 @@ export class UsersController {
           item.phone !== userToReturn.phone &&
           item.phone.length < 15 &&
           item.phone.startsWith("+") &&
-          (_.isUndefined(userToReturn.phone) || _.isEmpty(userToReturn.phone))
+          (isUndefined(userToReturn.phone) || isEmpty(userToReturn.phone))
         ) {
           const userFoundWithPhone = await this.users.list([
             Query.equal("phone", item.phone),

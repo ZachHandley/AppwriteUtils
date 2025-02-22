@@ -5,7 +5,6 @@ import {
   type Attribute,
 } from "appwrite-utils";
 import { nameToIdMapping, enqueueOperation } from "../migrations/queue.js";
-import _ from "lodash";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import chalk from "chalk";
 
@@ -14,24 +13,24 @@ const attributesSame = (
   configAttribute: Attribute
 ): boolean => {
   const attributesToCheck = [
-    'key',
-    'type',
-    'array',
-    'encrypted',
-    'required',
-    'size',
-    'min',
-    'max',
-    'xdefault',
-    'elements',
-    'relationType',
-    'twoWay',
-    'twoWayKey',
-    'onDelete',
-    'relatedCollection'
+    "key",
+    "type",
+    "array",
+    "encrypted",
+    "required",
+    "size",
+    "min",
+    "max",
+    "xdefault",
+    "elements",
+    "relationType",
+    "twoWay",
+    "twoWayKey",
+    "onDelete",
+    "relatedCollection",
   ];
 
-  return attributesToCheck.every(attr => {
+  return attributesToCheck.every((attr) => {
     // Check if both objects have the attribute
     const dbHasAttr = attr in databaseAttribute;
     const configHasAttr = attr in configAttribute;
@@ -42,7 +41,10 @@ const attributesSame = (
       const configValue = configAttribute[attr as keyof typeof configAttribute];
 
       // Consider undefined and null as equivalent
-      if ((dbValue === undefined || dbValue === null) && (configValue === undefined || configValue === null)) {
+      if (
+        (dbValue === undefined || dbValue === null) &&
+        (configValue === undefined || configValue === null)
+      ) {
         return true;
       }
 
@@ -91,10 +93,18 @@ export const createOrUpdateAttribute = async (
     foundAttribute = undefined;
   }
 
-  if (foundAttribute && attributesSame(foundAttribute, attribute) && updateEnabled) {
+  if (
+    foundAttribute &&
+    attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
     // No need to do anything, they are the same
     return;
-  } else if (foundAttribute && !attributesSame(foundAttribute, attribute) && updateEnabled) {
+  } else if (
+    foundAttribute &&
+    !attributesSame(foundAttribute, attribute) &&
+    updateEnabled
+  ) {
     // console.log(
     //   `Updating attribute with same key ${attribute.key} but different values`
     // );
@@ -103,9 +113,15 @@ export const createOrUpdateAttribute = async (
       ...attribute,
     };
     action = "update";
-  } else if (!updateEnabled && foundAttribute && !attributesSame(foundAttribute, attribute)) {
+  } else if (
+    !updateEnabled &&
+    foundAttribute &&
+    !attributesSame(foundAttribute, attribute)
+  ) {
     await db.deleteAttribute(dbId, collection.$id, attribute.key);
-    console.log(`Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`);
+    console.log(
+      `Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`
+    );
     return;
   }
 
@@ -168,7 +184,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.size,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false,
               finalAttribute.encrypted
             )
@@ -181,7 +199,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -209,7 +229,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -235,7 +257,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -251,7 +275,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -265,7 +291,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.min || -2147483647,
               finalAttribute.max || 2147483647,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -279,7 +307,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -291,7 +321,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -305,7 +337,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -317,7 +351,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -331,7 +367,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -343,7 +381,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -357,7 +397,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -369,7 +411,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -383,7 +427,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -395,7 +441,9 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -410,7 +458,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null,
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null,
               finalAttribute.array || false
             )
         );
@@ -423,7 +473,9 @@ export const createOrUpdateAttribute = async (
               finalAttribute.key,
               finalAttribute.elements,
               finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required ? finalAttribute.xdefault : null
+              finalAttribute.xdefault !== undefined && !finalAttribute.required
+                ? finalAttribute.xdefault
+                : null
             )
         );
       }
@@ -468,26 +520,47 @@ export const createUpdateCollectionAttributes = async (
   attributes: Attribute[]
 ): Promise<void> => {
   console.log(
-    chalk.green(`Creating/Updating attributes for collection: ${collection.name}`)
+    chalk.green(
+      `Creating/Updating attributes for collection: ${collection.name}`
+    )
   );
 
-  // @ts-expect-error
-  const existingAttributes: Attribute[] = collection.attributes.map((attr) => parseAttribute(attr)) || [];
+  const existingAttributes: Attribute[] =
+    // @ts-expect-error
+    collection.attributes.map((attr) => parseAttribute(attr)) || [];
 
-  const attributesToRemove = existingAttributes.filter((attr) => !attributes.some((a) => a.key === attr.key));
-  const indexesToRemove = collection.indexes.filter((index) => attributesToRemove.some((attr) => index.attributes.includes(attr.key)));
+  const attributesToRemove = existingAttributes.filter(
+    (attr) => !attributes.some((a) => a.key === attr.key)
+  );
+  const indexesToRemove = collection.indexes.filter((index) =>
+    attributesToRemove.some((attr) => index.attributes.includes(attr.key))
+  );
 
   if (attributesToRemove.length > 0) {
     if (indexesToRemove.length > 0) {
-      console.log(chalk.red(`Removing indexes as they rely on an attribute that is being removed: ${indexesToRemove.map((index) => index.key).join(", ")}`));
+      console.log(
+        chalk.red(
+          `Removing indexes as they rely on an attribute that is being removed: ${indexesToRemove
+            .map((index) => index.key)
+            .join(", ")}`
+        )
+      );
       for (const index of indexesToRemove) {
-        await tryAwaitWithRetry(async () => await db.deleteIndex(dbId, collection.$id, index.key));
+        await tryAwaitWithRetry(
+          async () => await db.deleteIndex(dbId, collection.$id, index.key)
+        );
         await delay(100);
       }
     }
     for (const attr of attributesToRemove) {
-      console.log(chalk.red(`Removing attribute: ${attr.key} as it is no longer in the collection`));
-      await tryAwaitWithRetry(async () => await db.deleteAttribute(dbId, collection.$id, attr.key));
+      console.log(
+        chalk.red(
+          `Removing attribute: ${attr.key} as it is no longer in the collection`
+        )
+      );
+      await tryAwaitWithRetry(
+        async () => await db.deleteAttribute(dbId, collection.$id, attr.key)
+      );
       await delay(50);
     }
   }
@@ -496,7 +569,10 @@ export const createUpdateCollectionAttributes = async (
   for (let i = 0; i < attributes.length; i += batchSize) {
     const batch = attributes.slice(i, i + batchSize);
     const attributePromises = batch.map((attribute) =>
-      tryAwaitWithRetry(async () => await createOrUpdateAttribute(db, dbId, collection, attribute))
+      tryAwaitWithRetry(
+        async () =>
+          await createOrUpdateAttribute(db, dbId, collection, attribute)
+      )
     );
 
     const results = await Promise.allSettled(attributePromises);

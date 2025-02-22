@@ -13,7 +13,6 @@ import type {
   AttributeMappings,
 } from "appwrite-utils";
 import type { ImportDataActions } from "./importDataActions.js";
-import _ from "lodash";
 import { areCollectionNamesSame, tryAwaitWithRetry } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
@@ -104,7 +103,11 @@ export class ImportController {
         await dataLoader.start(db.$id);
         await this.importCollections(db, dataLoader, specificCollections);
         await resolveAndUpdateRelationships(db.$id, this.database, this.config);
-        await this.executePostImportActions(db.$id, dataLoader, specificCollections);
+        await this.executePostImportActions(
+          db.$id,
+          dataLoader,
+          specificCollections
+        );
       } else if (databaseRan.$id !== db.$id) {
         await this.updateOthersToFinalData(databaseRan, db);
       }
@@ -137,27 +140,41 @@ export class ImportController {
       );
 
       const allBuckets = await this.storage.listBuckets([Query.limit(1000)]);
-      const bucketsWithDbIdInThem = allBuckets.buckets.filter(bucket => bucket.name.toLowerCase().includes(updatedDb.$id.toLowerCase()));
-      const configuredUpdatedBucketId = `${this.config.documentBucketId}_${updatedDb.$id.toLowerCase().trim().replace(" ", "")}`;
-      const configuredTargetBucketId = `${this.config.documentBucketId}_${targetDb.$id.toLowerCase().trim().replace(" ", "")}`;
+      const bucketsWithDbIdInThem = allBuckets.buckets.filter((bucket) =>
+        bucket.name.toLowerCase().includes(updatedDb.$id.toLowerCase())
+      );
+      const configuredUpdatedBucketId = `${
+        this.config.documentBucketId
+      }_${updatedDb.$id.toLowerCase().trim().replace(" ", "")}`;
+      const configuredTargetBucketId = `${
+        this.config.documentBucketId
+      }_${targetDb.$id.toLowerCase().trim().replace(" ", "")}`;
 
       let sourceBucketId: string | undefined;
       let targetBucketId: string | undefined;
 
-      if (bucketsWithDbIdInThem.find(bucket => bucket.$id === configuredUpdatedBucketId)) {
+      if (
+        bucketsWithDbIdInThem.find(
+          (bucket) => bucket.$id === configuredUpdatedBucketId
+        )
+      ) {
         sourceBucketId = configuredUpdatedBucketId;
-      } else if (bucketsWithDbIdInThem.find(bucket => bucket.$id === configuredTargetBucketId)) {
+      } else if (
+        bucketsWithDbIdInThem.find(
+          (bucket) => bucket.$id === configuredTargetBucketId
+        )
+      ) {
         targetBucketId = configuredTargetBucketId;
       }
 
       if (!sourceBucketId) {
-        sourceBucketId = updatedDbConfig?.bucket?.$id ||
-          bucketsWithDbIdInThem[0]?.$id;
+        sourceBucketId =
+          updatedDbConfig?.bucket?.$id || bucketsWithDbIdInThem[0]?.$id;
       }
 
       if (!targetBucketId) {
-        targetBucketId = targetDbConfig?.bucket?.$id ||
-          bucketsWithDbIdInThem[0]?.$id;
+        targetBucketId =
+          targetDbConfig?.bucket?.$id || bucketsWithDbIdInThem[0]?.$id;
       }
 
       if (sourceBucketId && targetBucketId) {
@@ -170,13 +187,23 @@ export class ImportController {
     }
   }
 
-  async importCollections(db: ConfigDatabase, dataLoader: DataLoader, specificCollections?: string[]) {
-    const collectionsToImport = specificCollections || (this.config.collections ? this.config.collections.map(c => c.name) : []);
+  async importCollections(
+    db: ConfigDatabase,
+    dataLoader: DataLoader,
+    specificCollections?: string[]
+  ) {
+    const collectionsToImport =
+      specificCollections ||
+      (this.config.collections
+        ? this.config.collections.map((c) => c.name)
+        : []);
 
     for (const collection of this.config.collections || []) {
       if (collectionsToImport.includes(collection.name)) {
-        let isUsersCollection = this.config.usersCollectionName && (dataLoader.getCollectionKey(this.config.usersCollectionName) ===
-            dataLoader.getCollectionKey(collection.name));
+        let isUsersCollection =
+          this.config.usersCollectionName &&
+          dataLoader.getCollectionKey(this.config.usersCollectionName) ===
+            dataLoader.getCollectionKey(collection.name);
         const importOperationId = dataLoader.collectionImportOperations.get(
           dataLoader.getCollectionKey(collection.name)
         );
@@ -197,7 +224,10 @@ export class ImportController {
             dataLoader.getCollectionKey("users")
           );
           const usersData = usersDataMap?.data;
-          const usersController = new UsersController(this.config, this.database);
+          const usersController = new UsersController(
+            this.config,
+            this.database
+          );
           if (usersData) {
             console.log("Found users data", usersData.length);
             const userDataBatches = createBatches(usersData);
@@ -230,7 +260,9 @@ export class ImportController {
                   );
                   return usersController.createUserAndReturn(item.finalData);
                 });
-              const promiseResults = await Promise.allSettled(userBatchPromises);
+              const promiseResults = await Promise.allSettled(
+                userBatchPromises
+              );
               for (const item of batch) {
                 if (item && item.finalData) {
                   dataLoader.userExistsMap.set(
@@ -298,7 +330,7 @@ export class ImportController {
                 async () =>
                   await this.database.createDocument(
                     db.$id,
-                    collection.$id,
+                    collection.$id!,
                     id,
                     item.finalData
                   )
@@ -324,13 +356,27 @@ export class ImportController {
     }
   }
 
-  async executePostImportActions(dbId: string, dataLoader: DataLoader, specificCollections?: string[]) {
+  async executePostImportActions(
+    dbId: string,
+    dataLoader: DataLoader,
+    specificCollections?: string[]
+  ) {
     console.log("Executing post-import actions...");
-    const collectionsToProcess = specificCollections && specificCollections.length > 0 ? specificCollections : (this.config.collections ? this.config.collections.map(c => c.name) : Array.from(dataLoader.importMap.keys()));
+    const collectionsToProcess =
+      specificCollections && specificCollections.length > 0
+        ? specificCollections
+        : this.config.collections
+        ? this.config.collections.map((c) => c.name)
+        : Array.from(dataLoader.importMap.keys());
     console.log("Collections to process:", collectionsToProcess);
     // Iterate over each collection in the importMap
-    for (const [collectionKey, collectionData] of dataLoader.importMap.entries()) {
-      const allCollectionKeys = collectionsToProcess.map(c => dataLoader.getCollectionKey(c));
+    for (const [
+      collectionKey,
+      collectionData,
+    ] of dataLoader.importMap.entries()) {
+      const allCollectionKeys = collectionsToProcess.map((c) =>
+        dataLoader.getCollectionKey(c)
+      );
       if (allCollectionKeys.includes(collectionKey)) {
         console.log(
           `Processing post-import actions for collection: ${collectionKey}`
@@ -360,7 +406,9 @@ export class ImportController {
           }
         }
       } else {
-        console.log(`Skipping collection: ${collectionKey} because it's not valid for post-import actions`);
+        console.log(
+          `Skipping collection: ${collectionKey} because it's not valid for post-import actions`
+        );
       }
     }
   }

@@ -239,6 +239,7 @@ export class InteractiveCLI {
 
     const configCollections = this.getLocalCollections();
     let remoteCollections: Models.Collection[] = [];
+    let shouldFilterByDatabase = true;
 
     const dbExists = await databasesClient.list([
       Query.equal("name", database.name),
@@ -249,6 +250,7 @@ export class InteractiveCLI {
           `Database "${database.name}" does not exist, using only local collection options`
         )
       );
+      shouldFilterByDatabase = false;
     } else {
       remoteCollections = await fetchAllCollections(
         database.$id,
@@ -256,7 +258,7 @@ export class InteractiveCLI {
       );
     }
 
-    const allCollections = preferLocal
+    let allCollections = preferLocal
       ? remoteCollections.reduce(
           (acc, remoteCollection) => {
             if (!acc.some((c) => c.name === remoteCollection.name)) {
@@ -272,6 +274,12 @@ export class InteractiveCLI {
             (c) => !remoteCollections.some((rc) => rc.name === c.name)
           ),
         ];
+
+    if (shouldFilterByDatabase) {
+      allCollections = allCollections.filter(
+        (c) => c.databaseId === database.$id
+      );
+    }
 
     const hasLocalAndRemote =
       allCollections.some((coll) =>

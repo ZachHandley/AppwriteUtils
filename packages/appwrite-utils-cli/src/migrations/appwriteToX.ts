@@ -8,7 +8,7 @@ import {
   type Models,
   type Permission,
 } from "node-appwrite";
-import { fetchAllCollections } from "./collections.js";
+import { fetchAllCollections } from "../collections/methods.js";
 import { fetchAllDatabases } from "./databases.js";
 import {
   CollectionSchema,
@@ -138,7 +138,7 @@ export class AppwriteToX {
           .map((attr: any) => {
             return parseAttribute(attr);
           })
-          .filter((attribute) =>
+          .filter((attribute: Attribute) =>
             attribute.type === "relationship"
               ? attribute.side !== "child"
               : true
@@ -169,10 +169,10 @@ export class AppwriteToX {
           }
         }
         this.collToAttributeMap.set(collection.name, collAttributes);
-        const finalIndexes = collection.indexes.map((index) => {
+        const finalIndexes = collection.indexes.map((index: Models.Index) => {
           return {
             ...index,
-            orders: index.orders?.filter((order) => {
+            orders: index.orders?.filter((order: string) => {
               return order !== null && order;
             }),
           };

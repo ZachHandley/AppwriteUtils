@@ -1,5 +1,5 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { fetchAllCollections } from "./collections.js";
+import { fetchAllCollections } from "../collections/methods.js";
 import type {
   AppwriteConfig,
   Attribute,

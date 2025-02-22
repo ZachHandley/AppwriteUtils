@@ -16,14 +16,14 @@ import path from "path";
 import fs from "fs";
 import { convertObjectByAttributeMappings } from "./converters.js";
 import { z } from "zod";
-import { checkForCollection } from "./collections.js";
+import { checkForCollection } from "../collections/methods.js";
 import { ID, Users, type Databases } from "node-appwrite";
 import { logger } from "./logging.js";
 import { findOrCreateOperation, updateOperation } from "./migrationHelper.js";
 import { AuthUserCreateSchema } from "../schemas/authUser.js";
-import _ from "lodash";
 import { UsersController } from "./users.js";
 import { finalizeByAttributeMap } from "../utils/helperFunctions.js";
+import { isEmpty } from "es-toolkit/compat";
 
 // Define a schema for the structure of collection import data using Zod for validation
 export const CollectionImportDataSchema = z.object({
@@ -315,7 +315,7 @@ export class DataLoader {
         // Find or create an import operation for the collection
         const collectionImportOperation = await findOrCreateOperation(
           this.database,
-          collection.$id,
+          collection.$id!,
           "importData"
         );
         // Store the operation ID in the map
@@ -556,7 +556,7 @@ export class DataLoader {
                 // Skip if value to match is missing or empty
                 if (
                   !sourceValue ||
-                  _.isEmpty(sourceValue) ||
+                  isEmpty(sourceValue) ||
                   sourceValue === null
                 )
                   continue;
@@ -953,7 +953,7 @@ export class DataLoader {
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         this.database,
-        collection.$id,
+        collection.$id!,
         "importData"
       );
       // Store the operation ID in the map
@@ -1180,7 +1180,7 @@ export class DataLoader {
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         this.database,
-        collection.$id,
+        collection.$id!,
         "importData"
       );
       // Store the operation ID in the map

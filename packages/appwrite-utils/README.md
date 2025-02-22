@@ -126,6 +126,8 @@ This setup ensures that your interactions with Appwrite are more robust, less er
 
 I also fixed `transfer` to actually transfer
 
+- 0.4.1: Removed `ulidx` requirement as it was breaking Cloudflare Builds
+- 0.4.0: Updated Function scopes to include messaging and other
 - 0.3.99: Updated Function schema to have the template vars as well
 - 0.3.98: Updated Function schema to have a `string[]` var called `ignore` -- to ignore files
 - 0.3.96: Added `SpecificationSchema, type Specification` type defs to support updating function specifications

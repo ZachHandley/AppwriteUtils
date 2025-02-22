@@ -1,5 +1,3 @@
-import { ID, IndexType, Permission } from "node-appwrite";
-import { z } from "zod";
 import { type Attribute, attributeSchema } from "../schemas/attribute.js";
 import { stringAttributeSchema } from "../schemas/stringAttribute.js";
 import { integerAttributeSchema } from "../schemas/integerAttribute.js";

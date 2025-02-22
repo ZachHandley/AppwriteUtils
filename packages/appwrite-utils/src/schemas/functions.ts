@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { RuntimeSchema } from "./runtime.js";
-import { ulid } from "ulidx";
 import { FunctionScopes } from "./functionScopes.js";
 import { FunctionSpecifications } from "./functionSpecifications.js";
 
@@ -31,7 +30,7 @@ import { FunctionSpecifications } from "./functionSpecifications.js";
  */
 export const AppwriteFunctionSchema = z.object({
   dirPath: z.string().optional(),
-  $id: z.string().default(ulid()),
+  $id: z.string(),
   name: z.string(),
   runtime: RuntimeSchema,
   execute: z.array(z.string()),

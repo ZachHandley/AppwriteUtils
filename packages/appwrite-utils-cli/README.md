@@ -150,6 +150,10 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+- 0.10.83: Actually fixed the import oops
+- 0.10.82: Fixed the `lodash` import, replaced with `es-toolkit`
+- 0.10.81: Fixed `wipeCollection` -- it wasn't properly deleting all files in a loop
+- 0.10.80: Updated `appwrite-utils` req
 - 0.10.78: Fixed `attributesSame` so it will properly update attributes that have changed
 - 0.10.77: Added disclaimer to update function specifications for bug
 - 0.10.76: Updated CLI commands to not require an `appwriteConfig.ts` if you set API Key, ProjectId, and Endpoint

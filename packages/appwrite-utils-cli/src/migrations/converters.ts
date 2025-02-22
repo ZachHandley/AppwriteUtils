@@ -1,7 +1,5 @@
-import _ from "lodash";
 import { converterFunctions, type AttributeMappings } from "appwrite-utils";
-
-const { cloneDeep, isObject } = _;
+import { cloneDeep, isPlainObject } from "es-toolkit";
 
 /**
  * Deeply converts all properties of an object (or array) to strings.
@@ -11,7 +9,7 @@ const { cloneDeep, isObject } = _;
 export const deepAnyToString = (data: any): any => {
   if (Array.isArray(data)) {
     return data.map((item) => deepAnyToString(item));
-  } else if (isObject(data)) {
+  } else if (isPlainObject(data)) {
     return Object.keys(data).reduce((acc, key) => {
       acc[key] = deepAnyToString(data[key as keyof typeof data]);
       return acc;
@@ -34,7 +32,7 @@ export const deepConvert = <T>(
 ): any => {
   if (Array.isArray(data)) {
     return data.map((item) => deepConvert(item, convertFn));
-  } else if (isObject(data)) {
+  } else if (isPlainObject(data)) {
     return Object.keys(data).reduce((acc: Record<string, T>, key: string) => {
       acc[key] = deepConvert(data[key as keyof typeof data], convertFn);
       return acc;

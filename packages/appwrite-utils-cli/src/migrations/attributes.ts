@@ -5,7 +5,6 @@ import {
   type Attribute,
 } from "appwrite-utils";
 import { nameToIdMapping, enqueueOperation } from "./queue.js";
-import _ from "lodash";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 const attributesSame = (
