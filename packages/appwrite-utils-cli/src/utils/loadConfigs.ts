@@ -69,7 +69,9 @@ export const loadConfig = async (
       }
     }
 
-    return config;
+    // to fix the issue of undefined databases etc, due to code looking for 
+    // e.g. this.config.appwriteEndpoint but receiving this.config.default.appwrite.endpoint 
+    return config.default;
   } finally {
     unregister(); // Unregister tsx when done
   }
