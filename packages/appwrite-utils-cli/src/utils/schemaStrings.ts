@@ -410,7 +410,8 @@ export class SchemaGenerator {
           baseSchemaCode += ".nullish()";
         }
         break;
-      case "float":
+      case "double":
+      case "float": // Backward compatibility
         baseSchemaCode = "z.number()";
         if (finalAttribute.min !== undefined) {
           baseSchemaCode += `.min(${finalAttribute.min}, "Minimum value of ${finalAttribute.min} not met")`;

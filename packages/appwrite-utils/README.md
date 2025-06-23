@@ -2,14 +2,27 @@
 
 ## Overview
 
-`appwrite-utils` is a comprehensive TypeScript library designed to streamline the development process for Appwrite projects. It provides a suite of utilities and helper functions that facilitate data manipulation, schema management, and seamless integration with Appwrite services. Whether you're managing data migrations, schema updates, or simply need a set of robust tools for your Appwrite project, `appwrite-utils` has you covered. This package is meant to be imported into your project for access to validation functions, converter functions, and more, enhancing your project's capabilities with Appwrite.
+`appwrite-utils` is a comprehensive TypeScript library designed to streamline the development process for Appwrite projects. Version 1.0.0 aligns with the YAML-first architecture of `appwrite-utils-cli`, providing enhanced integration capabilities and robust utilities for modern Appwrite development. This library provides a suite of utilities and helper functions that facilitate data manipulation, schema management, YAML configuration validation, and seamless integration with Appwrite services. Whether you're managing data migrations, schema updates, or building custom tools on top of the CLI architecture, `appwrite-utils` provides the foundation for professional Appwrite development.
 
 ## Features
 
-- **Validation Functions**: Utilize a collection of validation functions to ensure data integrity throughout your Appwrite projects.
-- **Converter Functions**: Transform data effortlessly with a suite of converter functions, facilitating smooth data manipulation and integration.
-- **Attribute Schemas**: Define and manage your data models with ease using comprehensive attribute schemas.
-- **File Operations**: Leverage functions for efficient file management and access within your Appwrite projects, including URL generation for file viewing and downloading.
+### Core Utilities
+- **Validation Functions**: Comprehensive validation suite ensuring data integrity throughout your Appwrite projects
+- **Converter Functions**: Advanced data transformation utilities supporting the CLI's import system
+- **Type Definitions**: Complete TypeScript definitions for Appwrite collections, attributes, and configurations
+- **Schema Management**: Robust schema definitions supporting both TypeScript and YAML configurations
+
+### CLI Integration
+- **YAML Configuration Support**: Type-safe definitions for YAML-first architecture
+- **Import System Types**: Complete type definitions for the CLI's modular import system
+- **Validation Rules**: Extensive validation rules used by the CLI's import validation system
+- **File Operations**: Advanced file utilities supporting URL downloads and local file handling
+
+### Advanced Features
+- **Permission Management**: Simplified permission handling with conversion utilities
+- **Function Definitions**: Complete type support for Appwrite Function configurations
+- **Authentication Schemas**: Robust user authentication and validation schemas
+- **Cross-Platform Compatibility**: Designed for seamless integration across development environments
 
 ## Installation
 
@@ -120,36 +133,168 @@ console.log(anyToString(1234)); // Output: "1234"
 
 This setup ensures that your interactions with Appwrite are more robust, less error-prone, and significantly more manageable.
 
-### Changelog
+## CLI Integration
 
-- 0.3.97: Added function deployment through Appwrite Utils CLI, specified through AppwriteConfig, as the current deployment for Appwrite ignored specifications and I wanted to add an `evalSync` to run commands pre-build. That means you can deploy a `TypeScript Node` project, and build it first, programmatically! These are just types, and only defined in `AppwriteUtils` to try to keep some semblence of usefulness in both. I also added `FunctionSpecifications` type defs, `FunctionScopes`, `AppwriteRequest` (A type definition for the request incoming to the Appwrite Function), `AppwriteResponse` (A type definition for the response of course).
+Version 1.0.0 is designed to work seamlessly with `appwrite-utils-cli`'s YAML-first architecture:
 
-I also fixed `transfer` to actually transfer
+### Import System Integration
 
-- 0.4.1: Removed `ulidx` requirement as it was breaking Cloudflare Builds
-- 0.4.0: Updated Function scopes to include messaging and other
-- 0.3.99: Updated Function schema to have the template vars as well
-- 0.3.98: Updated Function schema to have a `string[]` var called `ignore` -- to ignore files
-- 0.3.96: Added `SpecificationSchema, type Specification` type defs to support updating function specifications
-- 0.3.95: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
-- 0.3.94: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT
-- 0.3.93: Forgot to export it 👁👄👁
-- 0.3.92: Added a `getFilePreviewUrl` which allows you to modify image files, or just get a preview of a file, without downloading it (creates a URL instead of an `ArrayBuffer`)
-- 0.3.91: Updated permissions to include `parsePermissions` which maps my permissions (`target`, `permission` to the Appwrite strings) -- also added `PermissionToAppwritePermission` which converts one of mine (target, permission) to Appwrite
-- 0.3.9: Refactored the cli tool to allow for more specificity and configuration
-- 0.3.8: Upgraded some parts of the package, AppwriteConfig typing updated to include buckets, made cli tool interactive
-- 0.3.7: Remove `ulid` to replace with `ulidx` for compatibility
-- 0.3.6: Bump to `appwrite` version
-- 0.3.5: Added `flattenArray` which flattens an array, so if you accidentally convert things into `"someValue": [ ['1' ], '2', ]` you can now make that just `['1', '2',]`
-- 0.3.4: Added `onlyUnsetToArray` converter, which is meant to be used last so if you need to guarantee something is an array instead of null or undefined, you would use that
-- 0.2.8: Added `valueToSet` to attributeMappings, allowing you to set the thing you want to set literally in importDefs
-- 0.2.7: Removed need for `lodash`
-- 0.2.6: Added `tryAwaitWithRetry` which will retry the given (used for Appwrite calls mostly) function up to 5 times if the error includes `fetch failed` or `server error` (all lowercased) because there's a weird bug sometimes with the server SDK
-- 0.2.5: Added `targetFieldToMatch` to the `idMappings` configuration which should allow more concise mapping of after-import fields
-- 0.2.3: Added OpenAPI descriptions to AuthUserSchema, which also allows one to use the openapi package itself (`@asteasolutions/zod-to-openapi`) with the AuthUserSchema
-- 0.2.2: Lots of updates, moved schemas and stuff here, fixed package, added export of AuthUser which got removed accidentally
-- 0.1.21: Changed `ID.unique()` to `ulid()` for random ID generation, refactored `schema.ts` into multiple files
-- 0.1.20: Forgot type ValidationRules, type ConverterFunctions, and type AfterImportActions
-- 0.1.19: Forgot Indexes oopsie
-- 0.1.18: Added Attribute type to exports (union of all types)
-- 0.1.17: Fixed package in general, removed redundancies in appwrite-utils-cli as it now depends on this package
+```typescript
+import { 
+  YamlImportConfig, 
+  AttributeMappings,
+  ValidationRules,
+  ConverterFunctions 
+} from "appwrite-utils";
+
+// Type-safe YAML import configuration
+const importConfig: YamlImportConfig = {
+  source: {
+    file: "importData/users.json",
+    basePath: "RECORDS",
+    type: "json"
+  },
+  target: {
+    collection: "Users",
+    type: "create",
+    primaryKey: "user_id",
+    createUsers: true
+  },
+  mapping: {
+    attributes: [
+      {
+        oldKey: "email",
+        targetKey: "email",
+        converters: ["anyToString", "stringToLowerCase"],
+        validation: [
+          { rule: "email", params: ["{email}"] },
+          { rule: "required", params: ["{email}"] }
+        ]
+      }
+    ]
+  }
+};
+```
+
+### Schema Validation
+
+```typescript
+import { 
+  CollectionCreateSchema,
+  AttributeSchema,
+  AppwriteConfigSchema 
+} from "appwrite-utils";
+
+// Validate YAML configurations with Zod schemas
+const validatedConfig = AppwriteConfigSchema.parse(yamlConfig);
+const validatedCollection = CollectionCreateSchema.parse(collectionData);
+```
+
+### Advanced Utilities
+
+```typescript
+import {
+  convertObjectByAttributeMappings,
+  tryAwaitWithRetry,
+  parsePermissions,
+  getFileViewUrl,
+  objectNeedsUpdate,
+  cleanObjectForAppwrite,
+  listDocumentsBatched
+} from "appwrite-utils";
+
+// Data transformation used by CLI import system
+const transformedData = convertObjectByAttributeMappings(sourceData, mappings);
+
+// Retry logic for reliable API calls
+const result = await tryAwaitWithRetry(() => 
+  databases.createDocument(dbId, collId, docId, data)
+);
+
+// Permission conversion for YAML configurations
+const appwritePermissions = parsePermissions(yamlPermissions);
+
+// Check if an object needs updating (ignores Appwrite system fields)
+const needsUpdate = objectNeedsUpdate(existingDoc, updatedData);
+
+// Clean object for Appwrite operations (removes system fields)
+const cleanData = cleanObjectForAppwrite(dataWithSystemFields);
+
+// Query documents in batches (Appwrite limits Query.equal to 100 IDs)
+const documents = await listDocumentsBatched(
+  databases, 
+  databaseId, 
+  collectionId, 
+  "$id", 
+  arrayOfIds
+);
+```
+
+## Changelog
+
+### 1.0.0 - YAML-First Architecture Integration
+
+**🎉 Major Release - CLI Architecture Alignment**
+
+#### YAML Configuration Support
+- **Complete type definitions** for YAML-first configuration architecture
+- **YamlImportConfig types** with full validation schema support
+- **Cross-platform compatibility** removing TypeScript runtime dependencies
+- **JSON Schema integration** for enhanced developer experience with IntelliSense
+
+#### Enhanced Import System Integration
+- **Modular import types** supporting the CLI's refactored import architecture
+- **Advanced validation rules** used by the CLI's validation service
+- **Sophisticated converter functions** supporting the enhanced data transformation pipeline
+- **File handling utilities** for URL downloads and local file operations
+- **Rate limiting types** for configurable performance optimization
+
+#### New Type Definitions
+- **Import Configuration Types**: Complete type safety for YAML import configurations
+- **Service Interface Types**: Type definitions for the CLI's modular service architecture
+- **Validation Schema Types**: Enhanced validation rules with parameter support
+- **Relationship Mapping Types**: Advanced cross-collection relationship definitions
+- **Progress Tracking Types**: Type definitions for progress monitoring and statistics
+
+#### New Utility Functions
+- **`objectNeedsUpdate`**: Compares existing and updated objects, filtering out Appwrite system fields to determine if an update is needed
+- **`cleanObjectForAppwrite`**: Removes Appwrite system fields (`$id`, `$createdAt`, `$updatedAt`, `$permissions`, etc.) from objects before create/update operations
+- **`listDocumentsBatched`**: Handles batched document queries since Appwrite only supports 100 IDs at a time in `Query.equal()`
+
+#### Enhanced Existing Features
+- **Permission system updates** with better YAML integration
+- **Function configuration types** aligned with CLI's function management
+- **Schema generation types** supporting both TypeScript and JSON Schema output
+- **Authentication types** enhanced for user deduplication features
+
+#### Developer Experience Improvements
+- **Better TypeScript inference** for YAML configuration objects
+- **Enhanced error types** with detailed validation feedback
+- **Improved documentation** with integration examples
+- **Cross-package compatibility** ensuring seamless CLI integration
+
+#### Backward Compatibility
+- **Full backward compatibility** with existing TypeScript configurations
+- **Legacy type support** maintained for smooth migration
+- **Incremental adoption** allowing gradual migration to YAML
+
+**Integration Note**: This version is specifically designed to work with `appwrite-utils-cli` 1.0.0's YAML-first architecture while maintaining full backward compatibility.
+
+---
+
+### Previous Versions
+
+- **0.4.1**: Removed `ulidx` requirement as it was breaking Cloudflare Builds
+- **0.4.0**: Updated Function scopes to include messaging and other
+- **0.3.99**: Updated Function schema to have the template vars as well
+- **0.3.98**: Updated Function schema to have a `string[]` var called `ignore` -- to ignore files
+- **0.3.97**: Added function deployment through Appwrite Utils CLI, specified through AppwriteConfig
+- **0.3.96**: Added `SpecificationSchema, type Specification` type defs to support updating function specifications
+- **0.3.95**: Updated `safeParseDate` to handle formats like `8:00AM` vs `8:00 AM` -- spaces matter!
+- **0.3.94**: Updated `getFilePreviewUrl` -- it was missing the `&` if you didn't use a JWT
+- **0.3.92**: Added a `getFilePreviewUrl` which allows you to modify image files, or just get a preview of a file
+- **0.3.91**: Updated permissions to include `parsePermissions` which maps permissions to Appwrite strings
+- **0.2.8**: Added `valueToSet` to attributeMappings, allowing you to set literal values in importDefs
+- **0.2.6**: Added `tryAwaitWithRetry` which retries failed API calls up to 5 times
+- **0.2.3**: Added OpenAPI descriptions to AuthUserSchema for better schema generation
+- **0.1.21**: Changed `ID.unique()` to `ulid()` for random ID generation, refactored schema files

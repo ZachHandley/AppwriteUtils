@@ -16,19 +16,21 @@ import type { ImportDataActions } from "./importDataActions.js";
 import { areCollectionNamesSame, tryAwaitWithRetry } from "../utils/index.js";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
-import { UsersController } from "./users.js";
-import { logger } from "./logging.js";
-import { updateOperation } from "./migrationHelper.js";
+import { UsersController } from "../users/methods.js";
+import { logger } from "../shared/logging.js";
+import { updateOperation } from "../shared/migrationHelpers.js";
 import {
   BatchSchema,
   OperationCreateSchema,
   OperationSchema,
-} from "./backup.js";
+} from "../storage/schemas.js";
 import { DataLoader, type CollectionImportData } from "./dataLoader.js";
 import {
   transferDatabaseLocalToLocal,
   transferStorageLocalToLocal,
 } from "./transfer.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
+import { ProgressManager } from "../shared/progressManager.js";
 
 export class ImportController {
   private config: AppwriteConfig;
@@ -82,13 +84,11 @@ export class ImportController {
     let databaseRan: Models.Database | undefined;
 
     for (let db of databasesToProcess) {
-      if (db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
+      if (!this.config.useMigrations && db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
         continue;
       }
 
-      console.log(`---------------------------------`);
-      console.log(`Starting import data for database: ${db.name}`);
-      console.log(`---------------------------------`);
+      MessageFormatter.banner(`Starting import data for database: ${db.name}`, "Database Import");
 
       if (!databaseRan) {
         databaseRan = db;
@@ -286,14 +286,18 @@ export class ImportController {
           continue;
         }
 
-        const importOperation = await this.database.getDocument(
-          "migrations",
-          "currentOperations",
-          importOperationId
-        );
-        await updateOperation(this.database, importOperation.$id, {
-          status: "in_progress",
-        });
+        let importOperation: any = null;
+        if (this.config.useMigrations) {
+          importOperation = await this.database.getDocument(
+            "migrations",
+            "currentOperations",
+            importOperationId
+          );
+          await updateOperation(this.database, importOperation.$id, {
+            status: "in_progress",
+          }, this.config.useMigrations);
+        }
+        
         const collectionData = dataLoader.importMap.get(
           dataLoader.getCollectionKey(collection.name)
         );
@@ -344,14 +348,18 @@ export class ImportController {
           // Wait for all promises in the current batch to resolve
           await Promise.all(batchPromises);
           console.log(`Completed batch ${i + 1} of ${dataSplit.length}`);
-          await updateOperation(this.database, importOperation.$id, {
-            progress: processedItems,
-          });
+          if (this.config.useMigrations && importOperation) {
+            await updateOperation(this.database, importOperation.$id, {
+              progress: processedItems,
+            }, this.config.useMigrations);
+          }
         }
         // After all batches are processed, update the operation status to completed
-        await updateOperation(this.database, importOperation.$id, {
-          status: "completed",
-        });
+        if (this.config.useMigrations && importOperation) {
+          await updateOperation(this.database, importOperation.$id, {
+            status: "completed",
+          }, this.config.useMigrations);
+        }
       }
     }
   }

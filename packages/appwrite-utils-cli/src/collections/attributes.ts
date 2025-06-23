@@ -4,7 +4,7 @@ import {
   parseAttribute,
   type Attribute,
 } from "appwrite-utils";
-import { nameToIdMapping, enqueueOperation } from "../migrations/queue.js";
+import { nameToIdMapping, enqueueOperation } from "../shared/operationQueue.js";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import chalk from "chalk";
 
@@ -264,7 +264,8 @@ export const createOrUpdateAttribute = async (
         );
       }
       break;
-    case "float":
+    case "double":
+    case "float": // Backward compatibility
       if (action === "create") {
         await tryAwaitWithRetry(
           async () =>

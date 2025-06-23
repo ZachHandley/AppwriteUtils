@@ -17,6 +17,8 @@ import {
 import { parseAttribute } from "appwrite-utils";
 import chalk from "chalk";
 import { fetchAllCollections } from "../collections/methods.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
+import { ProgressManager } from "../shared/progressManager.js";
 import {
   createOrUpdateIndex,
   createOrUpdateIndexes,
@@ -41,7 +43,7 @@ export const transferStorageLocalToLocal = async (
   fromBucketId: string,
   toBucketId: string
 ) => {
-  console.log(`Transferring files from ${fromBucketId} to ${toBucketId}`);
+  MessageFormatter.info(`Transferring files from ${fromBucketId} to ${toBucketId}`, { prefix: "Transfer" });
   let lastFileId: string | undefined;
   let fromFiles = await tryAwaitWithRetry(
     async () => await storage.listFiles(fromBucketId, [Query.limit(100)])
@@ -55,7 +57,7 @@ export const transferStorageLocalToLocal = async (
       try {
         return await storage.getFileDownload(bucketId, fileId);
       } catch (error) {
-        console.error(`Error downloading file ${fileId}: ${error}`);
+        MessageFormatter.error(`Error downloading file ${fileId}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
         attempts--;
         if (attempts === 0) throw error;
       }
@@ -68,14 +70,14 @@ export const transferStorageLocalToLocal = async (
         async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
       if (!fileData) {
-        console.error(`Error downloading file ${file.$id}`);
+        MessageFormatter.error(`Error downloading file ${file.$id}`, undefined, { prefix: "Transfer" });
         continue;
       }
       const fileToCreate = InputFile.fromBuffer(
         new Uint8Array(fileData),
         file.name
       );
-      console.log(`Creating file: ${file.name}`);
+      MessageFormatter.progress(`Creating file: ${file.name}`, { prefix: "Transfer" });
       try {
         await tryAwaitWithRetry(
           async () =>
@@ -114,7 +116,7 @@ export const transferStorageLocalToLocal = async (
         async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
       if (!fileData) {
-        console.error(`Error downloading file ${file.$id}`);
+        MessageFormatter.error(`Error downloading file ${file.$id}`, undefined, { prefix: "Transfer" });
         continue;
       }
       const fileToCreate = InputFile.fromBuffer(
@@ -133,17 +135,16 @@ export const transferStorageLocalToLocal = async (
         );
       } catch (error: any) {
         // File already exists, so we can skip it
-        console.log(
-          chalk.yellow(`File ${file.$id} already exists, skipping...`)
-        );
+        MessageFormatter.warning(`File ${file.$id} already exists, skipping...`, { prefix: "Transfer" });
         continue;
       }
       numberOfFiles++;
     }
   }
 
-  console.log(
-    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`
+  MessageFormatter.success(
+    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`,
+    { prefix: "Transfer" }
   );
 };
 
@@ -155,8 +156,9 @@ export const transferStorageLocalToRemote = async (
   fromBucketId: string,
   toBucketId: string
 ) => {
-  console.log(
-    `Transferring files from current storage ${fromBucketId} to ${endpoint} bucket ${toBucketId}`
+  MessageFormatter.info(
+    `Transferring files from current storage ${fromBucketId} to ${endpoint} bucket ${toBucketId}`,
+    { prefix: "Transfer" }
   );
   const client = getAppwriteClient(endpoint, projectId, apiKey);
   const remoteStorage = new Storage(client);
@@ -204,230 +206,20 @@ export const transferStorageLocalToRemote = async (
       );
     } catch (error: any) {
       // File already exists, so we can skip it
-      console.log(chalk.yellow(`File ${file.$id} already exists, skipping...`));
+      MessageFormatter.warning(`File ${file.$id} already exists, skipping...`, { prefix: "Transfer" });
       continue;
     }
     numberOfFiles++;
   }
-  console.log(
-    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`
+  MessageFormatter.success(
+    `Transferred ${numberOfFiles} files from ${fromBucketId} to ${toBucketId}`,
+    { prefix: "Transfer" }
   );
 };
 
-/**
- * Transfers all documents from one collection to another in a different database
- * within the same Appwrite Project
- */
-export const transferDocumentsBetweenDbsLocalToLocal = async (
-  db: Databases,
-  fromDbId: string,
-  toDbId: string,
-  fromCollId: string,
-  toCollId: string
-) => {
-  let totalDocumentsTransferred = 0;
-  let lastDocumentId: string | undefined;
-  let hasMoreDocuments = true;
+// Document transfer functions moved to collections/methods.ts with enhanced UX
 
-  while (hasMoreDocuments) {
-    const queryParams = [Query.limit(50)];
-    if (lastDocumentId) {
-      queryParams.push(Query.cursorAfter(lastDocumentId));
-    }
-
-    const fromCollDocs = await tryAwaitWithRetry(async () =>
-      db.listDocuments(fromDbId, fromCollId, queryParams)
-    );
-
-    if (fromCollDocs.documents.length === 0) {
-      if (totalDocumentsTransferred === 0) {
-        console.log(`No documents found in collection ${fromCollId}`);
-      }
-      break;
-    }
-
-    const allDocsToCreateCheck = await tryAwaitWithRetry(
-      async () =>
-        await db.listDocuments(toDbId, toCollId, [
-          Query.equal(
-            "$id",
-            fromCollDocs.documents.map((doc) => doc.$id)
-          ),
-        ])
-    );
-
-    const docsToCreate = fromCollDocs.documents.filter(
-      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
-    );
-
-    const batchedPromises = docsToCreate.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(
-        async () =>
-          await db.createDocument(
-            toDbId,
-            toCollId,
-            doc.$id,
-            toCreateObject,
-            doc.$permissions
-          )
-      );
-    });
-
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += docsToCreate.length;
-
-    if (fromCollDocs.documents.length < 50) {
-      hasMoreDocuments = false;
-    } else {
-      lastDocumentId =
-        fromCollDocs.documents[fromCollDocs.documents.length - 1].$id;
-    }
-  }
-
-  console.log(
-    `Transferred ${totalDocumentsTransferred} documents from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}`
-  );
-};
-
-export const transferDocumentsBetweenDbsLocalToRemote = async (
-  localDb: Databases,
-  endpoint: string,
-  projectId: string,
-  apiKey: string,
-  fromDbId: string,
-  toDbId: string,
-  fromCollId: string,
-  toCollId: string
-) => {
-  const client = new Client()
-    .setEndpoint(endpoint)
-    .setProject(projectId)
-    .setKey(apiKey);
-  let totalDocumentsTransferred = 0;
-  const remoteDb = new Databases(client);
-  let fromCollDocs = await tryAwaitWithRetry(async () =>
-    localDb.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
-  );
-
-  if (fromCollDocs.documents.length === 0) {
-    console.log(`No documents found in collection ${fromCollId}`);
-    return;
-  } else if (fromCollDocs.documents.length < 50) {
-    const allDocsToCreateCheck = await tryAwaitWithRetry(
-      async () =>
-        await remoteDb.listDocuments(toDbId, toCollId, [
-          Query.equal(
-            "$id",
-            fromCollDocs.documents.map((doc) => doc.$id)
-          ),
-        ])
-    );
-    const docsToCreate = fromCollDocs.documents.filter(
-      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
-    );
-    const batchedPromises = docsToCreate.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(async () =>
-        remoteDb.createDocument(
-          toDbId,
-          toCollId,
-          doc.$id,
-          toCreateObject,
-          doc.$permissions
-        )
-      );
-    });
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-  } else {
-    const allDocsToCreateCheck = await tryAwaitWithRetry(
-      async () =>
-        await remoteDb.listDocuments(toDbId, toCollId, [
-          Query.equal(
-            "$id",
-            fromCollDocs.documents.map((doc) => doc.$id)
-          ),
-        ])
-    );
-    const docsToCreate = fromCollDocs.documents.filter(
-      (doc) => !allDocsToCreateCheck.documents.some((d) => d.$id === doc.$id)
-    );
-    const batchedPromises = docsToCreate.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(async () =>
-        remoteDb.createDocument(
-          toDbId,
-          toCollId,
-          doc.$id,
-          toCreateObject,
-          doc.$permissions
-        )
-      );
-    });
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-    while (fromCollDocs.documents.length === 50) {
-      fromCollDocs = await tryAwaitWithRetry(async () =>
-        localDb.listDocuments(fromDbId, fromCollId, [
-          Query.limit(50),
-          Query.cursorAfter(
-            fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
-          ),
-        ])
-      );
-      const batchedPromises = fromCollDocs.documents.map((doc) => {
-        const toCreateObject: Partial<typeof doc> = {
-          ...doc,
-        };
-        delete toCreateObject.$databaseId;
-        delete toCreateObject.$collectionId;
-        delete toCreateObject.$createdAt;
-        delete toCreateObject.$updatedAt;
-        delete toCreateObject.$id;
-        delete toCreateObject.$permissions;
-        return tryAwaitWithRetry(async () =>
-          remoteDb.createDocument(
-            toDbId,
-            toCollId,
-            doc.$id,
-            toCreateObject,
-            doc.$permissions
-          )
-        );
-      });
-      await Promise.all(batchedPromises);
-      totalDocumentsTransferred += fromCollDocs.documents.length;
-    }
-  }
-  console.log(
-    `Total documents transferred from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}: ${totalDocumentsTransferred}`
-  );
-};
+// Remote document transfer functions moved to collections/methods.ts with enhanced UX
 
 /**
  * Transfers all collections and documents from one local database to another local database.
@@ -588,6 +380,7 @@ export const transferDatabaseLocalToLocal = async (
       }
 
       // Transfer documents
+      const { transferDocumentsBetweenDbsLocalToLocal } = await import("../collections/methods.js");
       await transferDocumentsBetweenDbsLocalToLocal(
         localDb,
         fromDbId,
@@ -751,6 +544,7 @@ export const transferDatabaseLocalToRemote = async (
       }
 
       // Transfer documents
+      const { transferDocumentsBetweenDbsLocalToRemote } = await import("../collections/methods.js");
       await transferDocumentsBetweenDbsLocalToRemote(
         localDb,
         endpoint,

@@ -12,6 +12,26 @@ export const AppwriteConfigSchema = z.object({
   appwriteProject: z.string(),
   appwriteKey: z.string(),
   appwriteClient: z.any().or(z.null()).default(null),
+  logging: z
+    .object({
+      enabled: z.boolean().default(false).describe("Enable file logging"),
+      level: z
+        .enum(["error", "warn", "info", "debug"])
+        .default("info")
+        .describe("Logging level"),
+      logDirectory: z
+        .string()
+        .optional()
+        .describe("Custom log directory path (default: ./zlogs)"),
+      console: z.boolean().default(false).describe("Enable console logging"),
+    })
+    .optional()
+    .default({
+      enabled: false,
+      level: "info",
+      console: false,
+    })
+    .describe("Logging configuration"),
   enableBackups: z.boolean().default(true).describe("Enable backups"),
   backupInterval: z
     .number()
@@ -37,6 +57,11 @@ export const AppwriteConfigSchema = z.object({
     .describe(
       "Users collection name for any overflowing data associated with users, will try to match one of the collections by name"
     ),
+  useMigrations: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe("Enable migrations database for tracking operations and progress"),
   databases: z
     .array(
       z.object({
@@ -50,7 +75,6 @@ export const AppwriteConfigSchema = z.object({
       { $id: "dev", name: "Development" },
       { $id: "main", name: "Main" },
       { $id: "staging", name: "Staging" },
-      { $id: "migrations", name: "Migrations" },
     ])
     .describe("Databases to create, $id is the id of the database"),
 
@@ -70,6 +94,26 @@ export const AppwriteConfigSchema = z.object({
     .array(AppwriteFunctionSchema)
     .optional()
     .describe("Functions to create"),
+  schemaConfig: z
+    .object({
+      outputDirectory: z.string().default("schemas"),
+      yamlSchemaDirectory: z.string().default(".yaml_schemas"),
+      importDirectory: z.string().default("importData"),
+    })
+    .optional()
+    .describe("Schema and data directory configuration"),
+}).transform((data) => {
+  // Add migrations database if useMigrations is true
+  if (data.useMigrations && data.databases) {
+    const hasMigrationsDb = data.databases.some(db => db.$id === "migrations");
+    if (!hasMigrationsDb) {
+      return {
+        ...data,
+        databases: [...data.databases, { $id: "migrations", name: "Migrations" }]
+      };
+    }
+  }
+  return data;
 });
 
 export type AppwriteConfig = z.infer<typeof AppwriteConfigSchema>;

@@ -1,7 +1,7 @@
 import { type Attribute, attributeSchema } from "../schemas/attribute.js";
 import { stringAttributeSchema } from "../schemas/stringAttribute.js";
 import { integerAttributeSchema } from "../schemas/integerAttribute.js";
-import { floatAttributeSchema } from "../schemas/floatAttribute.js";
+import { doubleAttributeSchema, floatAttributeSchema } from "../schemas/doubleAttribute.js";
 import { booleanAttributeSchema } from "../schemas/booleanAttribute.js";
 import { datetimeAttributeSchema } from "../schemas/datetimeAttribute.js";
 import { emailAttributeSchema } from "../schemas/emailAttribute.js";
@@ -36,9 +36,8 @@ export const parseAttribute = (
     delete attributeToParse.format;
   }
 
-  if (attributeToParse.type === "double") {
-    attributeToParse.type = "float";
-  }
+  // Keep "double" as is - this is now our preferred type
+  // Legacy "float" will also be supported through the discriminated union
 
   switch (attributeToParse.type) {
     case "string":
@@ -57,6 +56,8 @@ export const parseAttribute = (
         delete attributeToParse.max;
       }
       return integerAttributeSchema.parse(attributeToParse);
+    case "double":
+      return doubleAttributeSchema.parse(attributeToParse);
     case "float":
       return floatAttributeSchema.parse(attributeToParse);
     case "boolean":

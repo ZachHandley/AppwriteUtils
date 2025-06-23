@@ -7,12 +7,14 @@ import { UtilsController, type SetupOptions } from "./utilsController.js";
 import type { TransferOptions } from "./migrations/transfer.js";
 import { Databases, Storage, type Models } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
-import { fetchAllDatabases } from "./migrations/databases.js";
+import { fetchAllDatabases } from "./databases/methods.js";
 import { setupDirsFiles } from "./utils/setupFiles.js";
 import { fetchAllCollections } from "./collections/methods.js";
 import type { Specification } from "appwrite-utils";
 import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
+import { MessageFormatter } from "./shared/messageFormatter.js";
+import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 
 interface CliOptions {
   config?: string;
@@ -46,6 +48,7 @@ interface CliOptions {
   updateFunctionSpec?: boolean;
   functionId?: string;
   specification?: string;
+  migrateConfig?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -53,21 +56,21 @@ type ParsedArgv = ArgumentsCamelCase<CliOptions>;
 const argv = yargs(hideBin(process.argv))
   .option("config", {
     type: "string",
-    description: "Appwrite Config file name",
+    description: "Path to Appwrite configuration file (appwriteConfig.ts)",
   })
   .option("it", {
     alias: ["interactive", "i"],
     type: "boolean",
-    description: "Run in interactive mode",
+    description: "Launch interactive CLI mode with guided prompts",
   })
   .option("dbIds", {
     type: "string",
-    description: "Comma-separated list of database IDs to operate on",
+    description: "Comma-separated list of database IDs to target (e.g., 'db1,db2,db3')",
   })
   .option("collectionIds", {
     alias: ["collIds"],
     type: "string",
-    description: "Comma-separated list of collection IDs to operate on",
+    description: "Comma-separated list of collection IDs to target (e.g., 'users,posts')",
   })
   .option("bucketIds", {
     type: "string",
@@ -76,12 +79,12 @@ const argv = yargs(hideBin(process.argv))
   .option("wipe", {
     choices: ["all", "docs", "users"] as const,
     description:
-      "Wipe data (all: everything, docs: only documents, users: only user data)",
+      "⚠️  DESTRUCTIVE: Wipe data (all: databases+storage+users, docs: documents only, users: user accounts only)",
   })
   .option("wipeCollections", {
     type: "boolean",
     description:
-      "Wipe collections, uses collectionIds option to get the collections to wipe",
+      "⚠️  DESTRUCTIVE: Wipe specific collections (requires --collectionIds)",
   })
   .option("transferUsers", {
     type: "boolean",
@@ -89,29 +92,29 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("generate", {
     type: "boolean",
-    description: "Generate TypeScript schemas from database schemas",
+    description: "Generate TypeScript schemas and types from your Appwrite database schemas",
   })
   .option("import", {
     type: "boolean",
-    description: "Import data into your databases",
+    description: "Import data from importData/ directory into your Appwrite databases",
   })
   .option("backup", {
     type: "boolean",
-    description: "Perform a backup of your databases",
+    description: "Create a complete backup of your databases and collections",
   })
   .option("writeData", {
     type: "boolean",
-    description: "Write converted imported data to file",
+    description: "Output converted import data to files for validation before importing",
   })
   .option("push", {
     type: "boolean",
     description:
-      "Push your local Appwrite config to your configured Appwrite Project",
+      "Deploy your local configuration (collections, attributes, indexes) to Appwrite",
   })
   .option("sync", {
     type: "boolean",
     description:
-      "Synchronize by pulling your Appwrite config from your configured Appwrite Project",
+      "Pull and synchronize your local config with the remote Appwrite project schema",
   })
   .option("endpoint", {
     type: "string",
@@ -127,17 +130,17 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("transfer", {
     type: "boolean",
-    description: "Transfer data between databases or collections",
+    description: "Transfer documents and files between databases, collections, or projects",
   })
   .option("fromDbId", {
     alias: ["fromDb", "sourceDbId", "sourceDb"],
     type: "string",
-    description: "Set the source database ID for transfer",
+    description: "Source database ID for transfer operations",
   })
   .option("toDbId", {
     alias: ["toDb", "targetDbId", "targetDb"],
     type: "string",
-    description: "Set the destination database ID for transfer",
+    description: "Target database ID for transfer operations",
   })
   .option("fromCollectionId", {
     alias: ["fromCollId", "fromColl"],
@@ -171,7 +174,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("setup", {
     type: "boolean",
-    description: "Setup directories and files",
+    description: "Initialize project with configuration files and directory structure",
   })
   .option("updateFunctionSpec", {
     type: "boolean",
@@ -195,9 +198,17 @@ const argv = yargs(hideBin(process.argv))
       "s-8vcpu-8gb",
     ],
   })
+  .option("migrateConfig", {
+    alias: ["migrate"],
+    type: "boolean",
+    description: "Migrate appwriteConfig.ts to .appwrite structure with YAML configuration",
+  })
   .parse() as ParsedArgv;
 
 async function main() {
+  const startTime = Date.now();
+  const operationStats: Record<string, number> = {};
+  
   if (argv.it) {
     const cli = new InteractiveCLI(process.cwd());
     await cli.run();
@@ -218,8 +229,14 @@ async function main() {
       return;
     }
 
+    if (argv.migrateConfig) {
+      const { migrateConfig } = await import("./utils/configMigration.js");
+      await migrateConfig(process.cwd());
+      return;
+    }
+
     if (!controller.config) {
-      console.log(chalk.red("No Appwrite connection found"));
+      MessageFormatter.error("No Appwrite connection found", undefined, { prefix: "CLI" });
       return;
     }
 
@@ -248,10 +265,9 @@ async function main() {
           "Function ID and specification are required for updating function specs"
         );
       }
-      console.log(
-        chalk.yellow(
-          `Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}, checking if specification exists...`
-        )
+      MessageFormatter.info(
+        `Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}`,
+        { prefix: "Functions" }
       );
       const specifications = await listSpecifications(
         controller.appwriteServer!
@@ -261,8 +277,10 @@ async function main() {
           (s: { slug: string }) => s.slug === parsedArgv.specification
         )
       ) {
-        console.log(
-          chalk.red(`Specification ${parsedArgv.specification} not found`)
+        MessageFormatter.error(
+          `Specification ${parsedArgv.specification} not found`,
+          undefined,
+          { prefix: "Functions" }
         );
         return;
       }
@@ -276,7 +294,10 @@ async function main() {
     if (!options.databases || options.databases.length === 0) {
       const allDatabases = await fetchAllDatabases(controller.database!);
       options.databases = allDatabases.filter(
-        (db) => db.name.toLowerCase() !== "migrations"
+        (db) => {
+          const useMigrations = controller.config?.useMigrations ?? true;
+          return useMigrations || db.name.toLowerCase() !== "migrations";
+        }
       );
     }
 
@@ -290,9 +311,12 @@ async function main() {
     }
 
     if (options.doBackup && options.databases) {
+      MessageFormatter.info(`Creating backups for ${options.databases.length} database(s)`, { prefix: "Backup" });
       for (const db of options.databases) {
         await controller.backupDatabase(db);
       }
+      operationStats.backups = options.databases.length;
+      MessageFormatter.success(`Backup completed for ${options.databases.length} database(s)`, { prefix: "Backup" });
     }
 
     if (
@@ -301,26 +325,46 @@ async function main() {
       options.wipeUsers ||
       options.wipeCollections
     ) {
+      // Confirm destructive operations
+      const databaseNames = options.databases?.map(db => db.name) || [];
+      const confirmed = await ConfirmationDialogs.confirmDatabaseWipe(databaseNames, {
+        includeStorage: options.wipeDocumentStorage,
+        includeUsers: options.wipeUsers
+      });
+      
+      if (!confirmed) {
+        MessageFormatter.info("Operation cancelled by user", { prefix: "CLI" });
+        return;
+      }
+      
+      let wipeStats = { databases: 0, collections: 0, users: 0, buckets: 0 };
+      
       if (parsedArgv.wipe === "all") {
         if (options.databases) {
           for (const db of options.databases) {
             await controller.wipeDatabase(db, true); // true to wipe associated buckets
           }
+          wipeStats.databases = options.databases.length;
         }
         await controller.wipeUsers();
+        wipeStats.users = 1;
       } else if (parsedArgv.wipe === "docs") {
         if (options.databases) {
           for (const db of options.databases) {
             await controller.wipeBucketFromDatabase(db);
           }
+          wipeStats.databases = options.databases.length;
         }
         if (parsedArgv.bucketIds) {
-          for (const bucketId of parsedArgv.bucketIds.split(",")) {
+          const bucketIds = parsedArgv.bucketIds.split(",");
+          for (const bucketId of bucketIds) {
             await controller.wipeDocumentStorage(bucketId);
           }
+          wipeStats.buckets = bucketIds.length;
         }
       } else if (parsedArgv.wipe === "users") {
         await controller.wipeUsers();
+        wipeStats.users = 1;
       }
 
       // Handle specific collection wipes
@@ -333,10 +377,29 @@ async function main() {
           const collectionsToWipe = dbCollections.filter((c) =>
             options.collections!.includes(c.$id)
           );
-          for (const collection of collectionsToWipe) {
-            await controller.wipeCollection(db, collection);
+          
+          // Confirm collection wipe
+          const collectionNames = collectionsToWipe.map(c => c.name);
+          const collectionConfirmed = await ConfirmationDialogs.confirmCollectionWipe(
+            db.name,
+            collectionNames
+          );
+          
+          if (collectionConfirmed) {
+            for (const collection of collectionsToWipe) {
+              await controller.wipeCollection(db, collection);
+            }
+            wipeStats.collections += collectionsToWipe.length;
           }
         }
+      }
+      
+      // Show wipe operation summary
+      if (wipeStats.databases > 0 || wipeStats.collections > 0 || wipeStats.users > 0 || wipeStats.buckets > 0) {
+        operationStats.wipedDatabases = wipeStats.databases;
+        operationStats.wipedCollections = wipeStats.collections;
+        operationStats.wipedUsers = wipeStats.users;
+        operationStats.wipedBuckets = wipeStats.buckets;
       }
     }
 
@@ -359,17 +422,22 @@ async function main() {
 
       if (parsedArgv.push) {
         await controller.syncDb(databases, collections);
+        operationStats.pushedDatabases = databases.length;
+        operationStats.pushedCollections = collections.length;
       } else if (parsedArgv.sync) {
         await controller.synchronizeConfigurations(databases);
+        operationStats.syncedDatabases = databases.length;
       }
     }
 
     if (options.generateSchemas) {
       await controller.generateSchemas();
+      operationStats.generatedSchemas = 1;
     }
 
     if (options.importData) {
       await controller.importData(options);
+      operationStats.importCompleted = 1;
     }
 
     if (parsedArgv.transfer) {
@@ -380,16 +448,15 @@ async function main() {
 
       // Only fetch databases if database IDs are provided
       if (parsedArgv.fromDbId && parsedArgv.toDbId) {
-        console.log(
-          chalk.blue(
-            `Starting database transfer from ${parsedArgv.fromDbId} to ${parsedArgv.toDbId}`
-          )
+        MessageFormatter.info(
+          `Starting database transfer from ${parsedArgv.fromDbId} to ${parsedArgv.toDbId}`,
+          { prefix: "Transfer" }
         );
         fromDb = (
           await controller.getDatabasesByIds([parsedArgv.fromDbId])
         )?.[0];
         if (!fromDb) {
-          console.log(chalk.red("Source database not found"));
+          MessageFormatter.error("Source database not found", undefined, { prefix: "Transfer" });
           return;
         }
         if (isRemote) {
@@ -410,19 +477,19 @@ async function main() {
           const remoteDbs = await fetchAllDatabases(targetDatabases);
           toDb = remoteDbs.find((db) => db.$id === parsedArgv.toDbId);
           if (!toDb) {
-            console.log(chalk.red("Target database not found"));
+            MessageFormatter.error("Target database not found", undefined, { prefix: "Transfer" });
             return;
           }
         } else {
           toDb = (await controller.getDatabasesByIds([parsedArgv.toDbId]))?.[0];
           if (!toDb) {
-            console.log(chalk.red("Target database not found"));
+            MessageFormatter.error("Target database not found", undefined, { prefix: "Transfer" });
             return;
           }
         }
 
         if (!fromDb || !toDb) {
-          console.log(chalk.red("Source or target database not found"));
+          MessageFormatter.error("Source or target database not found", undefined, { prefix: "Transfer" });
           return;
         }
       }
@@ -470,11 +537,18 @@ async function main() {
       };
 
       await controller.transferData(transferOptions);
+      operationStats.transfers = 1;
+    }
+    
+    // Show final operation summary if any operations were performed
+    if (Object.keys(operationStats).length > 0) {
+      const duration = Date.now() - startTime;
+      MessageFormatter.operationSummary("CLI Operations", operationStats, duration);
     }
   }
 }
 
 main().catch((error) => {
-  console.error("An error occurred:", error);
+  MessageFormatter.error("CLI execution failed", error, { prefix: "CLI" });
   process.exit(1);
 });

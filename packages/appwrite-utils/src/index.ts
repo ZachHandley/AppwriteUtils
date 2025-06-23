@@ -29,9 +29,11 @@ export {
   enumAttributeSchema,
 } from "./schemas/enumAttribute.js";
 export {
+  type DoubleAttribute,
   type FloatAttribute,
+  doubleAttributeSchema,
   floatAttributeSchema,
-} from "./schemas/floatAttribute.js";
+} from "./schemas/doubleAttribute.js";
 export {
   type IntegerAttribute,
   integerAttributeSchema,
@@ -108,7 +110,12 @@ export {
   AuthUserCreateSchema,
   type AuthUserCreate,
 } from "./schemas/authUser.js";
-export { tryAwaitWithRetry } from "./functions/helpers.js";
+export { 
+  tryAwaitWithRetry, 
+  objectNeedsUpdate, 
+  cleanObjectForAppwrite, 
+  listDocumentsBatched 
+} from "./functions/helpers.js";
 export { getAppwriteClient } from "./functions/appwriteHelpers.js";
 export { SpecificationSchema, type Specification } from "./schemas/specifications.js";
 export { AppwriteRequest } from "./schemas/appwriteRequest.js";

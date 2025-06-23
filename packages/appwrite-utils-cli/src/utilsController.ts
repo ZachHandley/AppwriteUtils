@@ -13,10 +13,11 @@ import {
 } from "appwrite-utils";
 import {
   loadConfig,
+  loadConfigWithPath,
   findAppwriteConfig,
   findFunctionsDir,
 } from "./utils/loadConfigs.js";
-import { UsersController } from "./migrations/users.js";
+import { UsersController } from "./users/methods.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
 import { ImportDataActions } from "./migrations/importDataActions.js";
@@ -25,7 +26,7 @@ import {
   ensureDatabasesExist,
   wipeOtherDatabases,
   ensureCollectionsExist,
-} from "./migrations/setupDatabase.js";
+} from "./databases/setup.js";
 import {
   createOrUpdateCollections,
   wipeDatabase,
@@ -57,7 +58,7 @@ import {
   type TransferOptions,
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
-import { fetchAllDatabases } from "./migrations/databases.js";
+import { fetchAllDatabases } from "./databases/methods.js";
 import {
   listFunctions,
   updateFunctionSpecifications,
@@ -65,6 +66,8 @@ import {
 import chalk from "chalk";
 import { deployLocalFunction } from "./functions/deployments.js";
 import fs from "node:fs";
+import { configureLogging, updateLogger } from "./shared/logging.js";
+import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -105,15 +108,15 @@ export class UtilsController {
     if (directConfig) {
       let hasErrors = false;
       if (!directConfig.appwriteEndpoint) {
-        console.log(chalk.red("Appwrite endpoint is required"));
+        MessageFormatter.error("Appwrite endpoint is required", undefined, { prefix: "Config" });
         hasErrors = true;
       }
       if (!directConfig.appwriteProject) {
-        console.log(chalk.red("Appwrite project is required"));
+        MessageFormatter.error("Appwrite project is required", undefined, { prefix: "Config" });
         hasErrors = true;
       }
       if (!directConfig.appwriteKey) {
-        console.log(chalk.red("Appwrite key is required"));
+        MessageFormatter.error("Appwrite key is required", undefined, { prefix: "Config" });
         hasErrors = true;
       }
       if (!hasErrors) {
@@ -130,40 +133,54 @@ export class UtilsController {
           enableMockData: false,
           documentBucketId: "",
           usersCollectionName: "",
+          useMigrations: true,
           databases: [],
           buckets: [],
           functions: [],
+          logging: {
+            enabled: false,
+            level: "info",
+            console: false,
+          },
         };
       }
     } else {
       // Try to find config file
       const appwriteConfigFound = findAppwriteConfig(basePath);
       if (!appwriteConfigFound) {
-        console.log(
-          chalk.yellow(
-            "No appwriteConfig.ts found and no direct configuration provided"
-          )
+        MessageFormatter.warning(
+          "No appwriteConfig.ts found and no direct configuration provided",
+          { prefix: "Config" }
         );
         return;
       }
       this.appwriteConfigPath = appwriteConfigFound;
-      this.appwriteFolderPath = path.dirname(appwriteConfigFound);
+      this.appwriteFolderPath = appwriteConfigFound; // For YAML configs, findAppwriteConfig already returns the correct directory
     }
   }
 
   async init() {
     if (!this.config) {
       if (this.appwriteFolderPath && this.appwriteConfigPath) {
-        console.log("Loading config from file...");
-        this.config = await loadConfig(this.appwriteFolderPath);
-        if (!this.config) {
-          console.log(chalk.red("Failed to load config from file"));
+        MessageFormatter.progress("Loading config from file...", { prefix: "Config" });
+        try {
+          const { config, actualConfigPath } = await loadConfigWithPath(this.appwriteFolderPath);
+          this.config = config;
+          MessageFormatter.info(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
+        } catch (error) {
+          MessageFormatter.error("Failed to load config from file", undefined, { prefix: "Config" });
           return;
         }
       } else {
-        console.log(chalk.red("No configuration available"));
+        MessageFormatter.error("No configuration available", undefined, { prefix: "Config" });
         return;
       }
+    }
+
+    // Configure logging based on config
+    if (this.config.logging) {
+      configureLogging(this.config.logging);
+      updateLogger();
     }
 
     this.appwriteServer = new Client();
@@ -179,7 +196,7 @@ export class UtilsController {
 
   async reloadConfig() {
     if (!this.appwriteFolderPath) {
-      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
     this.config = await loadConfig(this.appwriteFolderPath);
@@ -187,6 +204,13 @@ export class UtilsController {
       console.log(chalk.red("Failed to load config"));
       return;
     }
+
+    // Configure logging based on updated config
+    if (this.config.logging) {
+      configureLogging(this.config.logging);
+      updateLogger();
+    }
+
     this.appwriteServer = new Client();
     this.appwriteServer
       .setEndpoint(this.config.appwriteEndpoint)
@@ -200,7 +224,7 @@ export class UtilsController {
   async setupMigrationDatabase() {
     await this.init();
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     await setupMigrationDatabase(this.config);
@@ -209,11 +233,11 @@ export class UtilsController {
   async ensureDatabaseConfigBucketsExist(databases: Models.Database[] = []) {
     await this.init();
     if (!this.storage) {
-      console.log(chalk.red("Storage not initialized"));
+      MessageFormatter.error("Storage not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     await ensureDatabaseConfigBucketsExist(
@@ -226,7 +250,7 @@ export class UtilsController {
   async ensureDatabasesExist(databases?: Models.Database[]) {
     await this.init();
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     await this.setupMigrationDatabase();
@@ -240,7 +264,7 @@ export class UtilsController {
   ) {
     await this.init();
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     await ensureCollectionsExist(this.config, database, collections);
@@ -249,7 +273,7 @@ export class UtilsController {
   async getDatabasesByIds(ids: string[]) {
     await this.init();
     if (!this.database) {
-      console.log(chalk.red("Database not initialized"));
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (ids.length === 0) return [];
@@ -263,10 +287,10 @@ export class UtilsController {
   async wipeOtherDatabases(databasesToKeep: Models.Database[]) {
     await this.init();
     if (!this.database) {
-      console.log(chalk.red("Database not initialized"));
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
       return;
     }
-    await wipeOtherDatabases(this.database, databasesToKeep);
+    await wipeOtherDatabases(this.database, databasesToKeep, this.config?.useMigrations ?? true);
   }
 
   async wipeUsers() {
@@ -307,7 +331,7 @@ export class UtilsController {
 
   async findFunctionDirectories() {
     if (!this.appwriteFolderPath) {
-      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return new Map();
     }
     const functionsDir = findFunctionsDir(this.appwriteFolderPath);
@@ -378,11 +402,11 @@ export class UtilsController {
     ]);
 
     for (const localFunction of localFunctions) {
-      console.log(chalk.blue(`Syncing function ${localFunction.name}...`));
+      MessageFormatter.progress(`Syncing function ${localFunction.name}...`, { prefix: "Functions" });
       await this.deployFunction(localFunction.name);
     }
 
-    console.log(chalk.green("✨ All functions synchronized successfully!"));
+    MessageFormatter.success("All functions synchronized successfully!", { prefix: "Functions" });
   }
 
   async wipeDatabase(database: Models.Database, wipeBucket: boolean = false) {
@@ -443,7 +467,7 @@ export class UtilsController {
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
     for (const database of databases) {
-      if (database.$id === "migrations") continue;
+      if (!this.config.useMigrations && database.$id === "migrations") continue;
       await this.createOrUpdateCollections(database, undefined, collections);
     }
   }
@@ -468,11 +492,11 @@ export class UtilsController {
   async generateSchemas() {
     await this.init();
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.appwriteFolderPath) {
-      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
     await generateSchemas(this.config, this.appwriteFolderPath);
@@ -481,19 +505,19 @@ export class UtilsController {
   async importData(options: SetupOptions = {}) {
     await this.init();
     if (!this.database) {
-      console.log(chalk.red("Database not initialized"));
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.storage) {
-      console.log(chalk.red("Storage not initialized"));
+      MessageFormatter.error("Storage not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.config) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.appwriteFolderPath) {
-      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
 
@@ -524,16 +548,16 @@ export class UtilsController {
   ) {
     await this.init();
     if (!this.storage) {
-      console.log(chalk.red("Storage not initialized"));
+      MessageFormatter.error("Storage not initialized", undefined, { prefix: "Controller" });
       return;
     }
     const configToUse = config || this.config;
     if (!configToUse) {
-      console.log(chalk.red("Config not initialized"));
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (!this.appwriteFolderPath) {
-      console.log(chalk.red("Failed to get appwriteFolderPath"));
+      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
     const appwriteToX = new AppwriteToX(
@@ -550,7 +574,7 @@ export class UtilsController {
   ) {
     await this.init();
     if (!this.database) {
-      console.log(chalk.red("Database not initialized"));
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
       return;
     }
     if (databases.length === 0) {
@@ -644,7 +668,7 @@ export class UtilsController {
         console.log(chalk.red("Appwrite server not initialized"));
         return;
       } else {
-        console.log(chalk.blue("Starting user transfer..."));
+        MessageFormatter.progress("Starting user transfer...", { prefix: "Transfer" });
         const localUsers = new Users(this.appwriteServer);
         await transferUsersLocalToRemote(
           localUsers,
@@ -652,7 +676,7 @@ export class UtilsController {
           options.transferProject!,
           options.transferKey!
         );
-        console.log(chalk.green("User transfer completed"));
+        MessageFormatter.success("User transfer completed", { prefix: "Transfer" });
       }
     }
 
@@ -677,10 +701,9 @@ export class UtilsController {
             .replace(/\s+/g, "")}`);
 
       if (sourceBucketId && targetBucketId) {
-        console.log(
-          chalk.blue(
-            `Starting storage transfer from ${sourceBucketId} to ${targetBucketId}`
-          )
+        MessageFormatter.progress(
+          `Starting storage transfer from ${sourceBucketId} to ${targetBucketId}`,
+          { prefix: "Transfer" }
         );
 
         if (options.isRemote) {
@@ -702,7 +725,7 @@ export class UtilsController {
       }
     }
 
-    console.log(chalk.green("Transfer completed"));
+    MessageFormatter.success("Transfer completed", { prefix: "Transfer" });
   }
 
   async updateFunctionSpecifications(
@@ -712,20 +735,18 @@ export class UtilsController {
     await this.init();
     if (!this.appwriteServer)
       throw new Error("Appwrite server not initialized");
-    console.log(
-      chalk.green(
-        `Updating function specifications for ${functionId} to ${specification}`
-      )
+    MessageFormatter.progress(
+      `Updating function specifications for ${functionId} to ${specification}`,
+      { prefix: "Functions" }
     );
     await updateFunctionSpecifications(
       this.appwriteServer,
       functionId,
       specification
     );
-    console.log(
-      chalk.green(
-        `Successfully updated function specifications for ${functionId} to ${specification}`
-      )
+    MessageFormatter.success(
+      `Successfully updated function specifications for ${functionId} to ${specification}`,
+      { prefix: "Functions" }
     );
   }
 }

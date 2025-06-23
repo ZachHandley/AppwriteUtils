@@ -1,4 +1,5 @@
-import { SchemaGenerator } from "./schemaStrings.js";
+import { SchemaGenerator } from "../shared/schemaGenerator.js";
+import { findYamlConfig } from "../config/yamlConfig.js";
 import {
   Client,
   Compression,
@@ -9,7 +10,7 @@ import {
   type Permission,
 } from "node-appwrite";
 import { fetchAllCollections } from "../collections/methods.js";
-import { fetchAllDatabases } from "./databases.js";
+import { fetchAllDatabases } from "../databases/methods.js";
 import {
   CollectionSchema,
   attributeSchema,
@@ -92,7 +93,7 @@ export class AppwriteToX {
 
     // Loop through each database
     for (const database of databases) {
-      if (database.name.toLowerCase() === "migrations") {
+      if (!this.config.useMigrations && database.name.toLowerCase() === "migrations") {
         continue;
       }
 
@@ -274,7 +275,19 @@ export class AppwriteToX {
       this.updatedConfig,
       this.appwriteFolderPath
     );
-    generator.updateTsSchemas();
+
+    // Check if this is a YAML-based project
+    const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
+    const isYamlProject = !!yamlConfigPath;
+
+    if (isYamlProject) {
+      console.log("📄 Detected YAML configuration - generating YAML collection definitions");
+      generator.updateYamlCollections();
+    } else {
+      console.log("📝 Generating TypeScript collection definitions");
+      generator.updateTsSchemas();
+    }
+    
     generator.generateSchemas();
   }
 }

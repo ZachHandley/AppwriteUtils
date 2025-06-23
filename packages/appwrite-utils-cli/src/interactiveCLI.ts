@@ -42,9 +42,15 @@ import {
 import { deployLocalFunction } from "./functions/deployments.js";
 import { join } from "node:path";
 import fs from "node:fs";
-import { SchemaGenerator } from "./migrations/schemaStrings.js";
+import { SchemaGenerator } from "./shared/schemaGenerator.js";
+import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
+import { MessageFormatter } from "./shared/messageFormatter.js";
+import { migrateConfig } from "./utils/configMigration.js";
+import { findAppwriteConfig } from "./utils/loadConfigs.js";
+import { findYamlConfig, addFunctionToYamlConfig } from "./config/yamlConfig.js";
 
 enum CHOICES {
+  MIGRATE_CONFIG = "🔄 Migrate TypeScript config to YAML (.appwrite structure)",
   CREATE_COLLECTION_CONFIG = "Create collection config file",
   CREATE_FUNCTION = "Create a new function, from scratch or using a template",
   DEPLOY_FUNCTION = "Deploy function(s)",
@@ -66,32 +72,45 @@ enum CHOICES {
 
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
+  private isUsingTypeScriptConfig: boolean = false;
 
   constructor(private currentDir: string) {}
 
   async run(): Promise<void> {
-    console.log(
-      chalk.green("Welcome to Appwrite Utils CLI Tool by Zach Handley")
+    MessageFormatter.banner(
+      "Appwrite Utils CLI",
+      "Welcome to Appwrite Utils CLI Tool by Zach Handley"
     );
-    console.log(
-      chalk.blue(
-        "For more information, visit https://github.com/zachhandley/AppwriteUtils"
-      )
+    MessageFormatter.info(
+      "For more information, visit https://github.com/zachhandley/AppwriteUtils"
     );
 
+    // Detect configuration type
+    try {
+      await this.detectConfigurationType();
+    } catch (error) {
+      // Continue if detection fails
+      this.isUsingTypeScriptConfig = false;
+    }
+
     while (true) {
+      // Build choices array dynamically based on config type
+      const choices = this.buildChoicesList();
+      
       const { action } = await inquirer.prompt([
         {
           type: "list",
           name: "action",
           message: chalk.yellow("What would you like to do?"),
-          choices: Object.values(CHOICES),
+          choices,
         },
       ]);
 
       switch (action) {
+        case CHOICES.MIGRATE_CONFIG:
+          await this.migrateTypeScriptConfig();
+          break;
         case CHOICES.CREATE_COLLECTION_CONFIG:
-          await this.initControllerIfNeeded();
           await this.createCollectionConfig();
           break;
         case CHOICES.CREATE_FUNCTION:
@@ -153,7 +172,7 @@ export class InteractiveCLI {
           await this.updateFunctionSpec();
           break;
         case CHOICES.EXIT:
-          console.log(chalk.green("Goodbye!"));
+          MessageFormatter.success("Goodbye!");
           process.exit(0);
       }
     }
@@ -190,7 +209,10 @@ export class InteractiveCLI {
         }
         return acc;
       }, [] as Models.Database[])
-      .filter((db) => db.name.toLowerCase() !== "migrations");
+      .filter((db) => {
+        const useMigrations = this.controller?.config?.useMigrations ?? true;
+        return useMigrations || db.name.toLowerCase() !== "migrations";
+      });
 
     const hasLocalAndRemote =
       allDatabases.some((db) =>
@@ -212,7 +234,10 @@ export class InteractiveCLI {
             : ""),
         value: db,
       }))
-      .filter((db) => db.name.toLowerCase() !== "migrations");
+      .filter((db) => {
+        const useMigrations = this.controller?.config?.useMigrations ?? true;
+        return useMigrations || db.name.toLowerCase() !== "migrations";
+      });
 
     const { selectedDatabases } = await inquirer.prompt([
       {
@@ -316,6 +341,36 @@ export class InteractiveCLI {
     return selectedCollections;
   }
 
+  private getTemplateDefaults(template: string) {
+    const defaults = {
+      "typescript-node": {
+        runtime: "node-21.0" as Runtime,
+        entrypoint: "src/index.ts",
+        commands: "npm install && npm run build",
+        specification: "s-0.5vcpu-512mb" as Specification,
+      },
+      "uv": {
+        runtime: "python-3.12" as Runtime,
+        entrypoint: "src/index.py",
+        commands: "uv sync && uv build",
+        specification: "s-0.5vcpu-512mb" as Specification,
+      },
+      "count-docs-in-collection": {
+        runtime: "node-21.0" as Runtime,
+        entrypoint: "src/main.ts",
+        commands: "npm install && npm run build",
+        specification: "s-1vcpu-512mb" as Specification,
+      },
+    };
+    
+    return defaults[template as keyof typeof defaults] || {
+      runtime: "node-21.0" as Runtime,
+      entrypoint: "",
+      commands: "",
+      specification: "s-0.5vcpu-512mb" as Specification,
+    };
+  }
+
   private async createFunction(): Promise<void> {
     const { name } = await inquirer.prompt([
       {
@@ -332,13 +387,16 @@ export class InteractiveCLI {
         name: "template",
         message: "Select a template:",
         choices: [
-          "typescript-node",
-          "poetry",
-          "count-docs-in-collection",
-          "none",
+          { name: "TypeScript Node.js", value: "typescript-node" },
+          { name: "Python with UV", value: "uv" },
+          { name: "Count Documents in Collection", value: "count-docs-in-collection" },
+          { name: "None (Empty Function)", value: "none" },
         ],
       },
     ]);
+
+    // Get template defaults
+    const templateDefaults = this.getTemplateDefaults(template);
 
     const { runtime } = await inquirer.prompt([
       {
@@ -346,6 +404,7 @@ export class InteractiveCLI {
         name: "runtime",
         message: "Select runtime:",
         choices: Object.values(RuntimeSchema.Values),
+        default: templateDefaults.runtime,
       },
     ]);
 
@@ -364,6 +423,7 @@ export class InteractiveCLI {
             value: s.slug,
           })),
         ],
+        default: templateDefaults.specification,
       },
     ]);
 
@@ -375,29 +435,50 @@ export class InteractiveCLI {
       execute: ["any"],
       enabled: true,
       logging: true,
-      entrypoint: template === "none" ? "src/index.ts" : undefined,
-      specification,
-      predeployCommands: template.includes("typescript")
-        ? ["npm install", "npm run build"]
-        : undefined,
-      deployDir: template.includes("typescript") ? "dist" : undefined,
+      entrypoint: templateDefaults.entrypoint,
+      commands: templateDefaults.commands,
+      specification: specification || templateDefaults.specification,
+      scopes: [],
+      timeout: 15,
+      schedule: "",
+      installationId: "",
+      providerRepositoryId: "",
+      providerBranch: "",
+      providerSilentMode: false,
+      providerRootDirectory: "",
+      templateRepository: "",
+      templateOwner: "",
+      templateRootDirectory: "",
     };
 
     if (template !== "none") {
       await createFunctionTemplate(
-        template as "typescript-node" | "poetry" | "count-docs-in-collection",
+        template as "typescript-node" | "uv" | "count-docs-in-collection",
         name,
         "./functions"
       );
     }
 
-    // Add to config
+    // Add to in-memory config
     if (!this.controller!.config!.functions) {
       this.controller!.config!.functions = [];
     }
     this.controller!.config!.functions.push(functionConfig);
 
-    console.log(chalk.green("✨ Function created successfully!"));
+    // If using YAML config, also add to YAML file
+    const yamlConfigPath = findYamlConfig(this.currentDir);
+    if (yamlConfigPath) {
+      try {
+        await addFunctionToYamlConfig(yamlConfigPath, functionConfig);
+      } catch (error) {
+        MessageFormatter.warning(
+          `Function created but failed to update YAML config: ${error instanceof Error ? error.message : error}`,
+          { prefix: "Functions" }
+        );
+      }
+    }
+
+    MessageFormatter.success("Function created successfully!", { prefix: "Functions" });
   }
 
   private async findFunctionInSubdirectories(
@@ -638,7 +719,7 @@ export class InteractiveCLI {
             dirPath: functionPath,
           }
         );
-        console.log(chalk.green("✨ Function deployed successfully!"));
+        MessageFormatter.success("Function deployed successfully!", { prefix: "Functions" });
       } catch (error) {
         console.error(chalk.red("Failed to deploy function:"), error);
       }
@@ -1373,7 +1454,7 @@ export class InteractiveCLI {
       console.log(chalk.yellow(`Backing up database: ${db.name}`));
       await this.controller!.backupDatabase(db);
     }
-    console.log(chalk.green("Database backup completed."));
+    MessageFormatter.success("Database backup completed", { prefix: "Backup" });
   }
 
   private async wipeDatabase(): Promise<void> {
@@ -1408,19 +1489,14 @@ export class InteractiveCLI {
       },
     ]);
 
-    const { confirm } = await inquirer.prompt([
-      {
-        type: "confirm",
-        name: "confirm",
-        message: chalk.red(
-          "Are you sure you want to wipe the selected items? This action cannot be undone."
-        ),
-        default: false,
-      },
-    ]);
+    const databaseNames = selectedDatabases.map(db => db.name);
+    const confirmed = await ConfirmationDialogs.confirmDatabaseWipe(databaseNames, {
+      includeStorage: selectedStorage.length > 0,
+      includeUsers: wipeUsers
+    });
 
-    if (confirm) {
-      console.log(chalk.yellow("Wiping selected items..."));
+    if (confirmed) {
+      MessageFormatter.info("Starting wipe operation...", { prefix: "Wipe" });
       for (const db of selectedDatabases) {
         await this.controller!.wipeDatabase(db);
       }
@@ -1430,9 +1506,9 @@ export class InteractiveCLI {
       if (wipeUsers) {
         await this.controller!.wipeUsers();
       }
-      console.log(chalk.green("Wipe operation completed."));
+      MessageFormatter.success("Wipe operation completed", { prefix: "Wipe" });
     } else {
-      console.log(chalk.blue("Wipe operation cancelled."));
+      MessageFormatter.info("Wipe operation cancelled", { prefix: "Wipe" });
     }
   }
 
@@ -1459,40 +1535,64 @@ export class InteractiveCLI {
         true
       );
 
-      const { confirm } = await inquirer.prompt([
-        {
-          type: "confirm",
-          name: "confirm",
-          message: chalk.red(
-            `Are you sure you want to wipe the selected collections from ${database.name}? This action cannot be undone.`
-          ),
-          default: false,
-        },
-      ]);
+      const collectionNames = collections.map(c => c.name);
+      const confirmed = await ConfirmationDialogs.confirmCollectionWipe(
+        database.name,
+        collectionNames
+      );
 
-      if (confirm) {
-        console.log(
-          chalk.yellow(`Wiping selected collections from ${database.name}...`)
+      if (confirmed) {
+        MessageFormatter.info(
+          `Wiping selected collections from ${database.name}...`,
+          { prefix: "Wipe" }
         );
         for (const collection of collections) {
           await this.controller!.wipeCollection(database, collection);
-          console.log(
-            chalk.green(`Collection ${collection.name} wiped successfully.`)
+          MessageFormatter.success(
+            `Collection ${collection.name} wiped successfully`,
+            { prefix: "Wipe" }
           );
         }
       } else {
-        console.log(
-          chalk.blue(`Wipe operation cancelled for ${database.name}.`)
+        MessageFormatter.info(
+          `Wipe operation cancelled for ${database.name}`,
+          { prefix: "Wipe" }
         );
       }
     }
-    console.log(chalk.green("Wipe collections operation completed."));
+    MessageFormatter.success("Wipe collections operation completed", { prefix: "Wipe" });
   }
 
   private async generateSchemas(): Promise<void> {
     console.log(chalk.yellow("Generating schemas..."));
-    await this.controller!.generateSchemas();
-    console.log(chalk.green("Schema generation completed."));
+    
+    // Prompt user for schema type preference
+    const { schemaType } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "schemaType",
+        message: "What type of schemas would you like to generate?",
+        choices: [
+          { name: "TypeScript (Zod) schemas", value: "zod" },
+          { name: "JSON schemas", value: "json" },
+          { name: "Both TypeScript and JSON schemas", value: "both" },
+        ],
+        default: "both",
+      },
+    ]);
+
+    // Get the config folder path (where the config file is located)
+    const configFolderPath = this.controller!.getAppwriteFolderPath();
+    if (!configFolderPath) {
+      MessageFormatter.error("Failed to get config folder path", undefined, { prefix: "Schemas" });
+      return;
+    }
+
+    // Create SchemaGenerator with the correct base path and generate schemas
+    const schemaGenerator = new SchemaGenerator(this.controller!.config!, configFolderPath);
+    schemaGenerator.generateSchemas({ format: schemaType, verbose: true });
+    
+    MessageFormatter.success("Schema generation completed", { prefix: "Schemas" });
   }
 
   private async importData(): Promise<void> {
@@ -1799,6 +1899,71 @@ export class InteractiveCLI {
       }
     } catch (error) {
       console.error(chalk.red("Error updating function specification:"), error);
+    }
+  }
+
+  private async detectConfigurationType(): Promise<void> {
+    try {
+      // Check for YAML config first
+      const yamlConfigPath = findYamlConfig(this.currentDir);
+      if (yamlConfigPath) {
+        this.isUsingTypeScriptConfig = false;
+        MessageFormatter.info("Using YAML configuration", { prefix: "Config" });
+        return;
+      }
+
+      // Then check for TypeScript config
+      const configPath = findAppwriteConfig(this.currentDir);
+      if (configPath && configPath.endsWith('.ts')) {
+        this.isUsingTypeScriptConfig = true;
+        MessageFormatter.info("TypeScript configuration detected", { prefix: "Config" });
+        MessageFormatter.info("Consider migrating to YAML for better organization", { prefix: "Config" });
+        return;
+      }
+
+      // No config found
+      this.isUsingTypeScriptConfig = false;
+      MessageFormatter.info("No configuration file found", { prefix: "Config" });
+    } catch (error) {
+      // Silently handle detection errors and continue
+      this.isUsingTypeScriptConfig = false;
+    }
+  }
+
+  private buildChoicesList(): string[] {
+    const allChoices = Object.values(CHOICES);
+    
+    if (this.isUsingTypeScriptConfig) {
+      // Place migration option at the top when TS config is detected
+      return [
+        CHOICES.MIGRATE_CONFIG,
+        ...allChoices.filter(choice => choice !== CHOICES.MIGRATE_CONFIG)
+      ];
+    } else {
+      // Hide migration option when using YAML config
+      return allChoices.filter(choice => choice !== CHOICES.MIGRATE_CONFIG);
+    }
+  }
+
+  private async migrateTypeScriptConfig(): Promise<void> {
+    try {
+      MessageFormatter.info("Starting TypeScript to YAML configuration migration...", { prefix: "Migration" });
+      
+      // Perform the migration
+      await migrateConfig(this.currentDir);
+      
+      // Reset the detection flag
+      this.isUsingTypeScriptConfig = false;
+      
+      // Reset the controller to pick up the new config
+      this.controller = undefined;
+      
+      MessageFormatter.success("Migration completed successfully!", { prefix: "Migration" });
+      MessageFormatter.info("Your configuration has been migrated to the .appwrite directory structure", { prefix: "Migration" });
+      MessageFormatter.info("You can now use YAML configuration for easier management", { prefix: "Migration" });
+      
+    } catch (error) {
+      MessageFormatter.error("Migration failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Migration" });
     }
   }
 }

@@ -7,10 +7,10 @@ import {
   type Models,
 } from "node-appwrite";
 import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
-import { nameToIdMapping, processQueue } from "../migrations/queue.js";
+import { nameToIdMapping, processQueue } from "../shared/operationQueue.js";
 import { createUpdateCollectionAttributes } from "./attributes.js";
 import { createOrUpdateIndexes } from "./indexes.js";
-import { SchemaGenerator } from "../migrations/schemaStrings.js";
+import { SchemaGenerator } from "../shared/schemaGenerator.js";
 import {
   isNull,
   isUndefined,
@@ -21,6 +21,8 @@ import {
   chunk,
 } from "es-toolkit";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
+import { ProgressManager } from "../shared/progressManager.js";
 
 export const documentExists = async (
   db: Databases,
@@ -88,20 +90,20 @@ export const checkForCollection = async (
   collection: Partial<CollectionCreate>
 ): Promise<Models.Collection | null> => {
   try {
-    console.log(`Checking for collection with name: ${collection.name}`);
+    MessageFormatter.progress(`Checking for collection with name: ${collection.name}`, { prefix: "Collections" });
     const response = await tryAwaitWithRetry(
       async () =>
         await db.listCollections(dbId, [Query.equal("name", collection.name!)])
     );
     if (response.collections.length > 0) {
-      console.log(`Collection found: ${response.collections[0].$id}`);
+      MessageFormatter.info(`Collection found: ${response.collections[0].$id}`, { prefix: "Collections" });
       return { ...collection, ...response.collections[0] };
     } else {
-      console.log(`No collection found with name: ${collection.name}`);
+      MessageFormatter.info(`No collection found with name: ${collection.name}`, { prefix: "Collections" });
       return null;
     }
   } catch (error) {
-    console.error(`Error checking for collection: ${error}`);
+    MessageFormatter.error(`Error checking for collection: ${collection.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Collections" });
     return null;
   }
 };
@@ -114,23 +116,23 @@ export const fetchAndCacheCollectionByName = async (
 ): Promise<Models.Collection | undefined> => {
   if (nameToIdMapping.has(collectionName)) {
     const collectionId = nameToIdMapping.get(collectionName);
-    console.log(`\tCollection found in cache: ${collectionId}`);
+    MessageFormatter.debug(`Collection found in cache: ${collectionId}`, undefined, { prefix: "Collections" });
     return await tryAwaitWithRetry(
       async () => await db.getCollection(dbId, collectionId!)
     );
   } else {
-    console.log(`\tFetching collection by name: ${collectionName}`);
+    MessageFormatter.progress(`Fetching collection by name: ${collectionName}`, { prefix: "Collections" });
     const collectionsPulled = await tryAwaitWithRetry(
       async () =>
         await db.listCollections(dbId, [Query.equal("name", collectionName)])
     );
     if (collectionsPulled.total > 0) {
       const collection = collectionsPulled.collections[0];
-      console.log(`\tCollection found: ${collection.$id}`);
+      MessageFormatter.info(`Collection found: ${collection.$id}`, { prefix: "Collections" });
       nameToIdMapping.set(collectionName, collection.$id);
       return collection;
     } else {
-      console.log(`\tCollection not found by name: ${collectionName}`);
+      MessageFormatter.warning(`Collection not found by name: ${collectionName}`, { prefix: "Collections" });
       return undefined;
     }
   }
@@ -167,15 +169,27 @@ async function wipeDocumentsFromCollection(
           ? docsResponse.documents[docsResponse.documents.length - 1].$id
           : undefined;
       if (totalDocuments % 10000 === 0) {
-        console.log(`Found ${totalDocuments} documents...`);
+        MessageFormatter.progress(`Found ${totalDocuments} documents...`, { prefix: "Wipe" });
       }
     }
 
-    console.log(`Found ${totalDocuments} documents to delete`);
+    MessageFormatter.info(`Found ${totalDocuments} documents to delete`, { prefix: "Wipe" });
+    
+    if (totalDocuments === 0) {
+      MessageFormatter.info("No documents to delete", { prefix: "Wipe" });
+      return;
+    }
+    
+    // Create progress tracker for deletion
+    const progress = ProgressManager.create(
+      `delete-${collectionId}`,
+      totalDocuments,
+      { title: "Deleting documents" }
+    );
 
     const maxStackSize = 50; // Reduced batch size
     const docBatches = chunk(documents, maxStackSize);
-    const quarterBatchSize = Math.ceil(docBatches.length / 4);
+    let documentsProcessed = 0;
 
     for (let i = 0; i < docBatches.length; i++) {
       const batch = docBatches[i];
@@ -184,6 +198,8 @@ async function wipeDocumentsFromCollection(
           await tryAwaitWithRetry(async () =>
             database.deleteDocument(databaseId, collectionId, doc.$id)
           );
+          documentsProcessed++;
+          progress.update(documentsProcessed);
         } catch (error: any) {
           // Skip if document doesn't exist or other non-critical errors
           if (
@@ -191,37 +207,33 @@ async function wipeDocumentsFromCollection(
               "Document with the requested ID could not be found"
             )
           ) {
-            console.error(
-              `Failed to delete document ${doc.$id}:`,
-              error.message
+            MessageFormatter.error(
+              `Failed to delete document ${doc.$id}`,
+              error.message,
+              { prefix: "Wipe" }
             );
           }
+          documentsProcessed++;
+          progress.update(documentsProcessed);
         }
       });
 
       await Promise.all(deletePromises);
       await delay(50); // Increased delay between batches
 
-      // Log at 25%, 50%, 75% and 100% completion
-      if ((i + 1) % quarterBatchSize === 0 || i === docBatches.length - 1) {
-        const percentComplete = Math.round(((i + 1) / docBatches.length) * 100);
-        const documentsProcessed = Math.min(
-          (i + 1) * maxStackSize,
-          totalDocuments
-        );
-        console.log(
-          `Deleted ${documentsProcessed} documents (${percentComplete}% complete)`
-        );
-      }
+      // Progress is now handled by ProgressManager automatically
     }
 
-    console.log(
-      `Completed deletion of ${totalDocuments} documents from collection ${collectionId}`
+    progress.stop();
+    MessageFormatter.success(
+      `Completed deletion of ${totalDocuments} documents from collection ${collectionId}`,
+      { prefix: "Wipe" }
     );
   } catch (error) {
-    console.error(
-      `Error wiping documents from collection ${collectionId}:`,
-      error
+    MessageFormatter.error(
+      `Error wiping documents from collection ${collectionId}`,
+      error instanceof Error ? error : new Error(String(error)),
+      { prefix: "Wipe" }
     );
     throw error;
   }
@@ -231,12 +243,25 @@ export const wipeDatabase = async (
   database: Databases,
   databaseId: string
 ): Promise<{ collectionId: string; collectionName: string }[]> => {
-  console.log(`Wiping database: ${databaseId}`);
+  MessageFormatter.info(`Wiping database: ${databaseId}`, { prefix: "Wipe" });
   const existingCollections = await fetchAllCollections(databaseId, database);
   let collectionsDeleted: { collectionId: string; collectionName: string }[] =
     [];
+  
+  if (existingCollections.length === 0) {
+    MessageFormatter.info("No collections to delete", { prefix: "Wipe" });
+    return collectionsDeleted;
+  }
+  
+  const progress = ProgressManager.create(
+    `wipe-db-${databaseId}`,
+    existingCollections.length,
+    { title: "Deleting collections" }
+  );
+  
+  let processed = 0;
   for (const { $id: collectionId, name: name } of existingCollections) {
-    console.log(`Deleting collection: ${collectionId}`);
+    MessageFormatter.progress(`Deleting collection: ${collectionId}`, { prefix: "Wipe" });
     collectionsDeleted.push({
       collectionId: collectionId,
       collectionName: name,
@@ -244,8 +269,13 @@ export const wipeDatabase = async (
     tryAwaitWithRetry(
       async () => await database.deleteCollection(databaseId, collectionId)
     ); // Try to delete the collection and ignore errors if it doesn't exist or if it's already being deleted
+    processed++;
+    progress.update(processed);
     await delay(100);
   }
+  
+  progress.stop();
+  MessageFormatter.success(`Deleted ${collectionsDeleted.length} collections from database`, { prefix: "Wipe" });
   return collectionsDeleted;
 };
 
@@ -258,7 +288,7 @@ export const wipeCollection = async (
     Query.equal("$id", collectionId),
   ]);
   if (collections.total === 0) {
-    console.log(`Collection ${collectionId} not found`);
+    MessageFormatter.warning(`Collection ${collectionId} not found`, { prefix: "Wipe" });
     return;
   }
   const collection = collections.collections[0];
@@ -314,7 +344,7 @@ export const createOrUpdateCollections = async (
               permissions.push(Permission.write(permission.target));
               break;
             default:
-              console.log(`Unknown permission: ${permission.permission}`);
+              MessageFormatter.warning(`Unknown permission: ${permission.permission}`, { prefix: "Collections" });
               break;
           }
         }
@@ -335,7 +365,7 @@ export const createOrUpdateCollections = async (
     // Determine the correct ID for the collection
     let collectionId: string;
     if (!collectionToUse) {
-      console.log(`Creating collection: ${collectionData.name}`);
+      MessageFormatter.info(`Creating collection: ${collectionData.name}`, { prefix: "Collections" });
       let foundColl = deletedCollections?.find(
         (coll) =>
           coll.collectionName.toLowerCase().trim().replace(" ", "") ===
@@ -368,13 +398,15 @@ export const createOrUpdateCollections = async (
         collectionData.$id = collectionToUse!.$id;
         nameToIdMapping.set(collectionData.name, collectionToUse!.$id);
       } catch (error) {
-        console.error(
-          `Failed to create collection ${collectionData.name} with ID ${collectionId}: ${error}`
+        MessageFormatter.error(
+          `Failed to create collection ${collectionData.name} with ID ${collectionId}`,
+          error instanceof Error ? error : new Error(String(error)),
+          { prefix: "Collections" }
         );
         continue;
       }
     } else {
-      console.log(`Collection ${collectionData.name} exists, updating it`);
+      MessageFormatter.info(`Collection ${collectionData.name} exists, updating it`, { prefix: "Collections" });
       await tryAwaitWithRetry(
         async () =>
           await database.updateCollection(
@@ -392,7 +424,7 @@ export const createOrUpdateCollections = async (
     await delay(250);
 
     // Update attributes and indexes for the collection
-    console.log("Creating Attributes");
+    MessageFormatter.progress("Creating Attributes", { prefix: "Collections" });
     await createUpdateCollectionAttributes(
       database,
       databaseId,
@@ -410,7 +442,7 @@ export const createOrUpdateCollections = async (
         : config.collections?.find((c) => c.$id === collectionToUse!.$id)
             ?.indexes ?? [];
 
-    console.log("Creating Indexes");
+    MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
     await createOrUpdateIndexes(
       databaseId,
       database,
@@ -432,7 +464,7 @@ export const generateMockData = async (
 ): Promise<void> => {
   for (const { collection, mockFunction } of configCollections) {
     if (mockFunction) {
-      console.log(`Generating mock data for collection: ${collection.name}`);
+      MessageFormatter.progress(`Generating mock data for collection: ${collection.name}`, { prefix: "Mock Data" });
       const mockData = mockFunction();
       for (const data of mockData) {
         await database.createDocument(
@@ -450,7 +482,7 @@ export const fetchAllCollections = async (
   dbId: string,
   database: Databases
 ): Promise<Models.Collection[]> => {
-  console.log(`Fetching all collections for database ID: ${dbId}`);
+  MessageFormatter.progress(`Fetching all collections for database ID: ${dbId}`, { prefix: "Collections" });
   let collections: Models.Collection[] = [];
   let moreCollections = true;
   let lastCollectionId: string | undefined;
@@ -471,7 +503,7 @@ export const fetchAllCollections = async (
     }
   }
 
-  console.log(`Fetched a total of ${collections.length} collections.`);
+  MessageFormatter.success(`Fetched a total of ${collections.length} collections`, { prefix: "Collections" });
   return collections;
 };
 
@@ -492,7 +524,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
   let totalDocumentsTransferred = 0;
 
   if (fromCollDocs.documents.length === 0) {
-    console.log(`No documents found in collection ${fromCollId}`);
+    MessageFormatter.info(`No documents found in collection ${fromCollId}`, { prefix: "Transfer" });
     return;
   } else if (fromCollDocs.documents.length < 50) {
     const batchedPromises = fromCollDocs.documents.map((doc) => {
@@ -577,8 +609,9 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
     }
   }
 
-  console.log(
-    `Transferred ${totalDocumentsTransferred} documents from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}`
+  MessageFormatter.success(
+    `Transferred ${totalDocumentsTransferred} documents from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}`,
+    { prefix: "Transfer" }
   );
 };
 
@@ -603,7 +636,7 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
   );
 
   if (fromCollDocs.documents.length === 0) {
-    console.log(`No documents found in collection ${fromCollId}`);
+    MessageFormatter.info(`No documents found in collection ${fromCollId}`, { prefix: "Transfer" });
     return;
   } else if (fromCollDocs.documents.length < 50) {
     const batchedPromises = fromCollDocs.documents.map((doc) => {
@@ -684,7 +717,8 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
       totalDocumentsTransferred += fromCollDocs.documents.length;
     }
   }
-  console.log(
-    `Total documents transferred from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}: ${totalDocumentsTransferred}`
+  MessageFormatter.success(
+    `Total documents transferred from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}: ${totalDocumentsTransferred}`,
+    { prefix: "Transfer" }
   );
 };

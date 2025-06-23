@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "0.10.86",
+  "version": "1.0.1",
   "main": "src/main.ts",
   "type": "module",
   "repository": {
@@ -30,29 +30,33 @@
     "postinstall": "echo 'This package is intended for CLI use only and should not be added as a dependency in other projects.'"
   },
   "dependencies": {
-    "@types/inquirer": "^9.0.7",
-    "appwrite-utils": "^0.4.1",
-    "chalk": "^5.3.0",
+    "@types/inquirer": "^9.0.8",
+    "@types/json-schema": "^7.0.15",
+    "@types/yargs": "^17.0.33",
+    "appwrite-utils": "^1.0.0",
+    "chalk": "^5.4.1",
     "cli-progress": "^3.12.0",
     "commander": "^12.1.0",
-    "es-toolkit": "^1.32.0",
+    "es-toolkit": "^1.39.4",
     "ignore": "^6.0.2",
-    "inquirer": "^9.3.6",
+    "inquirer": "^9.3.7",
     "js-yaml": "^4.1.0",
-    "luxon": "^3.5.0",
+    "luxon": "^3.6.1",
     "nanostores": "^0.10.3",
-    "node-appwrite": "^14.1.0",
+    "node-appwrite": "^14.2.0",
+    "p-limit": "^6.2.0",
     "tar": "^7.4.3",
-    "tsx": "^4.17.0",
-    "ulidx": "^2.4.0",
-    "winston": "^3.14.2",
-    "zod": "^3.23.8"
+    "tsx": "^4.20.3",
+    "ulidx": "^2.4.1",
+    "winston": "^3.17.0",
+    "yargs": "^18.0.0",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@types/cli-progress": "^3.11.6",
     "@types/js-yaml": "^4.0.9",
-    "@types/lodash": "^4.17.7",
-    "@types/luxon": "^3.4.2",
-    "typescript": "^5.5.4"
+    "@types/lodash": "^4.17.18",
+    "@types/luxon": "^3.6.2",
+    "typescript": "^5.8.3"
   }
 }

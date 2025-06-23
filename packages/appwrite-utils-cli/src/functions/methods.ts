@@ -5,12 +5,14 @@ import {
   Query,
   Runtime,
 } from "node-appwrite";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import {
   type AppwriteFunction,
   type FunctionScope,
   type Specification,
+  type Runtime as AppwriteUtilsRuntime,
 } from "appwrite-utils";
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
@@ -136,7 +138,7 @@ export const updateFunctionSpecifications = async (
   try {
     const functionResponse = await updateFunction(client, {
       ...functionFound,
-      runtime: functionFound.runtime as Runtime,
+      runtime: functionFound.runtime as AppwriteUtilsRuntime,
       scopes: functionFound.scopes as FunctionScope[],
       specification: specification,
     });
@@ -193,12 +195,14 @@ export const updateFunction = async (
 };
 
 export const createFunctionTemplate = async (
-  templateType: "typescript-node" | "poetry" | "count-docs-in-collection",
+  templateType: "typescript-node" | "uv" | "count-docs-in-collection",
   functionName: string,
   basePath: string = "./functions"
 ) => {
   const functionPath = join(basePath, functionName);
-  const templatesPath = join(__dirname, "templates", templateType);
+  const currentFileUrl = import.meta.url;
+  const currentDir = dirname(fileURLToPath(currentFileUrl));
+  const templatesPath = join(currentDir, "templates", templateType);
 
   // Create function directory
   await fs.promises.mkdir(functionPath, { recursive: true });

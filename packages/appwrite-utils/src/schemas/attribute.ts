@@ -8,9 +8,11 @@ import {
   type IntegerAttribute,
 } from "../schemas/integerAttribute.js";
 import {
+  doubleAttributeSchema,
   floatAttributeSchema,
+  type DoubleAttribute,
   type FloatAttribute,
-} from "../schemas/floatAttribute.js";
+} from "../schemas/doubleAttribute.js";
 import {
   booleanAttributeSchema,
   type BooleanAttribute,
@@ -40,7 +42,8 @@ import {
 export const attributeSchema = z.discriminatedUnion("type", [
   stringAttributeSchema,
   integerAttributeSchema,
-  floatAttributeSchema,
+  doubleAttributeSchema, // Preferred double type
+  floatAttributeSchema, // Backwards compatibility for float type
   booleanAttributeSchema,
   datetimeAttributeSchema,
   emailAttributeSchema,

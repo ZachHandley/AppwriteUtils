@@ -14,14 +14,14 @@ import {
 } from "appwrite-utils";
 import path from "path";
 import fs from "fs";
-import { convertObjectByAttributeMappings } from "./converters.js";
+import { convertObjectByAttributeMappings } from "../utils/dataConverters.js";
 import { z } from "zod";
 import { checkForCollection } from "../collections/methods.js";
 import { ID, Users, type Databases } from "node-appwrite";
-import { logger } from "./logging.js";
-import { findOrCreateOperation, updateOperation } from "./migrationHelper.js";
+import { logger } from "../shared/logging.js";
+import { findOrCreateOperation, updateOperation } from "../shared/migrationHelpers.js";
 import { AuthUserCreateSchema } from "../schemas/authUser.js";
-import { UsersController } from "./users.js";
+import { UsersController } from "../users/methods.js";
 import { finalizeByAttributeMap } from "../utils/helperFunctions.js";
 import { isEmpty } from "es-toolkit/compat";
 

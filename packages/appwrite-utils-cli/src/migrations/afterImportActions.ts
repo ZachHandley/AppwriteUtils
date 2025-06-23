@@ -11,7 +11,7 @@ import { InputFile } from "node-appwrite/file";
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { logger } from "./logging.js";
+import { logger } from "../shared/logging.js";
 import {
   tryAwaitWithRetry,
   type AfterImportActions,
@@ -485,7 +485,7 @@ export const afterImportActions = {
         // Use arrayBuffer if buffer is not available
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        fs.writeFileSync(tempFilePath, buffer);
+        fs.writeFileSync(tempFilePath, new Uint8Array(buffer));
 
         // Create InputFile from the downloaded file
         const inputFile = InputFile.fromPath(tempFilePath, fileName);

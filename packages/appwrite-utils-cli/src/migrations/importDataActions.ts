@@ -6,10 +6,10 @@ import {
   type AttributeMappings,
 } from "appwrite-utils";
 import { converterFunctions, type ConverterFunctions } from "appwrite-utils";
-import { convertObjectBySchema } from "./converters.js";
+import { convertObjectBySchema } from "../utils/dataConverters.js";
 import { type AfterImportActions } from "appwrite-utils";
 import { afterImportActions } from "./afterImportActions.js";
-import { logger } from "./logging.js";
+import { logger } from "../shared/logging.js";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 
 export class ImportDataActions {

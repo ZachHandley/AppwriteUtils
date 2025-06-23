@@ -2,19 +2,30 @@
 
 ## Overview
 
-`appwrite-utils-cli` is a powerful command-line interface tool designed for Appwrite developers who need to manage database migrations, schema generation, data import, and much more. This CLI tool facilitates complex tasks like setting up databases, running migrations, generating schemas, and managing backups efficiently, making it an indispensable part of your Appwrite project management.
+`appwrite-utils-cli` is a powerful, YAML-first command-line interface tool designed for Appwrite developers who need to manage database migrations, schema generation, data import, and comprehensive project management. Built on a modular architecture with enhanced performance, this CLI tool facilitates complex tasks like setting up databases, running migrations, generating schemas, and managing backups efficiently. With version 1.0.0, the CLI introduces a completely refactored import system with 50%+ complexity reduction, YAML-first configuration, and sophisticated data handling capabilities.
 
 ## Features
 
-- **Interactive Mode**: Run the CLI in interactive mode for a guided experience through all available options.
-- **Easy Configuration**: Initialize your Appwrite project configurations interactively directly from the command line.
-- **Database Migrations**: Control the migration process with options to target specific databases and collections.
-- **Schema Generation**: Generate and manage TypeScript schemas directly from your Appwrite database schemas.
-- **Data Import**: Facilitate the import of data into your Appwrite databases with comprehensive command-line support.
-- **Backup Management**: Create backups of your Appwrite databases to ensure data integrity and safety.
-- **Flexible Database Management**: Includes commands to wipe databases, documents, or user data, providing flexibility in managing your database state during development or testing.
-- **Data Transfer**: Transfer data between databases, collections, and even between local and remote Appwrite instances.
-- **Configuration Synchronization**: Sync your local Appwrite configuration with your remote Appwrite project.
+### Core Capabilities
+- **YAML-First Configuration**: Modern YAML-based configuration with JSON Schema support for IntelliSense
+- **Interactive Mode**: Professional guided CLI experience with rich visual feedback and progress tracking
+- **Modular Import System**: Completely refactored import architecture with 50%+ complexity reduction
+- **Enhanced Performance**: Configurable rate limiting and batch processing for optimal performance
+- **Safety First**: Smart confirmation dialogs for destructive operations with explicit confirmations
+
+### Data Management
+- **Advanced Data Import**: YAML-configured imports with sophisticated file handling, URL support, and user deduplication
+- **Relationship Resolution**: Intelligent cross-collection relationship mapping and ID resolution
+- **User Management**: Advanced user deduplication with email/phone matching and merge capabilities
+- **File Operations**: Complete file handling with URL downloads, local file search, and afterImportActions
+- **Backup Management**: Comprehensive backup system with progress tracking and detailed reporting
+
+### Development Tools
+- **Database Migrations**: Full migration control with progress tracking and operation summaries
+- **Schema Generation**: Generate TypeScript and JSON schemas from database configurations
+- **Data Transfer**: Transfer data between databases, collections, and instances with real-time progress
+- **Configuration Sync**: Bidirectional synchronization between local YAML configs and Appwrite projects
+- **Function Management**: Deploy and manage Appwrite Functions with specification updates
 
 ## Installation
 
@@ -32,19 +43,69 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 
 **Note: Do not install this locally into your project. It is meant to be used as a command-line tool only.**
 
+## YAML-First Configuration
+
+Version 1.0.0 introduces a YAML-first approach for better cross-platform compatibility and enhanced developer experience.
+
+### Configuration Structure
+
+The CLI automatically detects configuration files in this order:
+1. `.appwrite/config.yaml` (recommended)
+2. `appwrite.yaml`
+3. `appwriteConfig.ts` (legacy, still supported)
+
+### YAML Configuration Example
+
+```yaml
+# .appwrite/config.yaml with JSON Schema support
+# yaml-language-server: $schema=./.yaml_schemas/appwrite-config.schema.json
+
+appwriteEndpoint: "https://cloud.appwrite.io/v1"
+appwriteProject: "your-project-id"
+appwriteKey: "your-api-key"
+
+databases:
+  - name: "main"
+    id: "main"
+    collections:
+      - name: "Users"
+        id: "users"
+        attributes:
+          - key: "email"
+            type: "string"
+            required: true
+            format: "email"
+
+buckets:
+  - name: "documents"
+    id: "documents"
+    permissions:
+      - target: "any"
+        permission: "read"
+
+logging:
+  enabled: false  # Disabled by default
+  level: "info"
+  console: true
+```
+
 ## Usage
 
 After installation, you can access the tool directly from your command line using the provided commands.
 
 ### Interactive Mode
 
-Run the CLI in interactive mode:
+Run the CLI in interactive mode with enhanced visual feedback:
 
 ```bash
 npx --package=appwrite-utils-cli@latest appwrite-migrate --it
 ```
 
-This will guide you through all available options interactively.
+This provides a professional guided experience with:
+- Rich visual feedback and progress tracking
+- Smart confirmation dialogs for destructive operations
+- Operation summaries with detailed statistics
+- Real-time progress bars with ETA calculations
 
 ### Non-Interactive Mode
 
@@ -54,38 +115,108 @@ You can also use specific flags to run tasks without the interactive prompt:
 npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 ```
 
+## YAML Import Configuration System
+
+Version 1.0.0 introduces a powerful YAML-based import system with sophisticated data handling capabilities.
+
+### Import Configuration Example
+
+```yaml
+# .appwrite/import/users-import.yaml
+# yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json
+
+source:
+  file: "importData/users.json"
+  basePath: "RECORDS"
+  type: "json"
+
+target:
+  collection: "Users"
+  type: "create"
+  primaryKey: "user_id"
+  createUsers: true
+
+mapping:
+  attributes:
+    - oldKey: "user_id"
+      targetKey: "userId"
+      converters: ["anyToString"]
+      validation:
+        - rule: "required"
+          params: ["{userId}"]
+
+    - oldKey: "profile_image_url"
+      targetKey: "avatar"
+      fileData:
+        path: "{profile_image_url}"
+        name: "{user_id}_avatar"
+      afterImport:
+        - action: "createFileAndUpdateField"
+          params: ["{dbId}", "{collId}", "{docId}", "avatar", "{bucketId}", "{filePath}", "{fileName}"]
+
+  relationships:
+    - sourceField: "department_id"
+      targetField: "departmentId"
+      targetCollection: "Departments"
+
+options:
+  batchSize: 50
+  continueOnError: true
+```
+
+### Import System Features
+
+- **File Handling**: Complete support for URL downloads and local file search
+- **User Deduplication**: Sophisticated email/phone matching with merge capabilities
+- **Rate Limiting**: Configurable p-limit for optimal performance (5 concurrent by default)
+- **Relationship Resolution**: Intelligent cross-collection ID mapping
+- **Validation**: Pre-import validation with detailed error reporting
+- **Progress Tracking**: Real-time progress bars with batch processing statistics
+- **AfterImportActions**: Complete post-import action system for file uploads and field updates
+
+## Command-Line Options
+
 Available options:
 
-- `--it`: Run in interactive mode
+### Core Operations
+- `--it`: Run in interactive mode with enhanced visual feedback
+- `--setup`: Create setup files (supports both YAML and TypeScript)
+- `--generate`: Generate TypeScript and JSON schemas from database configurations
+- `--import`: Import data using YAML configurations with advanced processing
+- `--backup`: Comprehensive backup with progress tracking and detailed reporting
+
+### Data Management
 - `--dbIds`: Comma-separated list of database IDs to operate on
 - `--collectionIds`: Comma-separated list of collection IDs to operate on
 - `--bucketIds`: Comma-separated list of bucket IDs to operate on
-- `--wipe`: Wipe data (all: everything, docs: only documents, users: only user data)
-- `--wipeCollections`: Wipe collections (wipes specified collections from collectionIds -- does this non-destructively, deletes all documents)
-- `--generate`: Generate TypeScript schemas from database schemas
-- `--import`: Import data into your databases
-- `--backup`: Perform a backup of your databases
-- `--writeData`: Write converted imported data to file
-- `--push`: Push your local Appwrite config to your configured Appwrite Project
-- `--sync`: Synchronize by pulling your Appwrite config from your configured Appwrite Project
+- `--wipe`: Wipe data with smart confirmation (all: everything, docs: only documents, users: only user data)
+- `--wipeCollections`: Non-destructively wipe specified collections
+- `--writeData`: Write converted imported data to file for validation
+
+### Configuration & Synchronization
+- `--push`: Push local YAML/TypeScript config to Appwrite project
+- `--sync`: Synchronize by pulling config from Appwrite project
 - `--endpoint`: Set the Appwrite endpoint
 - `--projectId`: Set the Appwrite project ID
 - `--apiKey`: Set the Appwrite API key
-- `--transfer`: Transfer data between databases or collections
+
+### Transfer Operations
+- `--transfer`: Transfer data between databases or collections with progress tracking
 - `--transfer-users`: Transfer users between instances (will not overwrite)
-- `--fromDbId`: Set the source database ID for transfer
-- `--toDbId`: Set the destination database ID for transfer
-- `--fromCollectionId`: Set the source collection ID for transfer
-- `--toCollectionId`: Set the destination collection ID for transfer
-- `--fromBucketId`: Set the source bucket ID for transfer
-- `--toBucketId`: Set the destination bucket ID for transfer
-- `--remoteEndpoint`: Set the remote Appwrite endpoint for transfers
-- `--remoteProjectId`: Set the remote Appwrite project ID for transfers
-- `--remoteApiKey`: Set the remote Appwrite API key for transfers
-- `--setup`: Create setup files
+- `--fromDbId` / `--sourceDbId`: Source database ID for transfer
+- `--toDbId` / `--targetDbId`: Destination database ID for transfer
+- `--fromCollectionId`: Source collection ID for transfer
+- `--toCollectionId`: Destination collection ID for transfer
+- `--fromBucketId`: Source bucket ID for transfer
+- `--toBucketId`: Destination bucket ID for transfer
+- `--remoteEndpoint`: Remote Appwrite endpoint for transfers
+- `--remoteProjectId`: Remote Appwrite project ID for transfers
+- `--remoteApiKey`: Remote Appwrite API key for transfers
+
+### Function Management
 - `--updateFunctionSpec`: Update function specifications
 - `--functionId`: Function ID to update
-- `--specification`: New function specification (one of: s-0.5vcpu-512mb, s-1vcpu-1gb, s-2vcpu-2gb, s-2vcpu-4gb, s-4vcpu-4gb, s-4vcpu-8gb, s-8vcpu-4gb, s-8vcpu-8gb)
+- `--specification`: New function specification (s-0.5vcpu-512mb to s-8vcpu-8gb)
 
 ## Examples
 
@@ -149,6 +280,102 @@ Available specifications:
 This updated CLI ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line, with both interactive and non-interactive modes available for flexibility.
 
 ## Changelog
+
+### 1.0.1 - Function Templates & Attribute Type Improvements
+
+**🚀 Enhanced Function Management & Type System Fixes**
+
+#### Function Template System Improvements
+- **ES Module Compatibility**: Fixed `__dirname is not defined` error when creating function templates
+- **Template-Specific Defaults**: Added pre-configured settings for all function templates:
+  - `typescript-node`: Node.js 21.0, TypeScript build setup, 0.5vCPU/512MB
+  - `uv`: Python 3.12, UV package manager, 0.5vCPU/512MB  
+  - `count-docs-in-collection`: Node.js 21.0, specialized counting function, 1vCPU/512MB
+- **YAML Config Integration**: Functions now automatically added to YAML config with generated ULIDs
+- **Interactive Enhancement**: Improved template selection with descriptive names and smart defaults
+
+#### YAML Collections Loading Fix
+- **Path Resolution**: Fixed collections directory resolution for YAML configurations
+- **Cross-Platform Support**: Collections now properly detected in `.appwrite/collections/` regardless of config location
+- **Backwards Compatibility**: Both TypeScript and YAML collection structures fully supported
+
+#### Attribute Type System Overhaul
+- **Double/Float Compatibility**: Resolved Zod discriminated union errors with proper schema separation
+- **Backwards Compatibility**: Full support for both "double" and "float" attribute types
+- **Schema Architecture**: Clean separation with shared base schema for numeric attributes
+- **Type Safety**: Enhanced TypeScript support with proper type inference
+
+#### Developer Experience Improvements
+- **Error Resolution**: Eliminated all TypeScript compilation errors
+- **Template Updates**: Updated function template references from deprecated "poetry" to "uv"
+- **Schema Validation**: Improved attribute validation with better error messages
+- **Clean Architecture**: Removed deprecated relationship attributes for better performance
+
+#### Bug Fixes
+- Fixed YAML collection path resolution in nested directory structures
+- Resolved ES module compatibility issues in function template creation
+- Eliminated Zod discriminated union conflicts for numeric attribute types
+- Updated outdated template references and improved template selection UX
+
+**Migration Notes**: 
+- Function templates now automatically integrate with YAML configs
+- Existing collections continue to work; deprecated relationship attributes converted to manual references
+- All numeric attributes now use consistent "double" type with "float" backwards compatibility
+
+### 1.0.0 - YAML-First Architecture & Import System Revolution
+
+**🎉 Major Release - Comprehensive Architecture Overhaul**
+
+#### YAML-First Configuration System
+- **Complete YAML support** with JSON Schema validation for IntelliSense
+- **Automatic discovery**: `.appwrite/config.yaml`, `appwrite.yaml`, or `appwriteConfig.ts`
+- **Cross-platform compatibility**: No TypeScript runner required
+- **Better organization**: Clean `.appwrite` directory structure
+- **Backward compatibility**: Existing TypeScript configs continue to work
+
+#### Import System Revolution (50%+ Complexity Reduction)
+- **Modular architecture**: Extracted DataLoader (1,688 lines) into focused services
+  - `DataTransformationService` - Pure data transformation logic
+  - `FileHandlerService` - URL downloads and local file handling
+  - `UserMappingService` - Sophisticated email/phone deduplication
+  - `ValidationService` - Centralized validation with detailed reporting
+  - `RelationshipResolver` - Cross-collection ID mapping
+  - `ImportOrchestrator` - High-level coordination
+- **Enhanced rate limiting**: Configurable p-limit for different operations
+  - `dataInsertion: 5` (concurrent document creation)
+  - `fileUpload: 2` (conservative for large files)
+  - `validation: 10` (pre-import validation)
+  - `dataQuery: 25` (relationship resolution)
+
+#### YAML Import Configuration System
+- **Complete YAML import definitions** with JSON Schema support
+- **Advanced file handling**: URL downloads with local file search fallback
+- **Sophisticated validation**: Pre-import validation with detailed error reporting
+- **Template generation**: Easy creation of new import configurations
+- **Relationship mapping**: Intelligent cross-collection ID resolution
+- **User deduplication**: Advanced email/phone matching with merge capabilities
+- **AfterImportActions**: Complete post-import action system
+
+#### Enhanced User Experience
+- **Rich visual feedback**: Progress bars with ETA and speed indicators
+- **Smart confirmation dialogs**: Risk-based confirmations for destructive operations
+- **Operation summaries**: Detailed post-operation reports with statistics
+- **Professional messaging**: Unified MessageFormatter with consistent styling
+- **Configurable logging**: Disabled by default, full configuration support
+
+#### Performance & Safety Improvements
+- **Batch processing**: Enhanced with progress tracking and memory efficiency
+- **Error resilience**: Improved error handling and recovery mechanisms
+- **Transaction safety**: Better handling of partial failures
+- **Memory optimization**: Efficient processing of large datasets
+
+#### Developer Experience
+- **JSON Schema generation**: Full IntelliSense support for YAML files
+- **Example configurations**: Comprehensive templates and examples
+- **Better error messages**: Clear validation and error reporting
+- **Type safety**: Full TypeScript support for all new features
+
+**Migration Note**: While fully backward compatible, we recommend migrating to YAML configuration for the best experience. Use `--setup` to generate new YAML configurations.
 
 - 0.10.86: Fixed `selectCollections` not always filtering by `databaseId`
 - 0.10.85: Added logging to `wipeCollection`

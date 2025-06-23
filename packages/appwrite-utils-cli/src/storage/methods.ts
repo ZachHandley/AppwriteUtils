@@ -11,10 +11,12 @@ import { tryAwaitWithRetry, type AppwriteConfig } from "appwrite-utils";
 import { getClientFromConfig } from "../utils/getClientFromConfig.js";
 import { ulid } from "ulidx";
 import type { BackupCreate } from "./schemas.js";
-import { logOperation } from "../migrations/helper.js";
-import { splitIntoBatches } from "../migrations/migrationHelper.js";
+import { logOperation } from "../shared/operationLogger.js";
+import { splitIntoBatches } from "../shared/migrationHelpers.js";
 import { retryFailedPromises } from "../utils/retryFailedPromises.js";
 import { InputFile } from "node-appwrite/file";
+import { MessageFormatter, Messages } from "../shared/messageFormatter.js";
+import { ProgressManager } from "../shared/progressManager.js";
 
 export const getStorage = (config: AppwriteConfig) => {
   const client = getClientFromConfig(config);
@@ -167,14 +169,39 @@ export const ensureDatabaseConfigBucketsExist = async (
 
 export const wipeDocumentStorage = async (
   storage: Storage,
-  bucketId: string
+  bucketId: string,
+  options: { skipConfirmation?: boolean } = {}
 ): Promise<void> => {
-  console.log(`Wiping storage for bucket ID: ${bucketId}`);
+  MessageFormatter.warning(`About to delete all files in bucket: ${bucketId}`);
+  
+  if (!options.skipConfirmation) {
+    const { ConfirmationDialogs } = await import("../shared/confirmationDialogs.js");
+    const confirmed = await ConfirmationDialogs.confirmDestructiveOperation({
+      operation: "Storage Wipe",
+      targets: [bucketId],
+      consequences: [
+        "Delete ALL files in the storage bucket",
+        "This action cannot be undone",
+      ],
+      requireExplicitConfirmation: true,
+      confirmationText: "DELETE FILES",
+    });
+
+    if (!confirmed) {
+      MessageFormatter.info("Storage wipe cancelled by user");
+      return;
+    }
+  }
+
+  MessageFormatter.progress(`Scanning files in bucket: ${bucketId}`);
+
   let moreFiles = true;
   let lastFileId: string | undefined;
   const allFiles: string[] = [];
+  
+  // First pass: collect all file IDs
   while (moreFiles) {
-    const queries = [Query.limit(100)]; // Adjust the limit as needed
+    const queries = [Query.limit(100)];
     if (lastFileId) {
       queries.push(Query.cursorAfter(lastFileId));
     }
@@ -182,26 +209,43 @@ export const wipeDocumentStorage = async (
       async () => await storage.listFiles(bucketId, queries)
     );
     if (filesPulled.files.length === 0) {
-      console.log("No files found, done!");
       moreFiles = false;
       break;
     } else if (filesPulled.files.length > 0) {
       const fileIds = filesPulled.files.map((file) => file.$id);
       allFiles.push(...fileIds);
     }
-    moreFiles = filesPulled.files.length === 100; // Adjust based on the limit
+    moreFiles = filesPulled.files.length === 100;
     if (moreFiles) {
       lastFileId = filesPulled.files[filesPulled.files.length - 1].$id;
     }
   }
 
-  for (const fileId of allFiles) {
-    console.log(`Deleting file: ${fileId}`);
-    await tryAwaitWithRetry(
-      async () => await storage.deleteFile(bucketId, fileId)
-    );
+  if (allFiles.length === 0) {
+    MessageFormatter.info("No files found in bucket");
+    return;
   }
-  console.log(`All files in bucket ${bucketId} have been deleted.`);
+
+  // Second pass: delete files with progress tracking
+  const progress = ProgressManager.create(`wipe-${bucketId}`, allFiles.length, {
+    title: `Deleting files from ${bucketId}`,
+  });
+
+  try {
+    for (let i = 0; i < allFiles.length; i++) {
+      const fileId = allFiles[i];
+      await tryAwaitWithRetry(
+        async () => await storage.deleteFile(bucketId, fileId)
+      );
+      progress.update(i + 1, `Deleted file: ${fileId.slice(0, 20)}...`);
+    }
+
+    progress.stop();
+    MessageFormatter.success(`All ${MessageFormatter.formatNumber(allFiles.length)} files in bucket ${bucketId} have been deleted`);
+  } catch (error) {
+    progress.fail(error instanceof Error ? error.message : String(error));
+    throw error;
+  }
 };
 
 export const initOrGetDocumentStorage = async (
@@ -254,9 +298,10 @@ export const backupDatabase = async (
   databaseId: string,
   storage: Storage
 ): Promise<void> => {
-  console.log("---------------------------------");
-  console.log("Starting Database Backup of " + databaseId);
-  console.log("---------------------------------");
+  const startTime = Date.now();
+  
+  MessageFormatter.banner("Database Backup", `Backing up database: ${databaseId}`);
+  MessageFormatter.info(Messages.BACKUP_STARTED(databaseId));
 
   let data: BackupCreate = {
     database: "",
@@ -272,7 +317,11 @@ export const backupDatabase = async (
     total: 100,
     error: "",
     status: "in_progress",
-  });
+  }, undefined, config.useMigrations);
+
+  let progress: ProgressManager | null = null;
+  let totalDocuments = 0;
+  let processedDocuments = 0;
 
   try {
     const db = await tryAwaitWithRetry(
@@ -280,10 +329,11 @@ export const backupDatabase = async (
     );
     data.database = JSON.stringify(db);
 
+    // First pass: count collections and documents for progress tracking
+    MessageFormatter.step(1, 3, "Analyzing database structure");
     let lastCollectionId = "";
     let moreCollections = true;
-    let progress = 0;
-    let total = 0;
+    let totalCollections = 0;
 
     while (moreCollections) {
       const collectionResponse = await tryAwaitWithRetry(
@@ -294,7 +344,45 @@ export const backupDatabase = async (
           ])
       );
 
-      total += collectionResponse.collections.length;
+      totalCollections += collectionResponse.collections.length;
+
+      // Count documents in each collection
+      for (const { $id: collectionId } of collectionResponse.collections) {
+        try {
+          const documentCount = await tryAwaitWithRetry(
+            async () => (await database.listDocuments(databaseId, collectionId, [Query.limit(1)])).total
+          );
+          totalDocuments += documentCount;
+        } catch (error) {
+          MessageFormatter.warning(`Could not count documents in collection ${collectionId}`);
+        }
+      }
+
+      moreCollections = collectionResponse.collections.length === 500;
+      if (moreCollections) {
+        lastCollectionId = collectionResponse.collections[collectionResponse.collections.length - 1].$id;
+      }
+    }
+
+    const totalItems = totalCollections + totalDocuments;
+    progress = ProgressManager.create(`backup-${databaseId}`, totalItems, {
+      title: `Backing up ${databaseId}`,
+    });
+
+    MessageFormatter.step(2, 3, `Processing ${totalCollections} collections and ${totalDocuments} documents`);
+
+    // Second pass: actual backup with progress tracking
+    lastCollectionId = "";
+    moreCollections = true;
+
+    while (moreCollections) {
+      const collectionResponse = await tryAwaitWithRetry(
+        async () =>
+          await database.listCollections(databaseId, [
+            Query.limit(500),
+            ...(lastCollectionId ? [Query.cursorAfter(lastCollectionId)] : []),
+          ])
+      );
 
       for (const {
         $id: collectionId,
@@ -304,8 +392,9 @@ export const backupDatabase = async (
           const collection = await tryAwaitWithRetry(
             async () => await database.getCollection(databaseId, collectionId)
           );
-          progress++;
+          
           data.collections.push(JSON.stringify(collection));
+          progress?.increment(1, `Processing collection: ${collectionName}`);
 
           let lastDocumentId = "";
           let moreDocuments = true;
@@ -322,7 +411,6 @@ export const backupDatabase = async (
                 ])
             );
 
-            total += documentResponse.documents.length;
             collectionDocumentCount += documentResponse.documents.length;
 
             const documentPromises = documentResponse.documents.map(
@@ -335,28 +423,36 @@ export const backupDatabase = async (
             for (const batch of promiseBatches) {
               const successfulDocuments = await retryFailedPromises(batch);
               documentsPulled.push(...successfulDocuments);
+              
+              // Update progress for each batch
+              progress?.increment(successfulDocuments.length, 
+                `Processing ${collectionName}: ${processedDocuments + successfulDocuments.length}/${totalDocuments} documents`
+              );
+              processedDocuments += successfulDocuments.length;
             }
 
             data.documents.push({
               collectionId: collectionId,
               data: JSON.stringify(documentsPulled),
             });
-            progress += documentsPulled.length;
 
-            await logOperation(
-              database,
-              databaseId,
-              {
-                operationType: "backup",
-                collectionId: collectionId,
-                data: `Backing up, ${data.collections.length} collections so far`,
-                progress: progress,
-                total: total,
-                error: "",
-                status: "in_progress",
-              },
-              backupOperation.$id
-            );
+            if (backupOperation) {
+              await logOperation(
+                database,
+                databaseId,
+                {
+                  operationType: "backup",
+                  collectionId: collectionId,
+                  data: `Backing up, ${data.collections.length} collections so far`,
+                  progress: processedDocuments,
+                  total: totalDocuments,
+                  error: "",
+                  status: "in_progress",
+                },
+                backupOperation.$id,
+                config.useMigrations
+              );
+            }
 
             moreDocuments = documentResponse.documents.length === 500;
             if (moreDocuments) {
@@ -367,12 +463,12 @@ export const backupDatabase = async (
             }
           }
 
-          console.log(
-            `Collection ${collectionName} backed up with ${collectionDocumentCount} documents.`
+          MessageFormatter.success(
+            `Collection ${collectionName} backed up with ${MessageFormatter.formatNumber(collectionDocumentCount)} documents`
           );
         } catch (error) {
-          console.log(
-            `Collection ${collectionName} must not exist, continuing...`
+          MessageFormatter.warning(
+            `Collection ${collectionName} could not be backed up: ${error instanceof Error ? error.message : String(error)}`
           );
           continue;
         }
@@ -387,50 +483,75 @@ export const backupDatabase = async (
       }
     }
 
+    MessageFormatter.step(3, 3, "Creating backup file");
+    
     const bucket = await initOrGetDocumentStorage(storage, config, databaseId);
-    const inputFile = InputFile.fromPlainText(
-      JSON.stringify(data),
-      `${new Date().toISOString()}-${databaseId}.json`
-    );
+    const backupData = JSON.stringify(data);
+    const backupSize = Buffer.byteLength(backupData, 'utf8');
+    const fileName = `${new Date().toISOString()}-${databaseId}.json`;
+    
+    const inputFile = InputFile.fromPlainText(backupData, fileName);
     const fileCreated = await storage.createFile(
       bucket!.$id,
       ulid(),
       inputFile
     );
 
-    await logOperation(
-      database,
-      databaseId,
-      {
-        operationType: "backup",
-        collectionId: "",
-        data: fileCreated.$id,
-        progress: 100,
-        total: total,
-        error: "",
-        status: "completed",
-      },
-      backupOperation.$id
-    );
+    progress?.stop();
 
-    console.log("---------------------------------");
-    console.log("Database Backup Complete");
-    console.log("---------------------------------");
+    if (backupOperation) {
+      await logOperation(
+        database,
+        databaseId,
+        {
+          operationType: "backup",
+          collectionId: "",
+          data: fileCreated.$id,
+          progress: totalItems,
+          total: totalItems,
+          error: "",
+          status: "completed",
+        },
+        backupOperation.$id,
+        config.useMigrations
+      );
+    }
+
+    const duration = Date.now() - startTime;
+    
+    MessageFormatter.operationSummary("Backup", {
+      database: databaseId,
+      collections: data.collections.length,
+      documents: processedDocuments,
+      fileSize: MessageFormatter.formatBytes(backupSize),
+      backupFile: fileName,
+      bucket: bucket!.$id,
+    }, duration);
+
+    MessageFormatter.success(Messages.BACKUP_COMPLETED(databaseId, backupSize));
   } catch (error) {
-    console.error("Error during backup:", error);
-    await logOperation(
-      database,
-      databaseId,
-      {
-        operationType: "backup",
-        collectionId: "",
-        data: "Backup failed",
-        progress: 0,
-        total: 100,
-        error: String(error),
-        status: "error",
-      },
-      backupOperation.$id
-    );
+    progress?.fail(error instanceof Error ? error.message : String(error));
+    
+    MessageFormatter.error("Backup failed", error instanceof Error ? error : new Error(String(error)));
+    
+    if (backupOperation) {
+      await logOperation(
+        database,
+        databaseId,
+        {
+          operationType: "backup",
+          collectionId: "",
+          data: "Backup failed",
+          progress: 0,
+          total: totalDocuments,
+          error: String(error),
+          status: "error",
+        },
+        backupOperation.$id,
+        config.useMigrations
+      );
+    }
+    
+    throw error;
   }
 };
