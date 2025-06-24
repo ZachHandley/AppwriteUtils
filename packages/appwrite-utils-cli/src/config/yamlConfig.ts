@@ -256,14 +256,18 @@ export const findYamlConfig = (startDir: string): string | null => {
     path.join(startDir, "appwrite.yml"),
   ];
 
+  console.log(`DEBUG: Checking YAML paths in ${startDir}:`);
   for (const configPath of possiblePaths) {
+    console.log(`  - ${configPath}: ${fs.existsSync(configPath)}`);
     if (fs.existsSync(configPath)) {
       return configPath;
     }
   }
 
   // Recursively search subdirectories for .appwrite folders
+  console.log(`DEBUG: Starting recursive search from ${startDir}`);
   const yamlConfigInSubdirs = findYamlConfigRecursive(startDir);
+  console.log(`DEBUG: Recursive search result: ${yamlConfigInSubdirs}`);
   if (yamlConfigInSubdirs) {
     return yamlConfigInSubdirs;
   }
@@ -326,28 +330,33 @@ const shouldIgnoreDirectory = (dirName: string): boolean => {
   return ignoredDirs.includes(dirName) || 
          dirName.startsWith('.git') || 
          dirName.startsWith('node_modules') ||
-         dirName.startsWith('.');
+         (dirName.startsWith('.') && dirName !== '.appwrite');
 };
 
 const findYamlConfigRecursive = (dir: string, depth: number = 0): string | null => {
   // Limit search depth to prevent infinite recursion
   if (depth > 5) {
+    console.log(`DEBUG: Stopping search at depth ${depth} in ${dir}`);
     return null;
   }
 
   if (shouldIgnoreDirectory(path.basename(dir))) {
+    console.log(`DEBUG: Ignoring directory ${dir}`);
     return null;
   }
 
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
+    console.log(`DEBUG: Searching directory ${dir} at depth ${depth}, found ${entries.length} entries`);
 
     for (const entry of entries) {
       if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
         const fullPath = path.join(dir, entry.name);
+        console.log(`DEBUG: Checking subdirectory: ${fullPath}`);
         
         // Check if this is an .appwrite directory
         if (entry.name === ".appwrite") {
+          console.log(`DEBUG: Found .appwrite directory at ${fullPath}`);
           const configPaths = [
             path.join(fullPath, "appwriteConfig.yaml"),
             path.join(fullPath, "appwriteConfig.yml"),

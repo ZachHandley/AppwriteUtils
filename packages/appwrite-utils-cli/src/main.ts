@@ -15,6 +15,7 @@ import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
 import { MessageFormatter } from "./shared/messageFormatter.js";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
+import path from "path";
 
 interface CliOptions {
   config?: string;
@@ -49,6 +50,9 @@ interface CliOptions {
   functionId?: string;
   specification?: string;
   migrateConfig?: boolean;
+  generateConstants?: boolean;
+  constantsLanguages?: string;
+  constantsOutput?: string;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -203,6 +207,21 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "Migrate appwriteConfig.ts to .appwrite structure with YAML configuration",
   })
+  .option("generateConstants", {
+    alias: ["constants"],
+    type: "boolean", 
+    description: "Generate cross-language constants file with database, collection, bucket, and function IDs",
+  })
+  .option("constantsLanguages", {
+    type: "string",
+    description: "Comma-separated list of languages for constants (typescript,javascript,python,php,dart,json,env)",
+    default: "typescript",
+  })
+  .option("constantsOutput", {
+    type: "string",
+    description: "Output directory for generated constants files (default: config-folder/constants)",
+    default: "auto",
+  })
   .parse() as ParsedArgv;
 
 async function main() {
@@ -232,6 +251,38 @@ async function main() {
     if (argv.migrateConfig) {
       const { migrateConfig } = await import("./utils/configMigration.js");
       await migrateConfig(process.cwd());
+      return;
+    }
+
+    if (argv.generateConstants) {
+      const { ConstantsGenerator } = await import("./utils/constantsGenerator.js");
+      type SupportedLanguage = import("./utils/constantsGenerator.js").SupportedLanguage;
+      
+      if (!controller.config) {
+        MessageFormatter.error("No Appwrite configuration found", undefined, { prefix: "Constants" });
+        return;
+      }
+
+      const languages = argv.constantsLanguages!.split(",").map(l => l.trim()) as SupportedLanguage[];
+      
+      // Determine output directory - use config folder/constants by default, or custom path if specified
+      let outputDir: string;
+      if (argv.constantsOutput === "auto") {
+        // Default case: use config directory + constants
+        const configPath = controller.getAppwriteFolderPath();
+        outputDir = path.join(configPath, "constants");
+      } else {
+        // Custom output directory specified
+        outputDir = argv.constantsOutput!;
+      }
+      
+      MessageFormatter.info(`Generating constants for languages: ${languages.join(", ")}`, { prefix: "Constants" });
+      
+      const generator = new ConstantsGenerator(controller.config);
+      await generator.generateFiles(languages, outputDir);
+      
+      operationStats.generatedConstants = languages.length;
+      MessageFormatter.success(`Constants generated in ${outputDir}`, { prefix: "Constants" });
       return;
     }
 

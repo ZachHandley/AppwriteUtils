@@ -135,7 +135,7 @@ async function migrateConfigFile(configFilePath: string, workingDir: string): Pr
     lineWidth: 120,
     noRefs: true 
   });
-  await fs.writeFile(path.join(appwriteDir, 'appwriteConfig.yaml'), yamlContent);
+  await fs.writeFile(path.join(appwriteDir, 'config.yaml'), yamlContent);
 
   // Copy all directories except collections and schemas (we handle collections separately, skip schemas entirely)
   const entries = await fs.readdir(configDir, { withFileTypes: true });

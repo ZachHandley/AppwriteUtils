@@ -23,6 +23,7 @@
 ### Development Tools
 - **Database Migrations**: Full migration control with progress tracking and operation summaries
 - **Schema Generation**: Generate TypeScript and JSON schemas from database configurations
+- **Constants Generation**: Generate cross-language constants files (TypeScript, Python, PHP, Dart, JSON, Env) for database, collection, bucket, and function IDs
 - **Data Transfer**: Transfer data between databases, collections, and instances with real-time progress
 - **Configuration Sync**: Bidirectional synchronization between local YAML configs and Appwrite projects
 - **Function Management**: Deploy and manage Appwrite Functions with specification updates
@@ -218,7 +219,52 @@ Available options:
 - `--functionId`: Function ID to update
 - `--specification`: New function specification (s-0.5vcpu-512mb to s-8vcpu-8gb)
 
+### Constants Generation
+- `--generateConstants` / `--constants`: Generate cross-language constants files with database, collection, bucket, and function IDs
+- `--constantsLanguages`: Comma-separated list of languages for constants generation (default: typescript)
+  - Available languages: `typescript`, `javascript`, `python`, `php`, `dart`, `json`, `env`
+- `--constantsOutput`: Output directory for generated constants files (default: config-folder/constants)
+
 ## Examples
+
+### Generate Constants
+
+Generate cross-language constants files for all your Appwrite resource IDs:
+
+```bash
+# Generate TypeScript constants (default)
+npx appwrite-utils-cli appwrite-migrate --generateConstants
+
+# Generate multiple language formats
+npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages="typescript,python,php,json"
+
+# Generate all available formats
+npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages="typescript,javascript,python,php,dart,json,env"
+
+# Generate with custom output directory
+npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsOutput="./my-constants"
+```
+
+This generates constants files in your configuration directory (e.g., `.appwrite/constants/`) containing:
+- Database IDs
+- Collection IDs  
+- Bucket IDs
+- Function IDs
+
+**Example TypeScript output:**
+```typescript
+export const DATABASE_IDS = {
+  MAIN_DATABASE: "main"
+} as const;
+
+export const COLLECTION_IDS = {
+  USERS: "01JYDBQTB5W8SCBAYB654CCADQ",
+  POSTS: "01JYDBQTB5W8SCBAYB654POSTS"
+} as const;
+
+// Type helpers and utility arrays included
+export type DatabaseId = typeof DATABASE_IDS[keyof typeof DATABASE_IDS];
+```
 
 ### Transfer Databases
 
@@ -280,6 +326,54 @@ Available specifications:
 This updated CLI ensures that developers have robust tools at their fingertips to manage complex Appwrite projects effectively from the command line, with both interactive and non-interactive modes available for flexibility.
 
 ## Changelog
+
+### 1.0.6 - Cross-Language Constants Generation
+
+**🚀 Enhanced Developer Experience with Multi-Language Constants**
+
+#### Constants Generation System
+- **Cross-Language Support**: Generate constants in 7 languages for seamless multi-platform development
+  - **TypeScript**: Type-safe constants with `as const` and helper types
+  - **JavaScript**: ES6 modules with utility arrays
+  - **Python**: Class-based constants with snake_case dictionaries
+  - **PHP**: Static class methods and associative arrays
+  - **Dart**: Maps with individual getter methods (camelCase)
+  - **JSON**: Structured data with metadata for cross-platform integration
+  - **Environment Variables**: Prefixed environment variables for deployment
+- **Smart Directory Structure**: Constants generated in `{config-folder}/constants/` by default
+- **CLI Integration**: Both command-line and interactive mode support
+- **Custom Output**: Support for custom output directories when needed
+
+#### Resource ID Extraction
+- **Database IDs**: Extract all configured database identifiers
+- **Collection IDs**: Generate constants for all collection ULIDs/names
+- **Bucket IDs**: Include storage bucket identifiers
+- **Function IDs**: Support for Appwrite Function identifiers
+- **Naming Conventions**: Language-appropriate naming (UPPER_CASE, camelCase, snake_case)
+
+#### Developer Experience Improvements
+- **Interactive Mode**: Checkbox selection for languages with smart defaults
+- **CLI Commands**: Simple `--generateConstants` with language and output options
+- **Type Safety**: Full TypeScript support with generated types and helpers
+- **Cross-Platform Compatibility**: Enable seamless development across different tech stacks
+
+#### Usage Examples
+```bash
+# Default TypeScript generation
+npx appwrite-utils-cli appwrite-migrate --generateConstants
+
+# Multi-language generation
+npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages="typescript,python,php,json"
+
+# All formats with custom output
+npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages="typescript,javascript,python,php,dart,json,env" --constantsOutput="./constants"
+```
+
+**Migration Benefits**: 
+- Eliminates hardcoded resource IDs across codebases
+- Enables type-safe resource access in TypeScript projects
+- Supports multi-language development workflows
+- Maintains constants alongside configuration for easy maintenance
 
 ### 1.0.1 - Function Templates & Attribute Type Improvements
 
@@ -377,6 +471,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ### Changelog
 
+- 1.0.5: Fixed `.` directories being ignored. Normally a good thing
+- 1.0.4: Fixed `appwriteConfig.yaml` being the name for the converted config, instead of `config.yaml`
 - 1.0.3: Fixed appwriteConfig detection for `--it` so it detects when you can migrate your config
 - 1.0.2: Fixed migrations, sorry about that!
 

@@ -69,7 +69,7 @@ const shouldIgnoreDirectory = (dirName: string): boolean => {
   return ignoredDirs.includes(dirName) || 
          dirName.startsWith('.git') || 
          dirName.startsWith('node_modules') ||
-         dirName.startsWith('.');
+         (dirName.startsWith('.') && dirName !== '.appwrite');
 };
 
 const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => {

@@ -41,6 +41,7 @@ import {
 } from "./functions/methods.js";
 import { deployLocalFunction } from "./functions/deployments.js";
 import { join } from "node:path";
+import path from "path";
 import fs from "node:fs";
 import { SchemaGenerator } from "./shared/schemaGenerator.js";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
@@ -64,6 +65,7 @@ enum CHOICES {
   WIPE_DATABASE = "Wipe database",
   WIPE_COLLECTIONS = "Wipe collections",
   GENERATE_SCHEMAS = "Generate schemas",
+  GENERATE_CONSTANTS = "📋 Generate cross-language constants (TypeScript, Python, PHP, Dart, etc.)",
   IMPORT_DATA = "Import data",
   RELOAD_CONFIG = "Reload configuration files",
   UPDATE_FUNCTION_SPEC = "Update function specifications",
@@ -158,6 +160,10 @@ export class InteractiveCLI {
         case CHOICES.GENERATE_SCHEMAS:
           await this.initControllerIfNeeded();
           await this.generateSchemas();
+          break;
+        case CHOICES.GENERATE_CONSTANTS:
+          await this.initControllerIfNeeded();
+          await this.generateConstants();
           break;
         case CHOICES.IMPORT_DATA:
           await this.initControllerIfNeeded();
@@ -1595,6 +1601,71 @@ export class InteractiveCLI {
     MessageFormatter.success("Schema generation completed", { prefix: "Schemas" });
   }
 
+  private async generateConstants(): Promise<void> {
+    console.log(chalk.yellow("Generating cross-language constants..."));
+
+    if (!this.controller?.config) {
+      MessageFormatter.error("No configuration found", undefined, { prefix: "Constants" });
+      return;
+    }
+
+    // Prompt for languages
+    const { languages } = await inquirer.prompt([
+      {
+        type: "checkbox",
+        name: "languages",
+        message: "Select languages for constants generation:",
+        choices: [
+          { name: "TypeScript", value: "typescript", checked: true },
+          { name: "JavaScript", value: "javascript" },
+          { name: "Python", value: "python" },
+          { name: "PHP", value: "php" },
+          { name: "Dart", value: "dart" },
+          { name: "JSON", value: "json" },
+          { name: "Environment Variables", value: "env" },
+        ],
+        validate: (input) => {
+          if (input.length === 0) {
+            return "Please select at least one language";
+          }
+          return true;
+        },
+      },
+    ]);
+
+    // Determine default output directory based on config location
+    const configPath = this.controller!.getAppwriteFolderPath();
+    const defaultOutputDir = path.join(configPath, "constants");
+
+    // Prompt for output directory
+    const { outputDir } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "outputDir",
+        message: "Output directory for constants files:",
+        default: defaultOutputDir,
+        validate: (input) => {
+          if (!input.trim()) {
+            return "Output directory cannot be empty";
+          }
+          return true;
+        },
+      },
+    ]);
+
+    try {
+      const { ConstantsGenerator } = await import("./utils/constantsGenerator.js");
+      const generator = new ConstantsGenerator(this.controller.config);
+      
+      MessageFormatter.info(`Generating constants for: ${languages.join(", ")}`, { prefix: "Constants" });
+      await generator.generateFiles(languages, outputDir);
+      
+      MessageFormatter.success(`Constants generated in ${outputDir}`, { prefix: "Constants" });
+    } catch (error) {
+      MessageFormatter.error("Failed to generate constants", error, { prefix: "Constants" });
+    }
+  }
+
   private async importData(): Promise<void> {
     console.log(chalk.yellow("Importing data..."));
 
@@ -1906,6 +1977,7 @@ export class InteractiveCLI {
     try {
       // Check for YAML config first
       const yamlConfigPath = findYamlConfig(this.currentDir);
+      console.log(`DEBUG: YAML config search from ${this.currentDir}, found: ${yamlConfigPath}`);
       if (yamlConfigPath) {
         this.isUsingTypeScriptConfig = false;
         MessageFormatter.info("Using YAML configuration", { prefix: "Config" });
