@@ -1914,11 +1914,14 @@ export class InteractiveCLI {
 
       // Then check for TypeScript config
       const configPath = findAppwriteConfig(this.currentDir);
-      if (configPath && configPath.endsWith('.ts')) {
-        this.isUsingTypeScriptConfig = true;
-        MessageFormatter.info("TypeScript configuration detected", { prefix: "Config" });
-        MessageFormatter.info("Consider migrating to YAML for better organization", { prefix: "Config" });
-        return;
+      if (configPath) {
+        const tsConfigPath = join(configPath, 'appwriteConfig.ts');
+        if (fs.existsSync(tsConfigPath)) {
+          this.isUsingTypeScriptConfig = true;
+          MessageFormatter.info("TypeScript configuration detected", { prefix: "Config" });
+          MessageFormatter.info("Consider migrating to YAML for better organization", { prefix: "Config" });
+          return;
+        }
       }
 
       // No config found

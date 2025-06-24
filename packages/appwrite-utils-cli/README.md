@@ -377,6 +377,7 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ### Changelog
 
+- 1.0.3: Fixed appwriteConfig detection for `--it` so it detects when you can migrate your config
 - 1.0.2: Fixed migrations, sorry about that!
 
 **Migration Note**: While fully backward compatible, we recommend migrating to YAML configuration for the best experience. Use `--setup` to generate new YAML configurations.
