@@ -5,7 +5,8 @@
   "private": true,
   "workspaces": [
     "packages/appwrite-utils",
-    "packages/appwrite-utils-cli"
+    "packages/appwrite-utils-cli",
+    "test"
   ],
   "repository": {
     "type": "git",

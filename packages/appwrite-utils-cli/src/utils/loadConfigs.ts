@@ -74,7 +74,7 @@ const shouldIgnoreDirectory = (dirName: string): boolean => {
 
 const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => {
   // Limit search depth to prevent infinite recursion
-  if (depth > 5) {
+  if (depth > 10) {
     return null;
   }
 
@@ -88,6 +88,7 @@ const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => 
     // First check current directory for appwriteConfig.ts
     for (const entry of entries) {
       if (entry.isFile() && entry.name === "appwriteConfig.ts") {
+        console.log(`Found appwriteConfig.ts at: ${path.join(dir, entry.name)}`);
         return path.join(dir, entry.name);
       }
     }
@@ -101,6 +102,7 @@ const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => 
     }
   } catch (error) {
     // Ignore directory access errors
+    console.log(`Error accessing directory ${dir}:`, error);
   }
 
   return null;

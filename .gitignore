@@ -131,3 +131,4 @@ appwriteConfig.yaml
 packages/*/**/*.json
 packages/*/**/zlogs
 .claude
+test

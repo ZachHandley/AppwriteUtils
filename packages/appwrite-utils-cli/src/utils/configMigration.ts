@@ -22,19 +22,39 @@ interface AppwriteConfigTS {
 }
 
 interface AppwriteConfigYAML {
-  appwriteEndpoint: string;
-  appwriteProject: string;
-  appwriteKey: string;
-  enableBackups?: boolean;
-  backupInterval?: number;
-  backupRetention?: number;
-  enableBackupCleanup?: boolean;
-  enableMockData?: boolean;
-  documentBucketId?: string;
-  usersCollectionName?: string;
-  databases: Array<{ $id: string; name: string }>;
+  appwrite: {
+    endpoint: string;
+    project: string;
+    key: string;
+  };
+  logging: {
+    enabled: boolean;
+    level: string;
+    console: boolean;
+    logDirectory: string;
+  };
+  backups: {
+    enabled: boolean;
+    interval: number;
+    retention: number;
+    cleanup: boolean;
+  };
+  data: {
+    enableMockData: boolean;
+    documentBucketId: string;
+    usersCollectionName: string;
+    importDirectory: string;
+  };
+  schemas: {
+    outputDirectory: string;
+    yamlSchemaDirectory: string;
+  };
+  migrations: {
+    enabled: boolean;
+  };
+  databases: Array<{ id: string; name: string; collections?: string[] }>;
   buckets: Array<any>;
-  [key: string]: any;
+  functions: Array<any>;
 }
 
 export async function migrateConfig(workingDir: string): Promise<void> {
@@ -87,7 +107,7 @@ async function findAppwriteConfigFiles(dir: string): Promise<string[]> {
 
 async function migrateConfigFile(configFilePath: string, workingDir: string): Promise<void> {
   const configDir = path.dirname(configFilePath);
-  const appwriteDir = path.join(configDir, '.appwrite');
+  const appwriteDir = path.join(path.dirname(configDir), '.appwrite');
   
   MessageFormatter.info(`Migrating ${path.relative(workingDir, configFilePath)}`, { prefix: "Migration" });
 
@@ -102,9 +122,8 @@ async function migrateConfigFile(configFilePath: string, workingDir: string): Pr
     }
   }
 
-  // Read and parse the TypeScript config
-  const configContent = await fs.readFile(configFilePath, 'utf8');
-  const config = await parseTypeScriptConfig(configContent);
+  // Load and parse the TypeScript config
+  const config = await parseTypeScriptConfig(configFilePath);
 
   // Create .appwrite directory
   await fs.mkdir(appwriteDir, { recursive: true });
@@ -118,95 +137,213 @@ async function migrateConfigFile(configFilePath: string, workingDir: string): Pr
   });
   await fs.writeFile(path.join(appwriteDir, 'appwriteConfig.yaml'), yamlContent);
 
-  // Move related directories
-  const foldersToMove = ['collections', 'schemas', 'importData', 'functions'];
-  for (const folder of foldersToMove) {
-    const sourcePath = path.join(configDir, folder);
-    const targetPath = path.join(appwriteDir, folder);
-    
-    if (existsSync(sourcePath)) {
-      await fs.rename(sourcePath, targetPath);
-      MessageFormatter.info(`Moved ${folder}/ to .appwrite/${folder}/`, { prefix: "Migration" });
+  // Copy all directories except collections and schemas (we handle collections separately, skip schemas entirely)
+  const entries = await fs.readdir(configDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name !== 'collections' && entry.name !== 'schemas') {
+      const sourcePath = path.join(configDir, entry.name);
+      const targetPath = path.join(appwriteDir, entry.name);
+      
+      await fs.cp(sourcePath, targetPath, { recursive: true });
+      MessageFormatter.info(`Copied ${entry.name}/ to .appwrite/${entry.name}/`, { prefix: "Migration" });
     }
   }
 
-  // Backup original config file
-  const backupPath = configFilePath + '.backup';
-  await fs.copyFile(configFilePath, backupPath);
-  MessageFormatter.info(`Created backup at ${path.relative(workingDir, backupPath)}`, { prefix: "Migration" });
-
-  // Optionally remove original config file
-  const shouldRemoveOriginal = await ConfirmationDialogs.confirmRemoval(
-    `Remove original ${path.relative(workingDir, configFilePath)}?`
-  );
-  if (shouldRemoveOriginal) {
-    await fs.unlink(configFilePath);
-    MessageFormatter.info(`Removed original ${path.relative(workingDir, configFilePath)}`, { prefix: "Migration" });
+  // Convert TypeScript collections to YAML collections
+  const collectionsPath = path.join(configDir, 'collections');
+  if (existsSync(collectionsPath)) {
+    const targetCollectionsPath = path.join(appwriteDir, 'collections');
+    await fs.mkdir(targetCollectionsPath, { recursive: true });
+    
+    const collectionFiles = await fs.readdir(collectionsPath);
+    for (const file of collectionFiles) {
+      if (file.endsWith('.ts')) {
+        await convertCollectionToYaml(path.join(collectionsPath, file), targetCollectionsPath);
+      }
+    }
+    MessageFormatter.info(`Converted TypeScript collections to YAML in .appwrite/collections/`, { prefix: "Migration" });
   }
+
+  // Keep original config file in place (no backup needed since we're not deleting it)
 
   MessageFormatter.success(`Migration completed for ${path.relative(workingDir, configFilePath)}`, { prefix: "Migration" });
 }
 
-async function parseTypeScriptConfig(content: string): Promise<AppwriteConfigTS> {
-  // This is a simplified parser - in a real implementation, you might want to use a proper TypeScript parser
-  // For now, we'll use a regex-based approach to extract the config object
-  
+async function parseTypeScriptConfig(configFilePath: string): Promise<AppwriteConfigTS> {
   try {
-    // Remove comments and imports
-    const cleanContent = content
-      .replace(/\/\*[\s\S]*?\*\//g, '') // Remove block comments
-      .replace(/\/\/.*$/gm, '') // Remove line comments
-      .replace(/^import.*$/gm, '') // Remove imports
-      .replace(/^export.*$/gm, ''); // Remove exports
+    // Use tsx to import the TypeScript config file directly
+    const { register } = await import("tsx/esm/api");
+    const { pathToFileURL } = await import("node:url");
     
-    // Find the config object
-    const configMatch = cleanContent.match(/const\s+\w+\s*:\s*\w+\s*=\s*({[\s\S]*?});/);
-    if (!configMatch) {
-      throw new Error('Could not find config object in TypeScript file');
+    const unregister = register();
+    
+    try {
+      const configUrl = pathToFileURL(configFilePath).href;
+      const configModule = await import(configUrl);
+      const config = configModule.default?.default || configModule.default || configModule;
+      
+      if (!config) {
+        throw new Error("Failed to load config from TypeScript file");
+      }
+      
+      return config as AppwriteConfigTS;
+    } finally {
+      unregister();
     }
-    
-    // Convert to JSON-like format and parse
-    let configStr = configMatch[1];
-    
-    // Replace TypeScript-specific syntax
-    configStr = configStr
-      .replace(/(\w+):/g, '"$1":') // Quote property names
-      .replace(/'/g, '"') // Convert single quotes to double quotes
-      .replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
-    
-    const config = JSON.parse(configStr);
-    return config as AppwriteConfigTS;
   } catch (error) {
-    MessageFormatter.error("Could not parse TypeScript config", error instanceof Error ? error : new Error(String(error)), { prefix: "Migration" });
-    throw new Error('Failed to parse TypeScript configuration file. Please ensure it follows standard format.');
+    MessageFormatter.error("Could not load TypeScript config", error instanceof Error ? error : new Error(String(error)), { prefix: "Migration" });
+    throw new Error('Failed to load TypeScript configuration file. Please ensure it exports a valid config object.');
   }
 }
 
 function convertToYAMLConfig(config: AppwriteConfigTS): AppwriteConfigYAML {
-  // Convert the config to YAML-friendly format
+  // Convert the config to the nested YAML structure
   const yamlConfig: AppwriteConfigYAML = {
-    appwriteEndpoint: config.appwriteEndpoint,
-    appwriteProject: config.appwriteProject,
-    appwriteKey: config.appwriteKey,
-    databases: config.databases || [],
-    buckets: config.buckets || [],
+    appwrite: {
+      endpoint: config.appwriteEndpoint,
+      project: config.appwriteProject,
+      key: config.appwriteKey
+    },
+    logging: {
+      enabled: config.logging?.enabled ?? false,
+      level: config.logging?.level ?? "info",
+      console: config.logging?.console ?? false,
+      logDirectory: "./logs"
+    },
+    backups: {
+      enabled: config.enableBackups ?? false,
+      interval: config.backupInterval ?? 3600,
+      retention: config.backupRetention ?? 30,
+      cleanup: config.enableBackupCleanup ?? false
+    },
+    data: {
+      enableMockData: config.enableMockData ?? false,
+      documentBucketId: config.documentBucketId ?? "documents",
+      usersCollectionName: config.usersCollectionName ?? "Users",
+      importDirectory: "importData"
+    },
+    schemas: {
+      outputDirectory: "schemas",
+      yamlSchemaDirectory: ".yaml_schemas"
+    },
+    migrations: {
+      enabled: true
+    },
+    databases: (config.databases || []).map(db => ({
+      id: db.$id,
+      name: db.name,
+      collections: [] // Collections will be handled separately
+    })),
+    buckets: (config.buckets || []).map(bucket => ({
+      id: bucket.$id,
+      name: bucket.name,
+      permissions: bucket.$permissions?.map((p: any) => ({
+        permission: p.permission,
+        target: p.target
+      })) || [],
+      fileSecurity: bucket.fileSecurity ?? false,
+      enabled: bucket.enabled ?? true,
+      maximumFileSize: bucket.maximumFileSize ?? 30000000,
+      allowedFileExtensions: bucket.allowedFileExtensions || [],
+      compression: bucket.compression || "gzip",
+      encryption: bucket.encryption ?? false,
+      antivirus: bucket.antivirus ?? false
+    })),
+    functions: (config.functions || []).map((func: any) => ({
+      id: func.$id,
+      name: func.name,
+      runtime: func.runtime,
+      execute: func.execute || [],
+      events: func.events || [],
+      schedule: func.schedule || "",
+      timeout: func.timeout ?? 15,
+      enabled: func.enabled ?? true,
+      logging: func.logging ?? false,
+      entrypoint: func.entrypoint || "src/main.js",
+      commands: func.commands || "",
+      scopes: func.scopes || [],
+      specification: func.specification || "s-1vcpu-512mb"
+    }))
   };
 
-  // Add optional properties if they exist
-  if (config.enableBackups !== undefined) yamlConfig.enableBackups = config.enableBackups;
-  if (config.backupInterval !== undefined) yamlConfig.backupInterval = config.backupInterval;
-  if (config.backupRetention !== undefined) yamlConfig.backupRetention = config.backupRetention;
-  if (config.enableBackupCleanup !== undefined) yamlConfig.enableBackupCleanup = config.enableBackupCleanup;
-  if (config.enableMockData !== undefined) yamlConfig.enableMockData = config.enableMockData;
-  if (config.documentBucketId !== undefined) yamlConfig.documentBucketId = config.documentBucketId;
-  if (config.usersCollectionName !== undefined) yamlConfig.usersCollectionName = config.usersCollectionName;
-
-  // Copy any additional properties
-  for (const [key, value] of Object.entries(config)) {
-    if (!(key in yamlConfig)) {
-      yamlConfig[key] = value;
-    }
-  }
-
   return yamlConfig;
+}
+
+async function convertCollectionToYaml(tsFilePath: string, targetDir: string): Promise<void> {
+  try {
+    // Load the TypeScript collection using tsx
+    const { register } = await import("tsx/esm/api");
+    const { pathToFileURL } = await import("node:url");
+    
+    const unregister = register();
+    
+    try {
+      const configUrl = pathToFileURL(tsFilePath).href;
+      const collectionModule = await import(configUrl);
+      const collection = collectionModule.default?.default || collectionModule.default || collectionModule;
+      
+      if (!collection) {
+        throw new Error("Failed to load collection from TypeScript file");
+      }
+
+      // Convert collection to YAML format
+      const yamlCollection = {
+        name: collection.name,
+        id: collection.$id,
+        documentSecurity: collection.documentSecurity ?? false,
+        enabled: collection.enabled ?? true,
+        permissions: (collection.permissions || collection.$permissions || []).map((p: any) => ({
+          permission: p.permission,
+          target: p.target
+        })),
+        attributes: (collection.attributes || []).map((attr: any) => ({
+          key: attr.key,
+          type: attr.type,
+          size: attr.size,
+          required: attr.required ?? false,
+          array: attr.array,
+          default: attr.xdefault || attr.default,
+          description: attr.description,
+          min: attr.min,
+          max: attr.max,
+          elements: attr.elements,
+          relatedCollection: attr.relatedCollection,
+          relationType: attr.relationType,
+          twoWay: attr.twoWay,
+          twoWayKey: attr.twoWayKey,
+          onDelete: attr.onDelete,
+          side: attr.side
+        })),
+        indexes: (collection.indexes || []).map((idx: any) => ({
+          key: idx.key,
+          type: idx.type,
+          attributes: idx.attributes,
+          orders: idx.orders
+        })),
+        importDefs: collection.importDefs || []
+      };
+
+      // Remove undefined values
+      const cleanYamlCollection = JSON.parse(JSON.stringify(yamlCollection, (key, value) => 
+        value === undefined ? undefined : value
+      ));
+
+      // Write YAML file
+      const fileName = path.basename(tsFilePath, '.ts') + '.yaml';
+      const targetPath = path.join(targetDir, fileName);
+      const yamlContent = yaml.dump(cleanYamlCollection, { 
+        indent: 2,
+        lineWidth: 120,
+        noRefs: true 
+      });
+      
+      await fs.writeFile(targetPath, yamlContent);
+      MessageFormatter.info(`Converted ${path.basename(tsFilePath)} to ${fileName}`, { prefix: "Migration" });
+      
+    } finally {
+      unregister();
+    }
+  } catch (error) {
+    MessageFormatter.error(`Failed to convert collection ${path.basename(tsFilePath)}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Migration" });
+  }
 }

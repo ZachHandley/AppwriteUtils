@@ -375,6 +375,10 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 - **Better error messages**: Clear validation and error reporting
 - **Type safety**: Full TypeScript support for all new features
 
+### Changelog
+
+- 1.0.2: Fixed migrations, sorry about that!
+
 **Migration Note**: While fully backward compatible, we recommend migrating to YAML configuration for the best experience. Use `--setup` to generate new YAML configurations.
 
 - 0.10.86: Fixed `selectCollections` not always filtering by `databaseId`
