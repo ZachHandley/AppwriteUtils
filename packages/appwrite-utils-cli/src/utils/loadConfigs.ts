@@ -7,6 +7,7 @@ import chalk from "chalk";
 import { findYamlConfig, loadYamlConfig } from "../config/yamlConfig.js";
 import yaml from "js-yaml";
 import { z } from "zod";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 /**
  * Recursively searches for configuration files starting from the given directory.
@@ -88,7 +89,6 @@ const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => 
     // First check current directory for appwriteConfig.ts
     for (const entry of entries) {
       if (entry.isFile() && entry.name === "appwriteConfig.ts") {
-        console.log(`Found appwriteConfig.ts at: ${path.join(dir, entry.name)}`);
         return path.join(dir, entry.name);
       }
     }
@@ -102,7 +102,6 @@ const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => 
     }
   } catch (error) {
     // Ignore directory access errors
-    console.log(`Error accessing directory ${dir}:`, error);
   }
 
   return null;
@@ -149,7 +148,6 @@ export const loadConfigWithPath = async (
       const unregister = register(); // Register tsx enhancement
 
       try {
-        console.log(`Loading TypeScript config from: ${configPath}`);
         const configUrl = pathToFileURL(configPath).href;
         const configModule = (await import(configUrl));
         config = configModule.default?.default || configModule.default || configModule;
@@ -239,7 +237,6 @@ export const loadConfig = async (
   // First try to find and load YAML config
   const yamlConfigPath = findYamlConfig(configDir);
   if (yamlConfigPath) {
-    console.log(`Loading YAML config from: ${yamlConfigPath}`);
     config = await loadYamlConfig(yamlConfigPath);
     actualConfigPath = yamlConfigPath;
   }
@@ -253,7 +250,6 @@ export const loadConfig = async (
       const unregister = register(); // Register tsx enhancement
 
       try {
-        console.log(`Loading TypeScript config from: ${configPath}`);
         const configUrl = pathToFileURL(configPath).href;
         const configModule = (await import(configUrl));
         config = configModule.default?.default || configModule.default || configModule;
@@ -330,6 +326,11 @@ export const loadConfig = async (
     }
   } else {
     config.collections = config.collections || [];
+  }
+
+  // Log successful config loading
+  if (actualConfigPath) {
+    MessageFormatter.success(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
   }
 
   return config;

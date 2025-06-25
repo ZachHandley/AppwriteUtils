@@ -327,6 +327,8 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+### 1.0.7 - Forgot to remove debug logs
+
 ### 1.0.6 - Cross-Language Constants Generation
 
 **🚀 Enhanced Developer Experience with Multi-Language Constants**

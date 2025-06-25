@@ -52,24 +52,24 @@ import { findYamlConfig, addFunctionToYamlConfig } from "./config/yamlConfig.js"
 
 enum CHOICES {
   MIGRATE_CONFIG = "🔄 Migrate TypeScript config to YAML (.appwrite structure)",
-  CREATE_COLLECTION_CONFIG = "Create collection config file",
-  CREATE_FUNCTION = "Create a new function, from scratch or using a template",
-  DEPLOY_FUNCTION = "Deploy function(s)",
-  DELETE_FUNCTION = "Delete function",
-  SETUP_DIRS_FILES = "Setup directories and files",
-  SETUP_DIRS_FILES_WITH_EXAMPLE_DATA = "Setup directories and files with example data",
-  SYNC_DB = "Push local config to Appwrite",
-  SYNCHRONIZE_CONFIGURATIONS = "Synchronize configurations - Pull from Appwrite and write to local config",
-  TRANSFER_DATA = "Transfer data",
-  BACKUP_DATABASE = "Backup database",
-  WIPE_DATABASE = "Wipe database",
-  WIPE_COLLECTIONS = "Wipe collections",
-  GENERATE_SCHEMAS = "Generate schemas",
+  CREATE_COLLECTION_CONFIG = "📄 Create collection config file",
+  CREATE_FUNCTION = "⚡ Create a new function, from scratch or using a template",
+  DEPLOY_FUNCTION = "🚀 Deploy function(s)",
+  DELETE_FUNCTION = "🗑️ Delete function",
+  SETUP_DIRS_FILES = "📁 Setup directories and files",
+  SETUP_DIRS_FILES_WITH_EXAMPLE_DATA = "📁✨ Setup directories and files with example data",
+  SYNC_DB = "⬆️ Push local config to Appwrite",
+  SYNCHRONIZE_CONFIGURATIONS = "🔄 Synchronize configurations - Pull from Appwrite and write to local config",
+  TRANSFER_DATA = "📦 Transfer data",
+  BACKUP_DATABASE = "💾 Backup database",
+  WIPE_DATABASE = "🧹 Wipe database",
+  WIPE_COLLECTIONS = "🧹 Wipe collections",
+  GENERATE_SCHEMAS = "🏗️ Generate schemas",
   GENERATE_CONSTANTS = "📋 Generate cross-language constants (TypeScript, Python, PHP, Dart, etc.)",
-  IMPORT_DATA = "Import data",
-  RELOAD_CONFIG = "Reload configuration files",
-  UPDATE_FUNCTION_SPEC = "Update function specifications",
-  EXIT = "Exit",
+  IMPORT_DATA = "📥 Import data",
+  RELOAD_CONFIG = "🔄 Reload configuration files",
+  UPDATE_FUNCTION_SPEC = "⚙️ Update function specifications",
+  EXIT = "👋 Exit",
 }
 
 export class InteractiveCLI {
@@ -1903,12 +1903,12 @@ export class InteractiveCLI {
   }
 
   private async reloadConfig(): Promise<void> {
-    console.log(chalk.yellow("Reloading configuration files..."));
+    MessageFormatter.progress("Reloading configuration files...", { prefix: "Config" });
     try {
       await this.controller!.reloadConfig();
-      console.log(chalk.green("Configuration files reloaded successfully."));
+      MessageFormatter.success("Configuration files reloaded successfully", { prefix: "Config" });
     } catch (error) {
-      console.error(chalk.red("Error reloading configuration files:"), error);
+      MessageFormatter.error("Failed to reload configuration files", error instanceof Error ? error : new Error(String(error)), { prefix: "Config" });
     }
   }
 
@@ -1979,7 +1979,6 @@ export class InteractiveCLI {
     try {
       // Check for YAML config first
       const yamlConfigPath = findYamlConfig(this.currentDir);
-      console.log(`DEBUG: YAML config search from ${this.currentDir}, found: ${yamlConfigPath}`);
       if (yamlConfigPath) {
         this.isUsingTypeScriptConfig = false;
         MessageFormatter.info("Using YAML configuration", { prefix: "Config" });
