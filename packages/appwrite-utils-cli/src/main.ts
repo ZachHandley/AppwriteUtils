@@ -268,9 +268,11 @@ async function main() {
       // Determine output directory - use config folder/constants by default, or custom path if specified
       let outputDir: string;
       if (argv.constantsOutput === "auto") {
-        // Default case: use config directory + constants
+        // Default case: use config directory + constants, fallback to current directory
         const configPath = controller.getAppwriteFolderPath();
-        outputDir = path.join(configPath, "constants");
+        outputDir = configPath 
+          ? path.join(configPath, "constants")
+          : path.join(process.cwd(), "constants");
       } else {
         // Custom output directory specified
         outputDir = argv.constantsOutput!;

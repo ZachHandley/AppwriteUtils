@@ -1635,7 +1635,9 @@ export class InteractiveCLI {
 
     // Determine default output directory based on config location
     const configPath = this.controller!.getAppwriteFolderPath();
-    const defaultOutputDir = path.join(configPath, "constants");
+    const defaultOutputDir = configPath 
+      ? path.join(configPath, "constants")
+      : path.join(process.cwd(), "constants");
 
     // Prompt for output directory
     const { outputDir } = await inquirer.prompt([
@@ -1662,7 +1664,7 @@ export class InteractiveCLI {
       
       MessageFormatter.success(`Constants generated in ${outputDir}`, { prefix: "Constants" });
     } catch (error) {
-      MessageFormatter.error("Failed to generate constants", error, { prefix: "Constants" });
+      MessageFormatter.error("Failed to generate constants", error instanceof Error ? error : new Error(String(error)), { prefix: "Constants" });
     }
   }
 
