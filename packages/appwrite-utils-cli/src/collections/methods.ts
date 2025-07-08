@@ -23,6 +23,7 @@ import {
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { ProgressManager } from "../shared/progressManager.js";
+import chalk from "chalk";
 
 export const documentExists = async (
   db: Databases,
@@ -615,6 +616,123 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
   );
 };
 
+/**
+ * Enhanced document transfer with fault tolerance and exponential backoff
+ */
+const transferDocumentWithRetry = async (
+  db: Databases,
+  dbId: string,
+  collectionId: string,
+  documentId: string,
+  documentData: any,
+  permissions: string[],
+  maxRetries: number = 3,
+  retryCount: number = 0
+): Promise<boolean> => {
+  try {
+    await db.createDocument(
+      dbId,
+      collectionId,
+      documentId,
+      documentData,
+      permissions
+    );
+    return true;
+  } catch (error: any) {
+    // Check if document already exists
+    if (error.code === 409 || error.message?.includes('already exists')) {
+      console.log(chalk.yellow(`Document ${documentId} already exists, skipping...`));
+      return true;
+    }
+    
+    if (retryCount < maxRetries) {
+      // Calculate exponential backoff: 1s, 2s, 4s
+      const exponentialDelay = Math.min(1000 * Math.pow(2, retryCount), 8000);
+      console.log(chalk.yellow(`Retrying document ${documentId} (attempt ${retryCount + 1}/${maxRetries}, backoff: ${exponentialDelay}ms)`));
+      
+      await delay(exponentialDelay);
+      
+      return await transferDocumentWithRetry(
+        db,
+        dbId,
+        collectionId,
+        documentId,
+        documentData,
+        permissions,
+        maxRetries,
+        retryCount + 1
+      );
+    }
+    
+    console.log(chalk.red(`Failed to transfer document ${documentId} after ${maxRetries} retries: ${error.message}`));
+    return false;
+  }
+};
+
+/**
+ * Enhanced batch document transfer with fault tolerance
+ */
+const transferDocumentBatchWithRetry = async (
+  db: Databases,
+  dbId: string,
+  collectionId: string,
+  documents: any[],
+  batchSize: number = 10
+): Promise<{ successful: number; failed: number }> => {
+  let successful = 0;
+  let failed = 0;
+  
+  // Process documents in smaller batches to avoid overwhelming the server
+  const documentBatches = chunk(documents, batchSize);
+  
+  for (const batch of documentBatches) {
+    console.log(chalk.blue(`Processing batch of ${batch.length} documents...`));
+    
+    const batchPromises = batch.map(async (doc) => {
+      const toCreateObject: Partial<typeof doc> = { ...doc };
+      delete toCreateObject.$databaseId;
+      delete toCreateObject.$collectionId;
+      delete toCreateObject.$createdAt;
+      delete toCreateObject.$updatedAt;
+      delete toCreateObject.$id;
+      delete toCreateObject.$permissions;
+      
+      const result = await transferDocumentWithRetry(
+        db,
+        dbId,
+        collectionId,
+        doc.$id,
+        toCreateObject,
+        doc.$permissions || []
+      );
+      
+      return { docId: doc.$id, success: result };
+    });
+    
+    const results = await Promise.allSettled(batchPromises);
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        if (result.value.success) {
+          successful++;
+        } else {
+          failed++;
+        }
+      } else {
+        console.log(chalk.red(`Batch promise rejected for document ${batch[index].$id}: ${result.reason}`));
+        failed++;
+      }
+    });
+    
+    // Add delay between batches to avoid rate limiting
+    if (documentBatches.indexOf(batch) < documentBatches.length - 1) {
+      await delay(500);
+    }
+  }
+  
+  return { successful, failed };
+};
+
 export const transferDocumentsBetweenDbsLocalToRemote = async (
   localDb: Databases,
   endpoint: string,
@@ -625,100 +743,70 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
   fromCollId: string,
   toCollId: string
 ) => {
+  console.log(chalk.blue(`Starting enhanced document transfer from ${fromCollId} to ${toCollId}...`));
+  
   const client = new Client()
     .setEndpoint(endpoint)
     .setProject(projectId)
     .setKey(apiKey);
-  let totalDocumentsTransferred = 0;
+  
   const remoteDb = new Databases(client);
-  let fromCollDocs = await tryAwaitWithRetry(async () =>
-    localDb.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
-  );
-
-  if (fromCollDocs.documents.length === 0) {
+  let totalDocumentsProcessed = 0;
+  let totalSuccessful = 0;
+  let totalFailed = 0;
+  
+  // Fetch documents in batches
+  let hasMoreDocuments = true;
+  let lastDocumentId: string | undefined;
+  
+  while (hasMoreDocuments) {
+    const queries = [Query.limit(50)];
+    if (lastDocumentId) {
+      queries.push(Query.cursorAfter(lastDocumentId));
+    }
+    
+    const fromCollDocs = await tryAwaitWithRetry(async () =>
+      localDb.listDocuments(fromDbId, fromCollId, queries)
+    );
+    
+    if (fromCollDocs.documents.length === 0) {
+      hasMoreDocuments = false;
+      break;
+    }
+    
+    console.log(chalk.blue(`Processing ${fromCollDocs.documents.length} documents...`));
+    
+    const { successful, failed } = await transferDocumentBatchWithRetry(
+      remoteDb,
+      toDbId,
+      toCollId,
+      fromCollDocs.documents
+    );
+    
+    totalDocumentsProcessed += fromCollDocs.documents.length;
+    totalSuccessful += successful;
+    totalFailed += failed;
+    
+    // Check if we have more documents to process
+    if (fromCollDocs.documents.length < 50) {
+      hasMoreDocuments = false;
+    } else {
+      lastDocumentId = fromCollDocs.documents[fromCollDocs.documents.length - 1].$id;
+    }
+    
+    console.log(chalk.gray(`Batch complete: ${successful} successful, ${failed} failed`));
+  }
+  
+  if (totalDocumentsProcessed === 0) {
     MessageFormatter.info(`No documents found in collection ${fromCollId}`, { prefix: "Transfer" });
     return;
-  } else if (fromCollDocs.documents.length < 50) {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(async () =>
-        remoteDb.createDocument(
-          toDbId,
-          toCollId,
-          doc.$id,
-          toCreateObject,
-          doc.$permissions
-        )
-      );
-    });
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-  } else {
-    const batchedPromises = fromCollDocs.documents.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
-        ...doc,
-      };
-      delete toCreateObject.$databaseId;
-      delete toCreateObject.$collectionId;
-      delete toCreateObject.$createdAt;
-      delete toCreateObject.$updatedAt;
-      delete toCreateObject.$id;
-      delete toCreateObject.$permissions;
-      return tryAwaitWithRetry(async () =>
-        remoteDb.createDocument(
-          toDbId,
-          toCollId,
-          doc.$id,
-          toCreateObject,
-          doc.$permissions
-        )
-      );
-    });
-    await Promise.all(batchedPromises);
-    totalDocumentsTransferred += fromCollDocs.documents.length;
-    while (fromCollDocs.documents.length === 50) {
-      fromCollDocs = await tryAwaitWithRetry(async () =>
-        localDb.listDocuments(fromDbId, fromCollId, [
-          Query.limit(50),
-          Query.cursorAfter(
-            fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
-          ),
-        ])
-      );
-      const batchedPromises = fromCollDocs.documents.map((doc) => {
-        const toCreateObject: Partial<typeof doc> = {
-          ...doc,
-        };
-        delete toCreateObject.$databaseId;
-        delete toCreateObject.$collectionId;
-        delete toCreateObject.$createdAt;
-        delete toCreateObject.$updatedAt;
-        delete toCreateObject.$id;
-        delete toCreateObject.$permissions;
-        return tryAwaitWithRetry(async () =>
-          remoteDb.createDocument(
-            toDbId,
-            toCollId,
-            doc.$id,
-            toCreateObject,
-            doc.$permissions
-          )
-        );
-      });
-      await Promise.all(batchedPromises);
-      totalDocumentsTransferred += fromCollDocs.documents.length;
-    }
   }
-  MessageFormatter.success(
-    `Total documents transferred from database ${fromDbId} to database ${toDbId} -- collection ${fromCollId} to collection ${toCollId}: ${totalDocumentsTransferred}`,
-    { prefix: "Transfer" }
-  );
+  
+  const message = `Total documents processed: ${totalDocumentsProcessed}, successful: ${totalSuccessful}, failed: ${totalFailed}`;
+  
+  if (totalFailed > 0) {
+    MessageFormatter.warning(message, { prefix: "Transfer" });
+  } else {
+    MessageFormatter.success(message, { prefix: "Transfer" });
+  }
 };

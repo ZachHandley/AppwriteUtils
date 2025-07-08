@@ -2052,49 +2052,144 @@ export class InteractiveCLI {
     MessageFormatter.info("Starting comprehensive transfer configuration...", { prefix: "Transfer" });
 
     try {
-      // Get source configuration
-      const sourceConfig = await inquirer.prompt([
-        {
-          type: "input",
-          name: "sourceEndpoint",
-          message: "Enter the source Appwrite endpoint:",
-          validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
-        },
-        {
-          type: "input",
-          name: "sourceProject",
-          message: "Enter the source project ID:",
-          validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
-        },
-        {
-          type: "password",
-          name: "sourceKey",
-          message: "Enter the source API key:",
-          validate: (input) => input.trim() !== "" || "API key cannot be empty",
-        },
-      ]);
+      // Initialize controller to optionally load config if available (supports both YAML and TypeScript configs)\n      await this.initControllerIfNeeded();\n      \n      // Check if user has an appwrite config for easier setup
+      const hasAppwriteConfig = this.controller?.config?.appwriteEndpoint && 
+                               this.controller?.config?.appwriteProject && 
+                               this.controller?.config?.appwriteKey;
 
-      // Get target configuration
-      const targetConfig = await inquirer.prompt([
-        {
-          type: "input",
-          name: "targetEndpoint",
-          message: "Enter the target Appwrite endpoint:",
-          validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
-        },
-        {
-          type: "input",
-          name: "targetProject",
-          message: "Enter the target project ID:",
-          validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
-        },
-        {
-          type: "password",
-          name: "targetKey",
-          message: "Enter the target API key:",
-          validate: (input) => input.trim() !== "" || "API key cannot be empty",
-        },
-      ]);
+      let sourceConfig: any;
+      let targetConfig: any;
+
+      if (hasAppwriteConfig) {
+        // Offer to use existing config for source
+        const { useConfigForSource } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "useConfigForSource",
+            message: "Use your current appwriteConfig as the source?",
+            default: true,
+          },
+        ]);
+
+        if (useConfigForSource) {
+          sourceConfig = {
+            sourceEndpoint: this.controller!.config!.appwriteEndpoint,
+            sourceProject: this.controller!.config!.appwriteProject,
+            sourceKey: this.controller!.config!.appwriteKey,
+          };
+          MessageFormatter.info(`Using config source: ${sourceConfig.sourceEndpoint}`, { prefix: "Transfer" });
+        } else {
+          // Get source configuration manually
+          sourceConfig = await inquirer.prompt([
+            {
+              type: "input",
+              name: "sourceEndpoint",
+              message: "Enter the source Appwrite endpoint:",
+              validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+            },
+            {
+              type: "input",
+              name: "sourceProject",
+              message: "Enter the source project ID:",
+              validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+            },
+            {
+              type: "password",
+              name: "sourceKey",
+              message: "Enter the source API key:",
+              validate: (input) => input.trim() !== "" || "API key cannot be empty",
+            },
+          ]);
+        }
+
+        // Offer to use existing config for target
+        const { useConfigForTarget } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "useConfigForTarget",
+            message: "Use your current appwriteConfig as the target?",
+            default: false,
+          },
+        ]);
+
+        if (useConfigForTarget) {
+          targetConfig = {
+            targetEndpoint: this.controller!.config!.appwriteEndpoint,
+            targetProject: this.controller!.config!.appwriteProject,
+            targetKey: this.controller!.config!.appwriteKey,
+          };
+          MessageFormatter.info(`Using config target: ${targetConfig.targetEndpoint}`, { prefix: "Transfer" });
+        } else {
+          // Get target configuration manually
+          targetConfig = await inquirer.prompt([
+            {
+              type: "input",
+              name: "targetEndpoint",
+              message: "Enter the target Appwrite endpoint:",
+              validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+            },
+            {
+              type: "input",
+              name: "targetProject",
+              message: "Enter the target project ID:",
+              validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+            },
+            {
+              type: "password",
+              name: "targetKey",
+              message: "Enter the target API key:",
+              validate: (input) => input.trim() !== "" || "API key cannot be empty",
+            },
+          ]);
+        }
+      } else {
+        // No appwrite config found, get both configurations manually
+        MessageFormatter.info("No appwriteConfig found, please enter source and target configurations manually", { prefix: "Transfer" });
+        
+        // Get source configuration
+        sourceConfig = await inquirer.prompt([
+          {
+            type: "input",
+            name: "sourceEndpoint",
+            message: "Enter the source Appwrite endpoint:",
+            validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+          },
+          {
+            type: "input",
+            name: "sourceProject",
+            message: "Enter the source project ID:",
+            validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+          },
+          {
+            type: "password",
+            name: "sourceKey",
+            message: "Enter the source API key:",
+            validate: (input) => input.trim() !== "" || "API key cannot be empty",
+          },
+        ]);
+
+        // Get target configuration
+        targetConfig = await inquirer.prompt([
+          {
+            type: "input",
+            name: "targetEndpoint",
+            message: "Enter the target Appwrite endpoint:",
+            validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+          },
+          {
+            type: "input",
+            name: "targetProject",
+            message: "Enter the target project ID:",
+            validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+          },
+          {
+            type: "password",
+            name: "targetKey",
+            message: "Enter the target API key:",
+            validate: (input) => input.trim() !== "" || "API key cannot be empty",
+          },
+        ]);
+      }
 
       // Get transfer options
       const transferOptions = await inquirer.prompt([
@@ -2161,17 +2256,19 @@ export class InteractiveCLI {
         return;
       }
 
-      // Important password warning
+      // Password preservation information
       if (transferOptions.transferTypes.includes("users") && !transferOptions.dryRun) {
-        MessageFormatter.warning("IMPORTANT: User passwords cannot be transferred due to Appwrite security limitations.", { prefix: "Transfer" });
-        MessageFormatter.warning("Users will need to reset their passwords after transfer.", { prefix: "Transfer" });
+        MessageFormatter.info("User Password Transfer Information:", { prefix: "Transfer" });
+        MessageFormatter.info("✅ Users with hashed passwords (Argon2, Bcrypt, Scrypt, MD5, SHA, PHPass) will preserve their passwords", { prefix: "Transfer" });
+        MessageFormatter.info("⚠️  Users without hash information will receive temporary passwords and need to reset", { prefix: "Transfer" });
+        MessageFormatter.info("🔒 All user data (preferences, labels, verification status) will be preserved", { prefix: "Transfer" });
         
         const { continueWithUsers } = await inquirer.prompt([
           {
             type: "confirm",
             name: "continueWithUsers",
-            message: "Continue with user transfer knowing passwords will be reset?",
-            default: false,
+            message: "Continue with user transfer?",
+            default: true,
           },
         ]);
 
@@ -2210,7 +2307,8 @@ export class InteractiveCLI {
       } else {
         MessageFormatter.success("Comprehensive transfer completed!", { prefix: "Transfer" });
         if (transferOptions.transferTypes.includes("users") && results.users.transferred > 0) {
-          MessageFormatter.info("Remember to notify users about password reset requirements", { prefix: "Transfer" });
+          MessageFormatter.info("Users with preserved password hashes can log in with their original passwords", { prefix: "Transfer" });
+          MessageFormatter.info("Users with temporary passwords will need to reset their passwords", { prefix: "Transfer" });
         }
       }
 

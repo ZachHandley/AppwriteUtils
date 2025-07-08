@@ -13,6 +13,7 @@ import { getAppwriteClient } from "../utils/helperFunctions.js";
 import {
   createOrUpdateAttribute,
   createUpdateCollectionAttributes,
+  createUpdateCollectionAttributesWithStatusCheck,
 } from "../collections/attributes.js";
 import { parseAttribute } from "appwrite-utils";
 import chalk from "chalk";
@@ -22,6 +23,7 @@ import { ProgressManager } from "../shared/progressManager.js";
 import {
   createOrUpdateIndex,
   createOrUpdateIndexes,
+  createOrUpdateIndexesWithStatusCheck,
 } from "../collections/indexes.js";
 import { getClient } from "../utils/getClientFromConfig.js";
 
@@ -305,44 +307,23 @@ export const transferDatabaseLocalToLocal = async (
         );
       }
 
-      // Handle attributes
-      const existingAttributes = await tryAwaitWithRetry(
-        async () =>
-          await localDb.listAttributes(targetDbId, targetCollection.$id)
+      // Handle attributes with enhanced status checking
+      console.log(chalk.blue(`Creating attributes for collection ${collection.name} with enhanced monitoring...`));
+      
+      const allAttributes = collection.attributes.map(attr => parseAttribute(attr as any));
+      const attributeSuccess = await createUpdateCollectionAttributesWithStatusCheck(
+        localDb,
+        targetDbId,
+        targetCollection,
+        allAttributes
       );
-
-      for (const attribute of collection.attributes) {
-        const parsedAttribute = parseAttribute(attribute as any);
-        const existingAttribute = existingAttributes.attributes.find(
-          (attr: any) => attr.key === parsedAttribute.key
-        );
-
-        if (!existingAttribute) {
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateAttribute(
-              localDb,
-              targetDbId,
-              targetCollection,
-              parsedAttribute
-            )
-          );
-          console.log(chalk.green(`Attribute ${parsedAttribute.key} created`));
-        } else {
-          console.log(
-            chalk.blue(
-              `Attribute ${parsedAttribute.key} exists, checking for updates...`
-            )
-          );
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateAttribute(
-              localDb,
-              targetDbId,
-              targetCollection,
-              parsedAttribute
-            )
-          );
-        }
+      
+      if (!attributeSuccess) {
+        console.log(chalk.red(`❌ Failed to create all attributes for collection ${collection.name}, skipping to next collection`));
+        continue;
       }
+      
+      console.log(chalk.green(`✅ All attributes created successfully for collection ${collection.name}`));
 
       // Handle indexes
       const existingIndexes = await tryAwaitWithRetry(
@@ -474,73 +455,41 @@ export const transferDatabaseLocalToRemote = async (
         );
       }
 
-      // Handle attributes
-      const existingAttributes = await tryAwaitWithRetry(
-        async () => await remoteDb.listAttributes(toDbId, targetCollection.$id)
+      // Handle attributes with enhanced status checking
+      console.log(chalk.blue(`Creating attributes for collection ${collection.name} with enhanced monitoring...`));
+      
+      const attributesToCreate = collection.attributes.map(attr => parseAttribute(attr as any));
+      
+      const attributesSuccess = await createUpdateCollectionAttributesWithStatusCheck(
+        remoteDb,
+        toDbId,
+        targetCollection,
+        attributesToCreate
       );
-
-      for (const attribute of collection.attributes) {
-        const parsedAttribute = parseAttribute(attribute as any);
-        const existingAttribute = existingAttributes.attributes.find(
-          (attr: any) => attr.key === parsedAttribute.key
-        );
-
-        if (!existingAttribute) {
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateAttribute(
-              remoteDb,
-              toDbId,
-              targetCollection,
-              parsedAttribute
-            )
-          );
-          console.log(chalk.green(`Attribute ${parsedAttribute.key} created`));
-        } else {
-          console.log(
-            chalk.blue(
-              `Attribute ${parsedAttribute.key} exists, checking for updates...`
-            )
-          );
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateAttribute(
-              remoteDb,
-              toDbId,
-              targetCollection,
-              parsedAttribute
-            )
-          );
-        }
+      
+      if (!attributesSuccess) {
+        console.log(chalk.red(`Failed to create some attributes for collection ${collection.name}`));
+        // Continue with the transfer even if some attributes failed
+      } else {
+        console.log(chalk.green(`All attributes created successfully for collection ${collection.name}`));
       }
 
-      // Handle indexes
-      const existingIndexes = await tryAwaitWithRetry(
-        async () => await remoteDb.listIndexes(toDbId, targetCollection.$id)
+      // Handle indexes with enhanced status checking
+      console.log(chalk.blue(`Creating indexes for collection ${collection.name} with enhanced monitoring...`));
+      
+      const indexesSuccess = await createOrUpdateIndexesWithStatusCheck(
+        toDbId,
+        remoteDb,
+        targetCollection.$id,
+        targetCollection,
+        collection.indexes as any
       );
-
-      for (const index of collection.indexes) {
-        const existingIndex = existingIndexes.indexes.find(
-          (idx) => idx.key === index.key
-        );
-
-        if (!existingIndex) {
-          await createOrUpdateIndex(
-            toDbId,
-            remoteDb,
-            targetCollection.$id,
-            index as any
-          );
-          console.log(chalk.green(`Index ${index.key} created`));
-        } else {
-          console.log(
-            chalk.blue(`Index ${index.key} exists, checking for updates...`)
-          );
-          await createOrUpdateIndex(
-            toDbId,
-            remoteDb,
-            targetCollection.$id,
-            index as any
-          );
-        }
+      
+      if (!indexesSuccess) {
+        console.log(chalk.red(`Failed to create some indexes for collection ${collection.name}`));
+        // Continue with the transfer even if some indexes failed
+      } else {
+        console.log(chalk.green(`All indexes created successfully for collection ${collection.name}`));
       }
 
       // Transfer documents
@@ -609,40 +558,198 @@ export const transferUsersLocalToRemote = async (
           ? converterFunctions.convertPhoneStringToUSInternational(user.phone)
           : undefined;
 
-        if (user.hash) {
-          await tryAwaitWithRetry(async () =>
-            remoteUsers.createArgon2User(
-              user.$id,
-              user.email,
-              user.password!, // password - cannot transfer hashed passwords
-              user.name // phone - optional
-            )
-          );
-          if (phone) {
+        // Handle user creation based on hash type
+        if (user.hash && user.password) {
+          // User has a hashed password - recreate with proper hash method
+          const hashType = user.hash.toLowerCase();
+          const hashedPassword = user.password; // This is already hashed
+          const hashOptions = (user.hashOptions as Record<string, any>) || {};
+          
+          try {
+            switch (hashType) {
+              case 'argon2':
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createArgon2User(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'bcrypt':
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createBcryptUser(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'scrypt':
+                // Scrypt requires additional parameters from hashOptions
+                const salt = typeof hashOptions.salt === 'string' ? hashOptions.salt : '';
+                const costCpu = typeof hashOptions.costCpu === 'number' ? hashOptions.costCpu : 32768;
+                const costMemory = typeof hashOptions.costMemory === 'number' ? hashOptions.costMemory : 14;
+                const costParallel = typeof hashOptions.costParallel === 'number' ? hashOptions.costParallel : 1;
+                const length = typeof hashOptions.length === 'number' ? hashOptions.length : 64;
+                
+                // Warn if using default values due to missing hash options
+                if (!hashOptions.salt || typeof hashOptions.costCpu !== 'number') {
+                  console.log(chalk.yellow(`User ${user.$id}: Using default Scrypt parameters due to missing hashOptions`));
+                }
+                
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createScryptUser(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    salt,
+                    costCpu,
+                    costMemory,
+                    costParallel,
+                    length,
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'scryptmodified':
+                // Scrypt Modified (Firebase) requires salt, separator, and signer key
+                const modSalt = typeof hashOptions.salt === 'string' ? hashOptions.salt : '';
+                const saltSeparator = typeof hashOptions.saltSeparator === 'string' ? hashOptions.saltSeparator : '';
+                const signerKey = typeof hashOptions.signerKey === 'string' ? hashOptions.signerKey : '';
+                
+                // Warn if critical parameters are missing
+                if (!hashOptions.salt || !hashOptions.saltSeparator || !hashOptions.signerKey) {
+                  console.log(chalk.yellow(`User ${user.$id}: Missing critical Scrypt Modified parameters in hashOptions`));
+                }
+                
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createScryptModifiedUser(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    modSalt,
+                    saltSeparator,
+                    signerKey,
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'md5':
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createMD5User(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'sha':
+              case 'sha1':
+              case 'sha256':
+              case 'sha512':
+                // SHA variants - determine version from hash type
+                const getPasswordHashVersion = (hash: string) => {
+                  switch (hash.toLowerCase()) {
+                    case 'sha1': return 'sha1' as any;
+                    case 'sha256': return 'sha256' as any;
+                    case 'sha512': return 'sha512' as any;
+                    default: return 'sha256' as any; // Default to SHA256
+                  }
+                };
+                
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createSHAUser(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    getPasswordHashVersion(hashType),
+                    user.name
+                  )
+                );
+                break;
+                
+              case 'phpass':
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createPHPassUser(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    user.name
+                  )
+                );
+                break;
+                
+              default:
+                console.log(chalk.yellow(`Unknown hash type '${hashType}' for user ${user.$id}, falling back to Argon2`));
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.createArgon2User(
+                    user.$id,
+                    user.email,
+                    hashedPassword,
+                    user.name
+                  )
+                );
+                break;
+            }
+            
+            console.log(chalk.green(`User ${user.$id} created with preserved ${hashType} password`));
+            
+          } catch (error) {
+            console.log(chalk.yellow(`Failed to create user ${user.$id} with ${hashType} hash, trying with temporary password`));
+            
+            // Fallback to creating user with temporary password
             await tryAwaitWithRetry(async () =>
-              remoteUsers.updatePhone(user.$id, phone)
+              remoteUsers.create(
+                user.$id,
+                user.email,
+                phone,
+                `changeMe${user.email}`,
+                user.name
+              )
             );
+            
+            console.log(chalk.yellow(`User ${user.$id} created with temporary password - password reset required`));
           }
-          if (user.labels && user.labels.length > 0) {
-            await tryAwaitWithRetry(async () =>
-              remoteUsers.updateLabels(user.$id, user.labels)
-            );
-          }
+          
         } else {
+          // No hash or password - create with temporary password
+          const tempPassword = user.password || `changeMe${user.email}`;
+          
           await tryAwaitWithRetry(async () =>
             remoteUsers.create(
               user.$id,
               user.email,
-              phone, // phone - optional
-              user.password, // password - cannot transfer hashed passwords
+              phone,
+              tempPassword,
               user.name
             )
           );
-          if (user.labels && user.labels.length > 0) {
-            await tryAwaitWithRetry(async () =>
-              remoteUsers.updateLabels(user.$id, user.labels)
-            );
+          
+          if (!user.password) {
+            console.log(chalk.yellow(`User ${user.$id} created with temporary password - password reset required`));
           }
+        }
+        
+        // Update phone, labels, and other attributes
+        if (phone) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updatePhone(user.$id, phone)
+          );
+        }
+        
+        if (user.labels && user.labels.length > 0) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updateLabels(user.$id, user.labels)
+          );
         }
 
         // Update user preferences and status

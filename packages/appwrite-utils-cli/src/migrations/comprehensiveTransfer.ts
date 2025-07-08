@@ -1,4 +1,4 @@
-import { converterFunctions, tryAwaitWithRetry } from "appwrite-utils";
+import { converterFunctions, tryAwaitWithRetry, parseAttribute } from "appwrite-utils";
 import {
   Client,
   Databases,
@@ -204,7 +204,10 @@ export class ComprehensiveTransfer {
         return;
       }
 
-      const transferTasks = sourceDatabases.databases.map(db => 
+      // Phase 1: Create all databases and collections (structure only)
+      MessageFormatter.info("Phase 1: Creating database structures (databases, collections, attributes, indexes)", { prefix: "Transfer" });
+      
+      const structureCreationTasks = sourceDatabases.databases.map(db => 
         this.limit(async () => {
           try {
             // Check if database exists in target
@@ -216,29 +219,186 @@ export class ComprehensiveTransfer {
               MessageFormatter.success(`Created database: ${db.name}`, { prefix: "Transfer" });
             }
 
-            // Transfer database content
-            await transferDatabaseLocalToRemote(
-              this.sourceDatabases,
-              this.options.targetEndpoint,
-              this.options.targetProject,
-              this.options.targetKey,
-              db.$id,
-              db.$id
-            );
+            // Create collections, attributes, and indexes WITHOUT transferring documents
+            await this.createDatabaseStructure(db.$id);
 
-            this.results.databases.transferred++;
-            MessageFormatter.success(`Database ${db.name} transferred successfully`, { prefix: "Transfer" });
+            MessageFormatter.success(`Database structure created: ${db.name}`, { prefix: "Transfer" });
           } catch (error) {
-            MessageFormatter.error(`Database ${db.name} transfer failed`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+            MessageFormatter.error(`Database structure creation failed for ${db.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
             this.results.databases.failed++;
           }
         })
       );
 
-      await Promise.all(transferTasks);
+      await Promise.all(structureCreationTasks);
+
+      // Phase 2: Transfer all documents after all structures are created
+      MessageFormatter.info("Phase 2: Transferring documents to all collections", { prefix: "Transfer" });
+      
+      const documentTransferTasks = sourceDatabases.databases.map(db => 
+        this.limit(async () => {
+          try {
+            // Transfer documents for this database
+            await this.transferDatabaseDocuments(db.$id);
+
+            this.results.databases.transferred++;
+            MessageFormatter.success(`Database documents transferred: ${db.name}`, { prefix: "Transfer" });
+          } catch (error) {
+            MessageFormatter.error(`Document transfer failed for ${db.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+            this.results.databases.failed++;
+          }
+        })
+      );
+
+      await Promise.all(documentTransferTasks);
       MessageFormatter.success("Database transfer phase completed", { prefix: "Transfer" });
     } catch (error) {
       MessageFormatter.error("Database transfer phase failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+    }
+  }
+
+  /**
+   * Phase 1: Create database structure (collections, attributes, indexes) without transferring documents
+   */
+  private async createDatabaseStructure(dbId: string): Promise<void> {
+    MessageFormatter.info(`Creating database structure for ${dbId}`, { prefix: "Transfer" });
+
+    try {
+      // Get all collections from source database
+      const sourceCollections = await this.fetchAllCollections(dbId, this.sourceDatabases);
+      MessageFormatter.info(`Found ${sourceCollections.length} collections in source database ${dbId}`, { prefix: "Transfer" });
+
+      // Process each collection
+      for (const collection of sourceCollections) {
+        MessageFormatter.info(`Processing collection: ${collection.name} (${collection.$id})`, { prefix: "Transfer" });
+
+        try {
+          // Create or update collection in target
+          let targetCollection: Models.Collection;
+          const existingCollection = await tryAwaitWithRetry(async () =>
+            this.targetDatabases.listCollections(dbId, [Query.equal("$id", collection.$id)])
+          );
+
+          if (existingCollection.collections.length > 0) {
+            targetCollection = existingCollection.collections[0];
+            MessageFormatter.info(`Collection ${collection.name} exists in target database`, { prefix: "Transfer" });
+
+            // Update collection if needed
+            if (
+              targetCollection.name !== collection.name ||
+              JSON.stringify(targetCollection.$permissions) !== JSON.stringify(collection.$permissions) ||
+              targetCollection.documentSecurity !== collection.documentSecurity ||
+              targetCollection.enabled !== collection.enabled
+            ) {
+              targetCollection = await tryAwaitWithRetry(async () =>
+                this.targetDatabases.updateCollection(
+                  dbId,
+                  collection.$id,
+                  collection.name,
+                  collection.$permissions,
+                  collection.documentSecurity,
+                  collection.enabled
+                )
+              );
+              MessageFormatter.success(`Collection ${collection.name} updated`, { prefix: "Transfer" });
+            }
+          } else {
+            MessageFormatter.info(`Creating collection ${collection.name} in target database...`, { prefix: "Transfer" });
+            targetCollection = await tryAwaitWithRetry(async () =>
+              this.targetDatabases.createCollection(
+                dbId,
+                collection.$id,
+                collection.name,
+                collection.$permissions,
+                collection.documentSecurity,
+                collection.enabled
+              )
+            );
+            MessageFormatter.success(`Collection ${collection.name} created`, { prefix: "Transfer" });
+          }
+
+          // Handle attributes with enhanced status checking
+          MessageFormatter.info(`Creating attributes for collection ${collection.name} with enhanced monitoring...`, { prefix: "Transfer" });
+          
+          const attributesToCreate = collection.attributes.map(attr => parseAttribute(attr as any));
+          
+          const attributesSuccess = await this.createCollectionAttributesWithStatusCheck(
+            this.targetDatabases,
+            dbId,
+            targetCollection,
+            attributesToCreate
+          );
+          
+          if (!attributesSuccess) {
+            MessageFormatter.error(`Failed to create some attributes for collection ${collection.name}`, undefined, { prefix: "Transfer" });
+            // Continue with the transfer even if some attributes failed
+          } else {
+            MessageFormatter.success(`All attributes created successfully for collection ${collection.name}`, { prefix: "Transfer" });
+          }
+
+          // Handle indexes with enhanced status checking
+          MessageFormatter.info(`Creating indexes for collection ${collection.name} with enhanced monitoring...`, { prefix: "Transfer" });
+          
+          const indexesSuccess = await this.createCollectionIndexesWithStatusCheck(
+            dbId,
+            this.targetDatabases,
+            targetCollection.$id,
+            targetCollection,
+            collection.indexes as any
+          );
+          
+          if (!indexesSuccess) {
+            MessageFormatter.error(`Failed to create some indexes for collection ${collection.name}`, undefined, { prefix: "Transfer" });
+            // Continue with the transfer even if some indexes failed
+          } else {
+            MessageFormatter.success(`All indexes created successfully for collection ${collection.name}`, { prefix: "Transfer" });
+          }
+
+          MessageFormatter.success(`Structure complete for collection ${collection.name}`, { prefix: "Transfer" });
+        } catch (error) {
+          MessageFormatter.error(`Error processing collection ${collection.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+        }
+      }
+    } catch (error) {
+      MessageFormatter.error(`Failed to create database structure for ${dbId}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+      throw error;
+    }
+  }
+
+  /**
+   * Phase 2: Transfer documents to all collections in the database
+   */
+  private async transferDatabaseDocuments(dbId: string): Promise<void> {
+    MessageFormatter.info(`Transferring documents for database ${dbId}`, { prefix: "Transfer" });
+
+    try {
+      // Get all collections from source database
+      const sourceCollections = await this.fetchAllCollections(dbId, this.sourceDatabases);
+      MessageFormatter.info(`Transferring documents for ${sourceCollections.length} collections in database ${dbId}`, { prefix: "Transfer" });
+
+      // Process each collection
+      for (const collection of sourceCollections) {
+        MessageFormatter.info(`Transferring documents for collection: ${collection.name} (${collection.$id})`, { prefix: "Transfer" });
+
+        try {
+          // Transfer documents
+          await this.transferDocumentsBetweenDatabases(
+            this.sourceDatabases,
+            this.targetDatabases,
+            dbId,
+            dbId,
+            collection.$id,
+            collection.$id
+          );
+          
+          MessageFormatter.success(`Documents transferred for collection ${collection.name}`, { prefix: "Transfer" });
+        } catch (error) {
+          MessageFormatter.error(`Error transferring documents for collection ${collection.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+        }
+      }
+    } catch (error) {
+      MessageFormatter.error(`Failed to transfer documents for database ${dbId}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+      throw error;
     }
   }
 
@@ -481,6 +641,180 @@ export class ComprehensiveTransfer {
       MessageFormatter.error(`Failed to download function ${func.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
       return null;
     }
+  }
+
+  /**
+   * Helper method to fetch all collections from a database
+   */
+  private async fetchAllCollections(dbId: string, databases: Databases): Promise<Models.Collection[]> {
+    const collections: Models.Collection[] = [];
+    let lastId: string | undefined;
+
+    while (true) {
+      const queries = [Query.limit(100)];
+      if (lastId) {
+        queries.push(Query.cursorAfter(lastId));
+      }
+
+      const result = await tryAwaitWithRetry(async () => databases.listCollections(dbId, queries));
+      
+      if (result.collections.length === 0) {
+        break;
+      }
+
+      collections.push(...result.collections);
+      
+      if (result.collections.length < 100) {
+        break;
+      }
+      
+      lastId = result.collections[result.collections.length - 1].$id;
+    }
+
+    return collections;
+  }
+
+  /**
+   * Helper method to parse attribute objects (simplified version of parseAttribute)
+   */
+  private parseAttribute(attr: any): any {
+    // This is a simplified version - in production you'd use the actual parseAttribute from appwrite-utils
+    return {
+      key: attr.key,
+      type: attr.type,
+      size: attr.size,
+      required: attr.required,
+      array: attr.array,
+      default: attr.default,
+      format: attr.format,
+      elements: attr.elements,
+      min: attr.min,
+      max: attr.max,
+      relatedCollection: attr.relatedCollection,
+      relationType: attr.relationType,
+      twoWay: attr.twoWay,
+      twoWayKey: attr.twoWayKey,
+      onDelete: attr.onDelete,
+      side: attr.side
+    };
+  }
+
+  /**
+   * Helper method to create collection attributes with status checking
+   */
+  private async createCollectionAttributesWithStatusCheck(
+    databases: Databases,
+    dbId: string,
+    collection: Models.Collection,
+    attributes: any[]
+  ): Promise<boolean> {
+    // Import the enhanced attribute creation function
+    const { createUpdateCollectionAttributesWithStatusCheck } = await import("../collections/attributes.js");
+    
+    return await createUpdateCollectionAttributesWithStatusCheck(
+      databases,
+      dbId,
+      collection,
+      attributes
+    );
+  }
+
+  /**
+   * Helper method to create collection indexes with status checking
+   */
+  private async createCollectionIndexesWithStatusCheck(
+    dbId: string,
+    databases: Databases,
+    collectionId: string,
+    collection: Models.Collection,
+    indexes: any[]
+  ): Promise<boolean> {
+    // Import the enhanced index creation function
+    const { createOrUpdateIndexesWithStatusCheck } = await import("../collections/indexes.js");
+    
+    return await createOrUpdateIndexesWithStatusCheck(
+      dbId,
+      databases,
+      collectionId,
+      collection,
+      indexes
+    );
+  }
+
+  /**
+   * Helper method to transfer documents between databases
+   */
+  private async transferDocumentsBetweenDatabases(
+    sourceDb: Databases,
+    targetDb: Databases,
+    sourceDbId: string,
+    targetDbId: string,
+    sourceCollectionId: string,
+    targetCollectionId: string
+  ): Promise<void> {
+    MessageFormatter.info(`Transferring documents from ${sourceCollectionId} to ${targetCollectionId}`, { prefix: "Transfer" });
+
+    let lastId: string | undefined;
+    let totalTransferred = 0;
+
+    while (true) {
+      const queries = [Query.limit(50)]; // Smaller batch size for better performance
+      if (lastId) {
+        queries.push(Query.cursorAfter(lastId));
+      }
+
+      const documents = await tryAwaitWithRetry(async () => 
+        sourceDb.listDocuments(sourceDbId, sourceCollectionId, queries)
+      );
+
+      if (documents.documents.length === 0) {
+        break;
+      }
+
+      // Transfer documents with rate limiting
+      const transferTasks = documents.documents.map(doc => 
+        this.limit(async () => {
+          try {
+            // Check if document already exists
+            try {
+              await targetDb.getDocument(targetDbId, targetCollectionId, doc.$id);
+              MessageFormatter.info(`Document ${doc.$id} already exists, skipping`, { prefix: "Transfer" });
+              return;
+            } catch (error) {
+              // Document doesn't exist, proceed with creation
+            }
+
+            // Create document in target
+            const { $id, $createdAt, $updatedAt, $permissions, $databaseId, $collectionId, ...docData } = doc;
+            
+            await tryAwaitWithRetry(async () =>
+              targetDb.createDocument(
+                targetDbId,
+                targetCollectionId,
+                doc.$id,
+                docData,
+                doc.$permissions
+              )
+            );
+
+            totalTransferred++;
+            MessageFormatter.success(`Transferred document ${doc.$id}`, { prefix: "Transfer" });
+          } catch (error) {
+            MessageFormatter.error(`Failed to transfer document ${doc.$id}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+          }
+        })
+      );
+
+      await Promise.all(transferTasks);
+
+      if (documents.documents.length < 50) {
+        break;
+      }
+
+      lastId = documents.documents[documents.documents.length - 1].$id;
+    }
+
+    MessageFormatter.info(`Transferred ${totalTransferred} documents from ${sourceCollectionId} to ${targetCollectionId}`, { prefix: "Transfer" });
   }
 
   private printSummary(): void {

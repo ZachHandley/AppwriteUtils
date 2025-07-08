@@ -327,6 +327,108 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+### 1.1.0 - Enhanced Transfer System with Fault Tolerance
+
+**🔧 Robust Transfer Operations with Status Monitoring**
+
+#### Enhanced Attribute Creation with Fault Tolerance
+- **Exponential Backoff**: Intelligent retry strategy starting at 2 seconds, doubling each retry (2s, 4s, 8s, 16s, 30s max)
+- **Status Monitoring**: Real-time monitoring of attribute states ('available', 'processing', 'stuck', 'failed', 'deleting')
+- **Retry Logic**: Collection deletion/recreation for stuck attributes with up to 5 retry attempts
+- **Sequential Processing**: Attributes processed one-by-one to prevent overwhelming the server
+- **Enhanced Logging**: Comprehensive console feedback with color-coded status messages
+
+#### Enhanced Index Creation with Status Monitoring
+- **Similar Fault Tolerance**: Index creation now includes the same robust monitoring and retry logic
+- **Status Checking**: Real-time monitoring of index creation states with proper error handling
+- **Collection Recreation**: Automatic collection deletion/recreation for stuck index operations
+- **Sequential Processing**: Prevents rate limiting by processing indexes individually
+
+#### Document Transfer Reliability Improvements
+- **Enhanced Error Handling**: Improved document transfer with exponential backoff retry logic
+- **Smaller Batch Sizes**: Reduced batch sizes (10 documents) to prevent server overload
+- **Better Progress Reporting**: Enhanced progress tracking with success/failure counts
+- **Fault Tolerance**: Graceful handling of duplicate documents and API errors
+
+#### Remote Database Transfer Enhancements
+- **Integrated Enhanced Methods**: Updated `transferDatabaseLocalToRemote` to use new attribute and index creation
+- **Proper Wait Logic**: System now properly waits for attributes/indexes to be fully created before proceeding
+- **Status Validation**: Comprehensive status checking throughout the transfer process
+- **Continued Operation**: Transfer continues even if some attributes/indexes fail (with warnings)
+
+#### AppwriteConfig Integration for Comprehensive Transfer
+- **Smart Configuration Detection**: Automatically detects existing appwriteConfig for reuse
+- **Source/Target Options**: Users can select their appwriteConfig for either source or target endpoints
+- **Streamlined Setup**: Enhanced user experience with clear configuration prompts
+
+#### Technical Implementation
+- **Rate Limiting Respect**: Enhanced operations respect existing rate limiting while adding reliability
+- **Memory Efficiency**: Optimized processing to handle large operations without overwhelming system resources
+- **Error Resilience**: Comprehensive error handling with detailed user feedback and recovery options
+- **Status Persistence**: Operations maintain state information for better debugging and monitoring
+
+#### Usage Benefits
+- **Reliability**: Transfer operations no longer fail due to timing issues or stuck operations
+- **Visibility**: Clear progress indicators and status messages throughout all operations
+- **Recovery**: Automatic retry and recovery mechanisms prevent data loss
+- **Performance**: Optimized timing prevents API throttling while maintaining speed
+
+**Breaking Change**: None - fully backward compatible with significantly enhanced reliability.
+
+### 1.0.9 - Enhanced User Transfer with Password Preservation
+
+**🔐 Complete Password Hash Preservation During User Transfers**
+
+#### Password Hash Support
+- **Universal Hash Support**: Support for all Appwrite password hash types:
+  - **Argon2**: Modern default hashing (preserved)
+  - **Bcrypt**: Industry standard (preserved)
+  - **Scrypt**: Memory-hard function with custom parameters (preserved)
+  - **Scrypt Modified**: Firebase-style with salt/separator/signer (preserved)
+  - **MD5**: Legacy support (preserved)
+  - **SHA variants**: SHA1, SHA256, SHA512 (preserved)
+  - **PHPass**: WordPress-style hashing (preserved)
+- **Dynamic Hash Detection**: Automatically detects and uses correct hash creation method
+- **Parameter Preservation**: Maintains hash-specific parameters (salt, iterations, memory cost, etc.)
+
+#### Enhanced User Transfer Logic
+- **Smart Password Recreation**: Uses appropriate `create*User` method based on detected hash type
+- **Fallback Mechanism**: Graceful fallback to temporary passwords if hash recreation fails
+- **Hash Options Support**: Preserves algorithm-specific configuration from `hashOptions`
+- **Detailed Logging**: Clear success/failure messages with hash type information
+
+#### User Experience Improvements
+- **Accurate Information**: Updated CLI messaging to reflect actual password preservation capabilities
+- **Clear Expectations**: Distinguishes between users who keep passwords vs. those who need reset
+- **Success Feedback**: Detailed reporting of password preservation success rate
+- **Risk Assessment**: Proper warnings only for users who will lose passwords
+
+#### Technical Implementation
+- **Hash Type Detection**: `user.hash` field determines creation method
+- **Configuration Parsing**: `user.hashOptions` provides algorithm parameters
+- **Error Resilience**: Comprehensive try-catch with fallback to temporary passwords
+- **Type Safety**: Proper handling of hash option types and parameters
+
+#### Migration Benefits
+- **Seamless Login**: Users with preserved hashes can immediately log in with original passwords
+- **Reduced Support**: Dramatically fewer password reset requests after migration
+- **Complete Fidelity**: Maintains original security posture and hash strength
+- **Production Ready**: Safe for live user base migrations
+
+#### Usage Examples
+```bash
+# Users will now preserve passwords during comprehensive transfer
+npx appwrite-utils-cli@latest appwrite-migrate --it
+# Select: 🚀 Comprehensive transfer (users → databases → buckets → functions)
+
+# Example output:
+# ✅ User 123 created with preserved argon2 password
+# ✅ User 456 created with preserved bcrypt password  
+# ⚠️  User 789 created with temporary password - password reset required
+```
+
+**Breaking Change**: None - fully backward compatible with enhanced capabilities.
+
 ### 1.0.8 - Comprehensive Transfer System with Enhanced Rate Limiting
 
 **🚀 Complete Cross-Instance Transfer Solution**
