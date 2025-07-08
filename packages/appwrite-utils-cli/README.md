@@ -327,6 +327,68 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+### 1.0.8 - Comprehensive Transfer System with Enhanced Rate Limiting
+
+**🚀 Complete Cross-Instance Transfer Solution**
+
+#### Comprehensive Transfer System
+- **New CLI Option**: `🚀 Comprehensive transfer (users → databases → buckets → functions)` in interactive mode
+- **Orchestrated Transfer Flow**: Proper execution order (users → databases → buckets → functions) for dependency management
+- **Cross-Instance Support**: Transfer entire Appwrite configurations between different instances/projects
+- **Selective Transfer**: Choose which components to transfer (users, databases, buckets, functions)
+- **Dry Run Mode**: Test transfers without making actual changes
+
+#### Enhanced Rate Limiting Strategy
+- **Configurable Limits**: 5 to 100 concurrent operations in steps of 5
+- **Differentiated Rates**: Smart rate limiting based on operation type:
+  - **General Operations**: Full rate (databases, functions)
+  - **User Operations**: Half rate (more sensitive operations)
+  - **File Operations**: Quarter rate (most bandwidth intensive)
+- **Visual Feedback**: Real-time rate limit display during transfers
+- **Intelligent Scaling**: Automatic calculation of optimal rates for different operations
+
+#### File Transfer Enhancements
+- **File Validation**: Comprehensive integrity checking (empty files, size limits)
+- **Retry Logic**: Exponential backoff for failed file transfers
+- **Error Handling**: Graceful handling of corrupt/invalid files
+- **Progress Tracking**: Real-time progress for large file transfers
+
+#### Function Transfer Integration
+- **Automated Function Migration**: Download from source, redeploy to target
+- **Temporary Management**: Automatic cleanup of downloaded function code
+- **Existing Code Integration**: Leverages existing deployment infrastructure
+- **Configuration Preservation**: Maintains function settings and variables
+
+#### User Experience Improvements
+- **Password Reset Warnings**: Clear notifications about Appwrite password limitations
+- **Interactive Configuration**: Step-by-step prompts for source/target setup
+- **Comprehensive Reporting**: Detailed transfer summaries with statistics
+- **Smart Confirmations**: Risk-based confirmations for destructive operations
+
+#### Technical Implementation
+- **Rate Limiting**: Uses p-limit for concurrent operation control
+- **Error Resilience**: Robust error handling with detailed user feedback
+- **Memory Management**: Efficient processing of large datasets
+- **Progress Tracking**: Real-time progress bars with ETA calculations
+
+#### Usage Examples
+```bash
+# Interactive mode - select comprehensive transfer
+npx appwrite-utils-cli@latest appwrite-migrate --it
+
+# Example rate limiting at 20 concurrent:
+# - General operations: 20 concurrent
+# - User operations: 10 concurrent  
+# - File operations: 5 concurrent
+```
+
+**Benefits**:
+- Complete Appwrite instance migration capability
+- Intelligent rate limiting prevents API throttling
+- Enhanced file transfer reliability
+- Comprehensive progress tracking and reporting
+- Maintains data integrity across transfers
+
 ### 1.0.7 - Forgot to remove debug logs
 
 ### 1.0.6 - Cross-Language Constants Generation

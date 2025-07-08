@@ -15,6 +15,7 @@ import {
 } from "node-appwrite";
 import { getClient } from "./utils/getClientFromConfig.js";
 import type { TransferOptions } from "./migrations/transfer.js";
+import { ComprehensiveTransfer, type ComprehensiveTransferOptions } from "./migrations/comprehensiveTransfer.js";
 import {
   AppwriteFunctionSchema,
   parseAttribute,
@@ -61,6 +62,7 @@ enum CHOICES {
   SYNC_DB = "⬆️ Push local config to Appwrite",
   SYNCHRONIZE_CONFIGURATIONS = "🔄 Synchronize configurations - Pull from Appwrite and write to local config",
   TRANSFER_DATA = "📦 Transfer data",
+  COMPREHENSIVE_TRANSFER = "🚀 Comprehensive transfer (users → databases → buckets → functions)",
   BACKUP_DATABASE = "💾 Backup database",
   WIPE_DATABASE = "🧹 Wipe database",
   WIPE_COLLECTIONS = "🧹 Wipe collections",
@@ -144,6 +146,9 @@ export class InteractiveCLI {
         case CHOICES.TRANSFER_DATA:
           await this.initControllerIfNeeded();
           await this.transferData();
+          break;
+        case CHOICES.COMPREHENSIVE_TRANSFER:
+          await this.comprehensiveTransfer();
           break;
         case CHOICES.BACKUP_DATABASE:
           await this.initControllerIfNeeded();
@@ -2040,6 +2045,177 @@ export class InteractiveCLI {
       
     } catch (error) {
       MessageFormatter.error("Migration failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Migration" });
+    }
+  }
+
+  private async comprehensiveTransfer(): Promise<void> {
+    MessageFormatter.info("Starting comprehensive transfer configuration...", { prefix: "Transfer" });
+
+    try {
+      // Get source configuration
+      const sourceConfig = await inquirer.prompt([
+        {
+          type: "input",
+          name: "sourceEndpoint",
+          message: "Enter the source Appwrite endpoint:",
+          validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+        },
+        {
+          type: "input",
+          name: "sourceProject",
+          message: "Enter the source project ID:",
+          validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+        },
+        {
+          type: "password",
+          name: "sourceKey",
+          message: "Enter the source API key:",
+          validate: (input) => input.trim() !== "" || "API key cannot be empty",
+        },
+      ]);
+
+      // Get target configuration
+      const targetConfig = await inquirer.prompt([
+        {
+          type: "input",
+          name: "targetEndpoint",
+          message: "Enter the target Appwrite endpoint:",
+          validate: (input) => input.trim() !== "" || "Endpoint cannot be empty",
+        },
+        {
+          type: "input",
+          name: "targetProject",
+          message: "Enter the target project ID:",
+          validate: (input) => input.trim() !== "" || "Project ID cannot be empty",
+        },
+        {
+          type: "password",
+          name: "targetKey",
+          message: "Enter the target API key:",
+          validate: (input) => input.trim() !== "" || "API key cannot be empty",
+        },
+      ]);
+
+      // Get transfer options
+      const transferOptions = await inquirer.prompt([
+        {
+          type: "checkbox",
+          name: "transferTypes",
+          message: "Select what to transfer:",
+          choices: [
+            { name: "👥 Users", value: "users", checked: true },
+            { name: "🗄️ Databases", value: "databases", checked: true },
+            { name: "📦 Storage Buckets", value: "buckets", checked: true },
+            { name: "⚡ Functions", value: "functions", checked: true },
+          ],
+          validate: (input) => input.length > 0 || "Select at least one transfer type",
+        },
+        {
+          type: "list",
+          name: "concurrencyLimit",
+          message: "Select concurrency limit:",
+          choices: [
+            { name: "5 (Conservative) - Users: 2, Files: 1", value: 5 },
+            { name: "10 (Balanced) - Users: 5, Files: 2", value: 10 },
+            { name: "15 - Users: 7, Files: 3", value: 15 },
+            { name: "20 - Users: 10, Files: 5", value: 20 },
+            { name: "25 - Users: 12, Files: 6", value: 25 },
+            { name: "30 - Users: 15, Files: 7", value: 30 },
+            { name: "35 - Users: 17, Files: 8", value: 35 },
+            { name: "40 - Users: 20, Files: 10", value: 40 },
+            { name: "45 - Users: 22, Files: 11", value: 45 },
+            { name: "50 - Users: 25, Files: 12", value: 50 },
+            { name: "55 - Users: 27, Files: 13", value: 55 },
+            { name: "60 - Users: 30, Files: 15", value: 60 },
+            { name: "65 - Users: 32, Files: 16", value: 65 },
+            { name: "70 - Users: 35, Files: 17", value: 70 },
+            { name: "75 - Users: 37, Files: 18", value: 75 },
+            { name: "80 - Users: 40, Files: 20", value: 80 },
+            { name: "85 - Users: 42, Files: 21", value: 85 },
+            { name: "90 - Users: 45, Files: 22", value: 90 },
+            { name: "95 - Users: 47, Files: 23", value: 95 },
+            { name: "100 (Aggressive) - Users: 50, Files: 25", value: 100 },
+          ],
+          default: 10,
+        },
+        {
+          type: "confirm",
+          name: "dryRun",
+          message: "Run in dry-run mode (no actual changes)?",
+          default: false,
+        },
+      ]);
+
+      // Confirmation
+      const { confirmed } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirmed",
+          message: `Are you sure you want to ${transferOptions.dryRun ? "dry-run" : "perform"} comprehensive transfer from ${sourceConfig.sourceEndpoint} to ${targetConfig.targetEndpoint}?`,
+          default: false,
+        },
+      ]);
+
+      if (!confirmed) {
+        MessageFormatter.info("Transfer cancelled by user", { prefix: "Transfer" });
+        return;
+      }
+
+      // Important password warning
+      if (transferOptions.transferTypes.includes("users") && !transferOptions.dryRun) {
+        MessageFormatter.warning("IMPORTANT: User passwords cannot be transferred due to Appwrite security limitations.", { prefix: "Transfer" });
+        MessageFormatter.warning("Users will need to reset their passwords after transfer.", { prefix: "Transfer" });
+        
+        const { continueWithUsers } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "continueWithUsers",
+            message: "Continue with user transfer knowing passwords will be reset?",
+            default: false,
+          },
+        ]);
+
+        if (!continueWithUsers) {
+          // Remove users from transfer types
+          transferOptions.transferTypes = transferOptions.transferTypes.filter((type: string) => type !== "users");
+          if (transferOptions.transferTypes.length === 0) {
+            MessageFormatter.info("No transfer types selected, cancelling", { prefix: "Transfer" });
+            return;
+          }
+        }
+      }
+
+      // Execute comprehensive transfer
+      const comprehensiveTransferOptions: ComprehensiveTransferOptions = {
+        sourceEndpoint: sourceConfig.sourceEndpoint,
+        sourceProject: sourceConfig.sourceProject,
+        sourceKey: sourceConfig.sourceKey,
+        targetEndpoint: targetConfig.targetEndpoint,
+        targetProject: targetConfig.targetProject,
+        targetKey: targetConfig.targetKey,
+        transferUsers: transferOptions.transferTypes.includes("users"),
+        transferDatabases: transferOptions.transferTypes.includes("databases"),
+        transferBuckets: transferOptions.transferTypes.includes("buckets"),
+        transferFunctions: transferOptions.transferTypes.includes("functions"),
+        concurrencyLimit: transferOptions.concurrencyLimit,
+        dryRun: transferOptions.dryRun,
+      };
+
+      const transfer = new ComprehensiveTransfer(comprehensiveTransferOptions);
+      const results = await transfer.execute();
+
+      // Display results
+      if (transferOptions.dryRun) {
+        MessageFormatter.success("Dry run completed successfully!", { prefix: "Transfer" });
+      } else {
+        MessageFormatter.success("Comprehensive transfer completed!", { prefix: "Transfer" });
+        if (transferOptions.transferTypes.includes("users") && results.users.transferred > 0) {
+          MessageFormatter.info("Remember to notify users about password reset requirements", { prefix: "Transfer" });
+        }
+      }
+
+    } catch (error) {
+      MessageFormatter.error("Comprehensive transfer failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
     }
   }
 }
