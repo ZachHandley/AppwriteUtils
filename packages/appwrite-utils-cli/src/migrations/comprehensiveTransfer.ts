@@ -68,6 +68,7 @@ export class ComprehensiveTransfer {
   private results: TransferResults;
   private startTime: number;
   private tempDir: string;
+  private cachedMaxFileSize?: number; // Cache successful maximumFileSize for subsequent buckets
 
   constructor(private options: ComprehensiveTransferOptions) {
     this.sourceClient = getClient(
@@ -408,39 +409,29 @@ export class ComprehensiveTransfer {
     MessageFormatter.info("Starting bucket transfer phase", { prefix: "Transfer" });
 
     try {
-      const sourceBuckets = await this.sourceStorage.listBuckets();
-      const targetBuckets = await this.targetStorage.listBuckets();
+      // Get all buckets from source with pagination
+      const allSourceBuckets = await this.fetchAllBuckets(this.sourceStorage);
+      const allTargetBuckets = await this.fetchAllBuckets(this.targetStorage);
 
       if (this.options.dryRun) {
         let totalFiles = 0;
-        for (const bucket of sourceBuckets.buckets) {
+        for (const bucket of allSourceBuckets) {
           const files = await this.sourceStorage.listFiles(bucket.$id, [Query.limit(1)]);
           totalFiles += files.total;
         }
-        MessageFormatter.info(`DRY RUN: Would transfer ${sourceBuckets.buckets.length} buckets with ${totalFiles} files`, { prefix: "Transfer" });
+        MessageFormatter.info(`DRY RUN: Would transfer ${allSourceBuckets.length} buckets with ${totalFiles} files`, { prefix: "Transfer" });
         return;
       }
 
-      const transferTasks = sourceBuckets.buckets.map(bucket => 
+      const transferTasks = allSourceBuckets.map(bucket => 
         this.limit(async () => {
           try {
             // Check if bucket exists in target
-            const existingBucket = targetBuckets.buckets.find(tb => tb.$id === bucket.$id);
+            const existingBucket = allTargetBuckets.find(tb => tb.$id === bucket.$id);
             
             if (!existingBucket) {
-              // Create bucket in target
-              await this.targetStorage.createBucket(
-                bucket.$id,
-                bucket.name,
-                bucket.$permissions,
-                bucket.fileSecurity,
-                bucket.enabled,
-                bucket.maximumFileSize,
-                bucket.allowedFileExtensions,
-                bucket.compression as any,
-                bucket.encryption,
-                bucket.antivirus
-              );
+              // Create bucket with fallback strategy for maximumFileSize
+              await this.createBucketWithFallback(bucket);
               MessageFormatter.success(`Created bucket: ${bucket.name}`, { prefix: "Transfer" });
             }
 
@@ -461,6 +452,152 @@ export class ComprehensiveTransfer {
     } catch (error) {
       MessageFormatter.error("Bucket transfer phase failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
     }
+  }
+
+  private async createBucketWithFallback(bucket: Models.Bucket): Promise<void> {
+    // Determine the optimal size to try first
+    let sizeToTry: number;
+    
+    if (this.cachedMaxFileSize) {
+      // Use cached size if it's smaller than or equal to the bucket's original size
+      if (bucket.maximumFileSize >= this.cachedMaxFileSize) {
+        sizeToTry = this.cachedMaxFileSize;
+        MessageFormatter.info(
+          `Bucket ${bucket.name}: Using cached maximumFileSize ${sizeToTry} (${(sizeToTry / 1_000_000_000).toFixed(1)}GB)`,
+          { prefix: "Transfer" }
+        );
+      } else {
+        // Original size is smaller than cached size, try original first
+        sizeToTry = bucket.maximumFileSize;
+      }
+    } else {
+      // No cached size yet, try original size first
+      sizeToTry = bucket.maximumFileSize;
+    }
+
+    // Try the optimal size first
+    try {
+      await this.targetStorage.createBucket(
+        bucket.$id,
+        bucket.name,
+        bucket.$permissions,
+        bucket.fileSecurity,
+        bucket.enabled,
+        sizeToTry,
+        bucket.allowedFileExtensions,
+        bucket.compression as any,
+        bucket.encryption,
+        bucket.antivirus
+      );
+      
+      // Success - cache this size if it's not already cached or is smaller than cached
+      if (!this.cachedMaxFileSize || sizeToTry < this.cachedMaxFileSize) {
+        this.cachedMaxFileSize = sizeToTry;
+        MessageFormatter.info(
+          `Bucket ${bucket.name}: Cached successful maximumFileSize ${sizeToTry} (${(sizeToTry / 1_000_000_000).toFixed(1)}GB)`,
+          { prefix: "Transfer" }
+        );
+      }
+      
+      // Log if we used a different size than original
+      if (sizeToTry !== bucket.maximumFileSize) {
+        MessageFormatter.warning(
+          `Bucket ${bucket.name}: maximumFileSize used ${sizeToTry} instead of original ${bucket.maximumFileSize} (${(sizeToTry / 1_000_000_000).toFixed(1)}GB)`,
+          { prefix: "Transfer" }
+        );
+      }
+      
+      return; // Success, exit the function
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      
+      // Check if the error is related to maximumFileSize validation
+      if (err.message.includes('maximumFileSize') || err.message.includes('valid range')) {
+        MessageFormatter.warning(
+          `Bucket ${bucket.name}: Failed with maximumFileSize ${sizeToTry}, falling back to smaller sizes...`,
+          { prefix: "Transfer" }
+        );
+        // Continue to fallback logic below
+      } else {
+        // Different error, don't retry
+        throw err;
+      }
+    }
+
+    // Fallback to progressively smaller sizes
+    const fallbackSizes = [
+      5_000_000_000, // 5GB
+      2_500_000_000, // 2.5GB
+      2_000_000_000, // 2GB
+      1_000_000_000, // 1GB
+      500_000_000,   // 500MB
+      100_000_000    // 100MB
+    ];
+
+    // Remove sizes that are larger than or equal to the already-tried size
+    const validSizes = fallbackSizes
+      .filter(size => size < sizeToTry)
+      .sort((a, b) => b - a); // Sort descending
+
+    let lastError: Error | null = null;
+    
+    for (const fileSize of validSizes) {
+      try {
+        await this.targetStorage.createBucket(
+          bucket.$id,
+          bucket.name,
+          bucket.$permissions,
+          bucket.fileSecurity,
+          bucket.enabled,
+          fileSize,
+          bucket.allowedFileExtensions,
+          bucket.compression as any,
+          bucket.encryption,
+          bucket.antivirus
+        );
+        
+        // Success - cache this size if it's not already cached or is smaller than cached
+        if (!this.cachedMaxFileSize || fileSize < this.cachedMaxFileSize) {
+          this.cachedMaxFileSize = fileSize;
+          MessageFormatter.info(
+            `Bucket ${bucket.name}: Cached successful maximumFileSize ${fileSize} (${(fileSize / 1_000_000_000).toFixed(1)}GB)`,
+            { prefix: "Transfer" }
+          );
+        }
+        
+        // Log if we had to reduce the file size
+        if (fileSize !== bucket.maximumFileSize) {
+          MessageFormatter.warning(
+            `Bucket ${bucket.name}: maximumFileSize reduced from ${bucket.maximumFileSize} to ${fileSize} (${(fileSize / 1_000_000_000).toFixed(1)}GB)`,
+            { prefix: "Transfer" }
+          );
+        }
+        
+        return; // Success, exit the function
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        // Check if the error is related to maximumFileSize validation
+        if (lastError.message.includes('maximumFileSize') || lastError.message.includes('valid range')) {
+          MessageFormatter.warning(
+            `Bucket ${bucket.name}: Failed with maximumFileSize ${fileSize}, trying smaller size...`,
+            { prefix: "Transfer" }
+          );
+          continue; // Try next smaller size
+        } else {
+          // Different error, don't retry
+          throw lastError;
+        }
+      }
+    }
+    
+    // If we get here, all fallback sizes failed
+    MessageFormatter.error(
+      `Bucket ${bucket.name}: All fallback file sizes failed. Last error: ${lastError?.message}`,
+      lastError || undefined,
+      { prefix: "Transfer" }
+    );
+    throw lastError || new Error('All fallback file sizes failed');
   }
 
   private async transferBucketFiles(sourceBucketId: string, targetBucketId: string): Promise<void> {
@@ -674,6 +811,37 @@ export class ComprehensiveTransfer {
     }
 
     return collections;
+  }
+
+  /**
+   * Helper method to fetch all buckets with pagination
+   */
+  private async fetchAllBuckets(storage: Storage): Promise<Models.Bucket[]> {
+    const buckets: Models.Bucket[] = [];
+    let lastId: string | undefined;
+
+    while (true) {
+      const queries = [Query.limit(100)];
+      if (lastId) {
+        queries.push(Query.cursorAfter(lastId));
+      }
+
+      const result = await tryAwaitWithRetry(async () => storage.listBuckets(queries));
+      
+      if (result.buckets.length === 0) {
+        break;
+      }
+
+      buckets.push(...result.buckets);
+      
+      if (result.buckets.length < 100) {
+        break;
+      }
+      
+      lastId = result.buckets[result.buckets.length - 1].$id;
+    }
+
+    return buckets;
   }
 
   /**
