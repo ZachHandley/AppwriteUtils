@@ -114,8 +114,7 @@ export const createOrUpdateAttribute = async (
   
   try {
     const collectionAttr = collection.attributes.find(
-      // @ts-expect-error - Appwrite type issues
-      (attr) => attr.key === attribute.key
+      (attr: any) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
     
@@ -384,8 +383,7 @@ export const deleteObsoleteAttributes = async (
   
   // Find attributes that exist in the database but not in the config
   const obsoleteAttributes = collection.attributes.filter(
-    // @ts-expect-error - Appwrite type issues
-    (attr) => !configAttributeKeys.has(attr.key)
+    (attr: any) => !configAttributeKeys.has(attr.key)
   );
 
   if (obsoleteAttributes.length === 0) {
@@ -400,16 +398,14 @@ export const deleteObsoleteAttributes = async (
     const queuedOperation: QueuedOperation = {
       type: "attribute",
       collectionId: collection.$id,
-      // @ts-expect-error - Appwrite type issues
-      attribute: { key: attr.key, type: "delete" } as Attribute,
+      attribute: { key: (attr as any).key, type: "delete" } as unknown as Attribute,
       collection,
     };
 
     const executeOperation = async () => {
       await attributeLimit(() => 
         tryAwaitWithRetry(async () => {
-          // @ts-expect-error - Appwrite type issues
-          await db.deleteAttribute(dbId, collection.$id, attr.key);
+          await db.deleteAttribute(dbId, collection.$id, (attr as any).key);
         })
       );
     };
@@ -422,8 +418,7 @@ export const deleteObsoleteAttributes = async (
     }
 
     if (verbose) {
-      // @ts-expect-error - Appwrite type issues
-      console.log(chalk.gray(`🗑️ Deleted obsolete attribute ${attr.key}`));
+      console.log(chalk.gray(`🗑️ Deleted obsolete attribute ${(attr as any).key}`));
     }
   }
 };

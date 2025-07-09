@@ -363,8 +363,7 @@ export const createOrUpdateAttribute = async (
   let finalAttribute: any = attribute;
   try {
     const collectionAttr = collection.attributes.find(
-      // @ts-expect-error
-      (attr) => attr.key === attribute.key
+      (attr: any) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
     // console.log(`Found attribute: ${JSON.stringify(foundAttribute)}`);

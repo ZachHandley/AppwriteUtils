@@ -113,12 +113,7 @@ export const createFunction = async (
     functionConfig.providerRepositoryId,
     functionConfig.providerBranch,
     functionConfig.providerSilentMode,
-    functionConfig.providerRootDirectory,
-    functionConfig.templateRepository,
-    functionConfig.templateOwner,
-    functionConfig.templateRootDirectory,
-    functionConfig.templateVersion,
-    functionConfig.specification
+    functionConfig.providerRootDirectory
   );
   return functionResponse;
 };
