@@ -701,7 +701,7 @@ const bulkUpsertDocuments = async (
   });
   
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+    const errorData: any = await response.json().catch(() => ({ message: 'Unknown error' }));
     throw new Error(`Bulk upsert failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
   }
   
@@ -733,7 +733,7 @@ const bulkCreateDocuments = async (
   });
   
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+    const errorData: any = await response.json().catch(() => ({ message: 'Unknown error' }));
     throw new Error(`Bulk create failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
   }
   
