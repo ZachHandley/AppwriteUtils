@@ -331,7 +331,9 @@ export class ComprehensiveTransfer {
           
           if (!attributesSuccess) {
             MessageFormatter.error(`Failed to create some attributes for collection ${collection.name}`, undefined, { prefix: "Transfer" });
-            // Continue with the transfer even if some attributes failed
+            MessageFormatter.error(`Skipping index creation and document transfer for collection ${collection.name} due to attribute failures`, undefined, { prefix: "Transfer" });
+            // Skip indexes and document transfer if attributes failed
+            continue;
           } else {
             MessageFormatter.success(`All attributes created successfully for collection ${collection.name}`, { prefix: "Transfer" });
           }
@@ -349,7 +351,7 @@ export class ComprehensiveTransfer {
           
           if (!indexesSuccess) {
             MessageFormatter.error(`Failed to create some indexes for collection ${collection.name}`, undefined, { prefix: "Transfer" });
-            // Continue with the transfer even if some indexes failed
+            MessageFormatter.warning(`Proceeding with document transfer despite index failures for collection ${collection.name}`, { prefix: "Transfer" });
           } else {
             MessageFormatter.success(`All indexes created successfully for collection ${collection.name}`, { prefix: "Transfer" });
           }

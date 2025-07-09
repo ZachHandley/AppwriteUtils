@@ -233,32 +233,55 @@ export const createOrUpdateIndexesWithStatusCheck = async (
 ): Promise<boolean> => {
   console.log(chalk.blue(`Creating/updating ${indexes.length} indexes with status monitoring...`));
   
-  const failedIndexes: string[] = [];
+  let indexesToProcess = [...indexes];
+  let overallRetryCount = 0;
+  const maxOverallRetries = 3;
   
-  for (const index of indexes) {
-    console.log(chalk.blue(`\n--- Processing index: ${index.key} ---`));
+  while (indexesToProcess.length > 0 && overallRetryCount < maxOverallRetries) {
+    const remainingIndexes = [...indexesToProcess];
+    indexesToProcess = []; // Reset for next iteration
     
-    const success = await createOrUpdateIndexWithStatusCheck(
-      dbId, 
-      db, 
-      collectionId, 
-      collection, 
-      index
-    );
+    console.log(chalk.blue(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${remainingIndexes.length} indexes ===`));
     
-    if (success) {
-      console.log(chalk.green(`✅ Successfully created index: ${index.key}`));
+    for (const index of remainingIndexes) {
+      console.log(chalk.blue(`\n--- Processing index: ${index.key} ---`));
       
-      // Add delay between successful indexes
-      await delay(1000);
-    } else {
-      console.log(chalk.red(`❌ Failed to create index: ${index.key}`));
-      failedIndexes.push(index.key);
+      const success = await createOrUpdateIndexWithStatusCheck(
+        dbId, 
+        db, 
+        collectionId, 
+        collection, 
+        index
+      );
+      
+      if (success) {
+        console.log(chalk.green(`✅ Successfully created index: ${index.key}`));
+        
+        // Add delay between successful indexes
+        await delay(1000);
+      } else {
+        console.log(chalk.red(`❌ Failed to create index: ${index.key}, will retry in next round`));
+        indexesToProcess.push(index); // Add back to retry list
+      }
+    }
+    
+    if (indexesToProcess.length === 0) {
+      console.log(chalk.green(`\n✅ Successfully created all ${indexes.length} indexes`));
+      return true;
+    }
+    
+    overallRetryCount++;
+    
+    if (overallRetryCount < maxOverallRetries) {
+      console.log(chalk.yellow(`\n⏳ Waiting 5 seconds before retrying ${indexesToProcess.length} failed indexes...`));
+      await delay(5000);
     }
   }
   
-  if (failedIndexes.length > 0) {
-    console.log(chalk.red(`\n❌ Failed to create ${failedIndexes.length} indexes: ${failedIndexes.join(', ')}`));
+  // If we get here, some indexes still failed after all retries
+  if (indexesToProcess.length > 0) {
+    console.log(chalk.red(`\n❌ Failed to create ${indexesToProcess.length} indexes after ${maxOverallRetries} attempts: ${indexesToProcess.map(i => i.key).join(', ')}`));
+    console.log(chalk.red(`This may indicate a fundamental issue with the index definitions or Appwrite instance`));
     return false;
   }
   

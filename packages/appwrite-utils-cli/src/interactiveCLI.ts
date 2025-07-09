@@ -2052,7 +2052,10 @@ export class InteractiveCLI {
     MessageFormatter.info("Starting comprehensive transfer configuration...", { prefix: "Transfer" });
 
     try {
-      // Initialize controller to optionally load config if available (supports both YAML and TypeScript configs)\n      await this.initControllerIfNeeded();\n      \n      // Check if user has an appwrite config for easier setup
+      // Initialize controller to optionally load config if available (supports both YAML and TypeScript configs)
+      await this.initControllerIfNeeded();
+      
+      // Check if user has an appwrite config for easier setup
       const hasAppwriteConfig = this.controller?.config?.appwriteEndpoint && 
                                this.controller?.config?.appwriteProject && 
                                this.controller?.config?.appwriteKey;
