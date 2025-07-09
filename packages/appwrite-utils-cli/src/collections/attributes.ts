@@ -849,21 +849,60 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     }
   }
 
-  // Create attributes ONE BY ONE with proper status checking and persistent retry logic
-  console.log(chalk.blue(`Creating ${attributes.length} attributes sequentially with status monitoring...`));
+  // First, get fresh collection data and determine which attributes actually need processing
+  console.log(chalk.blue(`Analyzing ${attributes.length} attributes to determine which need processing...`));
   
   let currentCollection = collection;
-  let attributesToProcess = [...attributes];
+  try {
+    currentCollection = await db.getCollection(dbId, collection.$id);
+  } catch (error) {
+    console.log(chalk.yellow(`Warning: Could not refresh collection data: ${error}`));
+  }
+  
+  const existingAttributesMap = new Map<string, Attribute>();
+  try {
+    // @ts-expect-error
+    const parsedAttributes = currentCollection.attributes.map((attr) => parseAttribute(attr));
+    parsedAttributes.forEach(attr => existingAttributesMap.set(attr.key, attr));
+  } catch (error) {
+    console.log(chalk.yellow(`Warning: Could not parse existing attributes: ${error}`));
+  }
+  
+  // Filter to only attributes that need processing (new or changed)
+  const attributesToProcess = attributes.filter(attribute => {
+    const existing = existingAttributesMap.get(attribute.key);
+    if (!existing) {
+      console.log(chalk.blue(`➕ New attribute: ${attribute.key}`));
+      return true;
+    }
+    
+    const needsUpdate = !attributesSame(existing, attribute);
+    if (needsUpdate) {
+      console.log(chalk.blue(`🔄 Changed attribute: ${attribute.key}`));
+    } else {
+      console.log(chalk.gray(`✅ Unchanged attribute: ${attribute.key} (skipping)`));
+    }
+    return needsUpdate;
+  });
+  
+  if (attributesToProcess.length === 0) {
+    console.log(chalk.green(`✅ All ${attributes.length} attributes are already up to date for collection: ${collection.name}`));
+    return true;
+  }
+  
+  console.log(chalk.blue(`Creating ${attributesToProcess.length} attributes sequentially with status monitoring...`));
+  
+  let remainingAttributes = [...attributesToProcess];
   let overallRetryCount = 0;
   const maxOverallRetries = 3;
   
-  while (attributesToProcess.length > 0 && overallRetryCount < maxOverallRetries) {
-    const remainingAttributes = [...attributesToProcess];
-    attributesToProcess = []; // Reset for next iteration
+  while (remainingAttributes.length > 0 && overallRetryCount < maxOverallRetries) {
+    const attributesToProcessThisRound = [...remainingAttributes];
+    remainingAttributes = []; // Reset for next iteration
     
-    console.log(chalk.blue(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${remainingAttributes.length} attributes ===`));
+    console.log(chalk.blue(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${attributesToProcessThisRound.length} attributes ===`));
     
-    for (const attribute of remainingAttributes) {
+    for (const attribute of attributesToProcessThisRound) {
       console.log(chalk.blue(`\n--- Processing attribute: ${attribute.key} ---`));
       
       const success = await createOrUpdateAttributeWithStatusCheck(
@@ -887,12 +926,12 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         await delay(1000);
       } else {
         console.log(chalk.red(`❌ Failed to create attribute: ${attribute.key}, will retry in next round`));
-        attributesToProcess.push(attribute); // Add back to retry list
+        remainingAttributes.push(attribute); // Add back to retry list
       }
     }
     
-    if (attributesToProcess.length === 0) {
-      console.log(chalk.green(`\n✅ Successfully created all ${attributes.length} attributes for collection: ${collection.name}`));
+    if (remainingAttributes.length === 0) {
+      console.log(chalk.green(`\n✅ Successfully created all ${attributesToProcess.length} attributes for collection: ${collection.name}`));
       return true;
     }
     

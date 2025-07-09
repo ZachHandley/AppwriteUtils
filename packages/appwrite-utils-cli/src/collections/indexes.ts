@@ -98,44 +98,6 @@ const waitForIndexAvailable = async (
   return false;
 };
 
-/**
- * Delete collection and recreate for index retry (reused from attributes.ts)
- */
-const deleteAndRecreateCollectionForIndex = async (
-  db: Databases,
-  dbId: string,
-  collection: Models.Collection,
-  retryCount: number
-): Promise<Models.Collection | null> => {
-  try {
-    console.log(chalk.yellow(`🗑️ Deleting collection '${collection.name}' for index retry ${retryCount}`));
-    
-    // Delete the collection
-    await db.deleteCollection(dbId, collection.$id);
-    console.log(chalk.yellow(`Deleted collection '${collection.name}'`));
-    
-    // Wait a bit before recreating
-    await delay(2000);
-    
-    // Recreate the collection
-    console.log(chalk.blue(`🔄 Recreating collection '${collection.name}'`));
-    const newCollection = await db.createCollection(
-      dbId,
-      collection.$id,
-      collection.name,
-      collection.$permissions,
-      collection.documentSecurity,
-      collection.enabled
-    );
-    
-    console.log(chalk.green(`✅ Recreated collection '${collection.name}'`));
-    return newCollection;
-    
-  } catch (error) {
-    console.log(chalk.red(`Failed to delete/recreate collection '${collection.name}': ${error}`));
-    return null;
-  }
-};
 
 /**
  * Enhanced index creation with proper status monitoring and retry logic
@@ -152,7 +114,19 @@ export const createOrUpdateIndexWithStatusCheck = async (
   console.log(chalk.blue(`Creating/updating index '${index.key}' (attempt ${retryCount + 1}/${maxRetries + 1})`));
   
   try {
-    // First, try to create/update the index using existing logic
+    // First, validate that all required attributes exist
+    const freshCollection = await db.getCollection(dbId, collectionId);
+    const existingAttributeKeys = freshCollection.attributes.map((attr: any) => attr.key);
+    
+    const missingAttributes = index.attributes.filter(attr => !existingAttributeKeys.includes(attr));
+    
+    if (missingAttributes.length > 0) {
+      console.log(chalk.red(`❌ Index '${index.key}' cannot be created: missing attributes [${missingAttributes.join(', ')}]`));
+      console.log(chalk.red(`Available attributes: [${existingAttributeKeys.join(', ')}]`));
+      return false; // Don't retry if attributes are missing
+    }
+    
+    // Try to create/update the index using existing logic
     await createOrUpdateIndex(dbId, db, collectionId, index);
     
     // Now wait for the index to become available
@@ -170,35 +144,40 @@ export const createOrUpdateIndexWithStatusCheck = async (
       return true;
     }
     
-    // If not successful and we have retries left, delete collection and try again
+    // If not successful and we have retries left, just retry the index creation
     if (retryCount < maxRetries) {
-      console.log(chalk.yellow(`Index '${index.key}' failed/stuck, retrying...`));
+      console.log(chalk.yellow(`Index '${index.key}' failed/stuck, retrying (${retryCount + 1}/${maxRetries})...`));
       
-      // Get fresh collection data
-      const freshCollection = await db.getCollection(dbId, collectionId);
+      // Wait a bit before retry
+      await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
       
-      // Delete and recreate collection
-      const newCollection = await deleteAndRecreateCollectionForIndex(db, dbId, freshCollection, retryCount + 1);
-      
-      if (newCollection) {
-        // Retry with the new collection
-        return await createOrUpdateIndexWithStatusCheck(
-          dbId, 
-          db, 
-          newCollection.$id, 
-          newCollection, 
-          index, 
-          retryCount + 1, 
-          maxRetries
-        );
-      }
+      // Retry the index creation
+      return await createOrUpdateIndexWithStatusCheck(
+        dbId, 
+        db, 
+        collectionId, 
+        collection, 
+        index, 
+        retryCount + 1, 
+        maxRetries
+      );
     }
     
     console.log(chalk.red(`❌ Failed to create index '${index.key}' after ${maxRetries + 1} attempts`));
     return false;
     
   } catch (error) {
-    console.log(chalk.red(`Error creating index '${index.key}': ${error}`));
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.log(chalk.red(`Error creating index '${index.key}': ${errorMessage}`));
+    
+    // Check if this is a permanent error that shouldn't be retried
+    if (errorMessage.includes('not found') || 
+        errorMessage.includes('missing') || 
+        errorMessage.includes('does not exist') ||
+        errorMessage.includes('attribute') && errorMessage.includes('not found')) {
+      console.log(chalk.red(`❌ Index '${index.key}' has permanent error - not retrying`));
+      return false;
+    }
     
     if (retryCount < maxRetries) {
       console.log(chalk.yellow(`Retrying index '${index.key}' due to error...`));
