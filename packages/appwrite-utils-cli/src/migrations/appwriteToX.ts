@@ -45,6 +45,18 @@ export class AppwriteToX {
     this.updatedConfig = config;
     this.storage = storage;
     this.appwriteFolderPath = appwriteFolderPath;
+    this.ensureClientInitialized();
+  }
+
+  private ensureClientInitialized() {
+    if (!this.config.appwriteClient) {
+      const client = new Client();
+      client
+        .setEndpoint(this.config.appwriteEndpoint)
+        .setProject(this.config.appwriteProject)
+        .setKey(this.config.appwriteKey);
+      this.config.appwriteClient = client;
+    }
   }
 
   // Function to parse a single permission string

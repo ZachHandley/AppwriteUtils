@@ -75,6 +75,12 @@ For a complete list of commands and options, run the help command:
 npx --package=appwrite-utils-cli@latest appwrite-migrate --help
 ```
 
+## Changelog
+
+### appwrite-utils-cli
+
+- **1.2.4**: Fixed sync functions deployment error where client was not properly initialized
+
 ### Contributing
 
 Contributions are welcome! Feel free to open a pull request or issue if you have suggestions for improvements or have encountered bugs.
