@@ -2202,6 +2202,7 @@ export class InteractiveCLI {
           message: "Select what to transfer:",
           choices: [
             { name: "👥 Users", value: "users", checked: true },
+            { name: "👥 Teams", value: "teams", checked: true },
             { name: "🗄️ Databases", value: "databases", checked: true },
             { name: "📦 Storage Buckets", value: "buckets", checked: true },
             { name: "⚡ Functions", value: "functions", checked: true },
@@ -2294,6 +2295,7 @@ export class InteractiveCLI {
         targetProject: targetConfig.targetProject,
         targetKey: targetConfig.targetKey,
         transferUsers: transferOptions.transferTypes.includes("users"),
+        transferTeams: transferOptions.transferTypes.includes("teams"),
         transferDatabases: transferOptions.transferTypes.includes("databases"),
         transferBuckets: transferOptions.transferTypes.includes("buckets"),
         transferFunctions: transferOptions.transferTypes.includes("functions"),
@@ -2312,6 +2314,9 @@ export class InteractiveCLI {
         if (transferOptions.transferTypes.includes("users") && results.users.transferred > 0) {
           MessageFormatter.info("Users with preserved password hashes can log in with their original passwords", { prefix: "Transfer" });
           MessageFormatter.info("Users with temporary passwords will need to reset their passwords", { prefix: "Transfer" });
+        }
+        if (transferOptions.transferTypes.includes("teams") && results.teams.transferred > 0) {
+          MessageFormatter.info("Team memberships have been transferred and may require user acceptance of invitations", { prefix: "Transfer" });
         }
       }
 

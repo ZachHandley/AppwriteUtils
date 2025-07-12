@@ -77,8 +77,13 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate --help
 
 ## Changelog
 
+### appwrite-utils
+
+- **1.2.0**: Added node-22.0 runtime support and enabled passthrough for unknown runtime values
+
 ### appwrite-utils-cli
 
+- **1.2.5**: Updated dependency to appwrite-utils ^1.2.0 for node-22 runtime support
 - **1.2.4**: Fixed sync functions deployment error where client was not properly initialized
 
 ### Contributing

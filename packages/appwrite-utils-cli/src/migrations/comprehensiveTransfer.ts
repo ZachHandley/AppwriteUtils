@@ -1,10 +1,11 @@
-import { converterFunctions, tryAwaitWithRetry, parseAttribute } from "appwrite-utils";
+import { converterFunctions, tryAwaitWithRetry, parseAttribute, objectNeedsUpdate } from "appwrite-utils";
 import {
   Client,
   Databases,
   Storage,
   Users,
   Functions,
+  Teams,
   type Models,
   Query,
 } from "node-appwrite";
@@ -36,6 +37,7 @@ export interface ComprehensiveTransferOptions {
   targetProject: string;
   targetKey: string;
   transferUsers?: boolean;
+  transferTeams?: boolean;
   transferDatabases?: boolean;
   transferBuckets?: boolean;
   transferFunctions?: boolean;
@@ -45,6 +47,7 @@ export interface ComprehensiveTransferOptions {
 
 export interface TransferResults {
   users: { transferred: number; skipped: number; failed: number };
+  teams: { transferred: number; skipped: number; failed: number };
   databases: { transferred: number; skipped: number; failed: number };
   buckets: { transferred: number; skipped: number; failed: number };
   functions: { transferred: number; skipped: number; failed: number };
@@ -56,6 +59,8 @@ export class ComprehensiveTransfer {
   private targetClient: Client;
   private sourceUsers: Users;
   private targetUsers: Users;
+  private sourceTeams: Teams;
+  private targetTeams: Teams;
   private sourceDatabases: Databases;
   private targetDatabases: Databases;
   private sourceStorage: Storage;
@@ -84,6 +89,8 @@ export class ComprehensiveTransfer {
 
     this.sourceUsers = new Users(this.sourceClient);
     this.targetUsers = new Users(this.targetClient);
+    this.sourceTeams = new Teams(this.sourceClient);
+    this.targetTeams = new Teams(this.targetClient);
     this.sourceDatabases = new Databases(this.sourceClient);
     this.targetDatabases = new Databases(this.targetClient);
     this.sourceStorage = new Storage(this.sourceClient);
@@ -101,6 +108,7 @@ export class ComprehensiveTransfer {
     this.fileLimit = pLimit(Math.max(1, Math.floor(baseLimit / 4)));
     this.results = {
       users: { transferred: 0, skipped: 0, failed: 0 },
+      teams: { transferred: 0, skipped: 0, failed: 0 },
       databases: { transferred: 0, skipped: 0, failed: 0 },
       buckets: { transferred: 0, skipped: 0, failed: 0 },
       functions: { transferred: 0, skipped: 0, failed: 0 },
@@ -133,6 +141,10 @@ export class ComprehensiveTransfer {
       // Execute transfers in the correct order
       if (this.options.transferUsers !== false) {
         await this.transferAllUsers();
+      }
+
+      if (this.options.transferTeams !== false) {
+        await this.transferAllTeams();
       }
 
       if (this.options.transferDatabases !== false) {
@@ -190,6 +202,80 @@ export class ComprehensiveTransfer {
     } catch (error) {
       MessageFormatter.error("User transfer failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
       this.results.users.failed = 1;
+    }
+  }
+
+  private async transferAllTeams(): Promise<void> {
+    MessageFormatter.info("Starting team transfer phase", { prefix: "Transfer" });
+
+    try {
+      // Fetch all teams from source with pagination
+      const allSourceTeams = await this.fetchAllTeams(this.sourceTeams);
+      const allTargetTeams = await this.fetchAllTeams(this.targetTeams);
+
+      if (this.options.dryRun) {
+        let totalMemberships = 0;
+        for (const team of allSourceTeams) {
+          const memberships = await this.sourceTeams.listMemberships(team.$id, [Query.limit(1)]);
+          totalMemberships += memberships.total;
+        }
+        MessageFormatter.info(`DRY RUN: Would transfer ${allSourceTeams.length} teams with ${totalMemberships} memberships`, { prefix: "Transfer" });
+        return;
+      }
+
+      const transferTasks = allSourceTeams.map(team => 
+        this.limit(async () => {
+          try {
+            // Check if team exists in target
+            const existingTeam = allTargetTeams.find(tt => tt.$id === team.$id);
+            
+            if (!existingTeam) {
+              // Fetch all memberships to extract unique roles before creating team
+              MessageFormatter.info(`Fetching memberships for team ${team.name} to extract roles`, { prefix: "Transfer" });
+              const memberships = await this.fetchAllMemberships(team.$id);
+              
+              // Extract unique roles from all memberships
+              const allRoles = new Set<string>();
+              memberships.forEach(membership => {
+                membership.roles.forEach(role => allRoles.add(role));
+              });
+              const uniqueRoles = Array.from(allRoles);
+              
+              MessageFormatter.info(`Found ${uniqueRoles.length} unique roles for team ${team.name}: ${uniqueRoles.join(', ')}`, { prefix: "Transfer" });
+              
+              // Create team in target with the collected roles
+              await this.targetTeams.create(
+                team.$id,
+                team.name,
+                uniqueRoles
+              );
+              MessageFormatter.success(`Created team: ${team.name} with roles: ${uniqueRoles.join(', ')}`, { prefix: "Transfer" });
+            } else {
+              MessageFormatter.info(`Team ${team.name} already exists, updating if needed`, { prefix: "Transfer" });
+              
+              // Update team if needed
+              if (existingTeam.name !== team.name) {
+                await this.targetTeams.updateName(team.$id, team.name);
+                MessageFormatter.success(`Updated team name: ${team.name}`, { prefix: "Transfer" });
+              }
+            }
+
+            // Transfer team memberships
+            await this.transferTeamMemberships(team.$id);
+
+            this.results.teams.transferred++;
+            MessageFormatter.success(`Team ${team.name} transferred successfully`, { prefix: "Transfer" });
+          } catch (error) {
+            MessageFormatter.error(`Team ${team.name} transfer failed`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+            this.results.teams.failed++;
+          }
+        })
+      );
+
+      await Promise.all(transferTasks);
+      MessageFormatter.success("Team transfer phase completed", { prefix: "Transfer" });
+    } catch (error) {
+      MessageFormatter.error("Team transfer phase failed", error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
     }
   }
 
@@ -433,6 +519,45 @@ export class ComprehensiveTransfer {
               // Create bucket with fallback strategy for maximumFileSize
               await this.createBucketWithFallback(bucket);
               MessageFormatter.success(`Created bucket: ${bucket.name}`, { prefix: "Transfer" });
+            } else {
+              // Compare bucket permissions and update if needed
+              const sourcePermissions = JSON.stringify(bucket.$permissions?.sort() || []);
+              const targetPermissions = JSON.stringify(existingBucket.$permissions?.sort() || []);
+              
+              if (sourcePermissions !== targetPermissions ||
+                  existingBucket.name !== bucket.name ||
+                  existingBucket.fileSecurity !== bucket.fileSecurity ||
+                  existingBucket.enabled !== bucket.enabled) {
+                
+                MessageFormatter.warning(
+                  `Bucket ${bucket.name} exists but has different settings. Updating to match source.`, 
+                  { prefix: "Transfer" }
+                );
+                
+                try {
+                  await this.targetStorage.updateBucket(
+                    bucket.$id,
+                    bucket.name,
+                    bucket.$permissions,
+                    bucket.fileSecurity,
+                    bucket.enabled,
+                    bucket.maximumFileSize,
+                    bucket.allowedFileExtensions,
+                    bucket.compression as any,
+                    bucket.encryption,
+                    bucket.antivirus
+                  );
+                  MessageFormatter.success(`Updated bucket ${bucket.name} to match source`, { prefix: "Transfer" });
+                } catch (updateError) {
+                  MessageFormatter.error(
+                    `Failed to update bucket ${bucket.name}`, 
+                    updateError instanceof Error ? updateError : new Error(String(updateError)), 
+                    { prefix: "Transfer" }
+                  );
+                }
+              } else {
+                MessageFormatter.info(`Bucket ${bucket.name} already exists with matching settings`, { prefix: "Transfer" });
+              }
             }
 
             // Transfer bucket files with enhanced validation
@@ -617,10 +742,40 @@ export class ComprehensiveTransfer {
       const fileTasks = files.files.map(file => 
         this.fileLimit(async () => {
           try {
-            // Check if file already exists
+            // Check if file already exists and compare permissions
+            let existingFile: Models.File | null = null;
             try {
-              await this.targetStorage.getFile(targetBucketId, file.$id);
-              MessageFormatter.info(`File ${file.name} already exists, skipping`, { prefix: "Transfer" });
+              existingFile = await this.targetStorage.getFile(targetBucketId, file.$id);
+              
+              // Compare permissions between source and target file
+              const sourcePermissions = JSON.stringify(file.$permissions?.sort() || []);
+              const targetPermissions = JSON.stringify(existingFile.$permissions?.sort() || []);
+              
+              if (sourcePermissions !== targetPermissions) {
+                MessageFormatter.warning(
+                  `File ${file.name} (${file.$id}) exists but has different permissions. Source: ${sourcePermissions}, Target: ${targetPermissions}`, 
+                  { prefix: "Transfer" }
+                );
+                
+                // Update file permissions to match source
+                try {
+                  await this.targetStorage.updateFile(
+                    targetBucketId,
+                    file.$id,
+                    file.name,
+                    file.$permissions
+                  );
+                  MessageFormatter.success(`Updated file ${file.name} permissions to match source`, { prefix: "Transfer" });
+                } catch (updateError) {
+                  MessageFormatter.error(
+                    `Failed to update permissions for file ${file.name}`, 
+                    updateError instanceof Error ? updateError : new Error(String(updateError)), 
+                    { prefix: "Transfer" }
+                  );
+                }
+              } else {
+                MessageFormatter.info(`File ${file.name} already exists with matching permissions, skipping`, { prefix: "Transfer" });
+              }
               return;
             } catch (error) {
               // File doesn't exist, proceed with transfer
@@ -912,7 +1067,7 @@ export class ComprehensiveTransfer {
   }
 
   /**
-   * Helper method to transfer documents between databases
+   * Helper method to transfer documents between databases using bulk operations with content and permission-based filtering
    */
   private async transferDocumentsBetweenDatabases(
     sourceDb: Databases,
@@ -922,69 +1077,568 @@ export class ComprehensiveTransfer {
     sourceCollectionId: string,
     targetCollectionId: string
   ): Promise<void> {
-    MessageFormatter.info(`Transferring documents from ${sourceCollectionId} to ${targetCollectionId}`, { prefix: "Transfer" });
+    MessageFormatter.info(`Transferring documents from ${sourceCollectionId} to ${targetCollectionId} with bulk operations, content comparison, and permission filtering`, { prefix: "Transfer" });
 
     let lastId: string | undefined;
     let totalTransferred = 0;
+    let totalSkipped = 0;
+    let totalUpdated = 0;
+
+    // Check if bulk operations are supported
+    const supportsBulk = this.options.sourceEndpoint.includes('cloud.appwrite.io') || 
+                        this.options.targetEndpoint.includes('cloud.appwrite.io');
+    
+    if (supportsBulk) {
+      MessageFormatter.info(`Using bulk operations for enhanced performance`, { prefix: "Transfer" });
+    }
 
     while (true) {
-      const queries = [Query.limit(50)]; // Smaller batch size for better performance
+      // Fetch source documents in larger batches (1000 instead of 50)
+      const queries = [Query.limit(1000)];
       if (lastId) {
         queries.push(Query.cursorAfter(lastId));
       }
 
-      const documents = await tryAwaitWithRetry(async () => 
+      const sourceDocuments = await tryAwaitWithRetry(async () => 
         sourceDb.listDocuments(sourceDbId, sourceCollectionId, queries)
       );
 
-      if (documents.documents.length === 0) {
+      if (sourceDocuments.documents.length === 0) {
         break;
       }
 
-      // Transfer documents with rate limiting
-      const transferTasks = documents.documents.map(doc => 
-        this.limit(async () => {
+      MessageFormatter.info(`Processing batch of ${sourceDocuments.documents.length} source documents`, { prefix: "Transfer" });
+
+      // Extract document IDs from the current batch
+      const sourceDocIds = sourceDocuments.documents.map(doc => doc.$id);
+      
+      // Fetch existing documents from target in a single query
+      const existingTargetDocs = await this.fetchTargetDocumentsBatch(
+        targetDb, 
+        targetDbId, 
+        targetCollectionId, 
+        sourceDocIds
+      );
+
+      // Create a map for quick lookup of existing documents
+      const existingDocsMap = new Map<string, Models.Document>();
+      existingTargetDocs.forEach(doc => {
+        existingDocsMap.set(doc.$id, doc);
+      });
+
+      // Filter documents based on existence, content comparison, and permission comparison
+      const documentsToTransfer: Models.Document[] = [];
+      const documentsToUpdate: { doc: Models.Document; targetDoc: Models.Document; reason: string }[] = [];
+
+      for (const sourceDoc of sourceDocuments.documents) {
+        const existingTargetDoc = existingDocsMap.get(sourceDoc.$id);
+        
+        if (!existingTargetDoc) {
+          // Document doesn't exist in target, needs to be transferred
+          documentsToTransfer.push(sourceDoc);
+        } else {
+          // Document exists, compare both content and permissions
+          const sourcePermissions = JSON.stringify((sourceDoc.$permissions || []).sort());
+          const targetPermissions = JSON.stringify((existingTargetDoc.$permissions || []).sort());
+          const permissionsDiffer = sourcePermissions !== targetPermissions;
+          
+          // Use objectNeedsUpdate to compare document content (excluding system fields)
+          const contentDiffers = objectNeedsUpdate(existingTargetDoc, sourceDoc);
+          
+          if (contentDiffers && permissionsDiffer) {
+            // Both content and permissions differ
+            documentsToUpdate.push({ 
+              doc: sourceDoc, 
+              targetDoc: existingTargetDoc, 
+              reason: "content and permissions differ"
+            });
+            MessageFormatter.info(
+              `Document ${sourceDoc.$id} exists but content and permissions differ - will update`, 
+              { prefix: "Transfer" }
+            );
+          } else if (contentDiffers) {
+            // Only content differs
+            documentsToUpdate.push({ 
+              doc: sourceDoc, 
+              targetDoc: existingTargetDoc, 
+              reason: "content differs"
+            });
+            MessageFormatter.info(
+              `Document ${sourceDoc.$id} exists but content differs - will update`, 
+              { prefix: "Transfer" }
+            );
+          } else if (permissionsDiffer) {
+            // Only permissions differ
+            documentsToUpdate.push({ 
+              doc: sourceDoc, 
+              targetDoc: existingTargetDoc, 
+              reason: "permissions differ"
+            });
+            MessageFormatter.info(
+              `Document ${sourceDoc.$id} exists but permissions differ - will update`, 
+              { prefix: "Transfer" }
+            );
+          } else {
+            // Document exists with identical content AND permissions, skip
+            totalSkipped++;
+            MessageFormatter.info(`Document ${sourceDoc.$id} exists with matching content and permissions - skipping`, { prefix: "Transfer" });
+          }
+        }
+      }
+
+      MessageFormatter.info(
+        `Batch analysis: ${documentsToTransfer.length} to create, ${documentsToUpdate.length} to update, ${totalSkipped} skipped so far`, 
+        { prefix: "Transfer" }
+      );
+
+      // Process new documents with bulk operations if supported and available
+      if (documentsToTransfer.length > 0) {
+        if (supportsBulk && documentsToTransfer.length >= 10) {
+          // Use bulk operations for large batches
+          await this.transferDocumentsBulk(
+            targetDb,
+            targetDbId,
+            targetCollectionId,
+            documentsToTransfer
+          );
+          totalTransferred += documentsToTransfer.length;
+          MessageFormatter.success(`Bulk transferred ${documentsToTransfer.length} new documents`, { prefix: "Transfer" });
+        } else {
+          // Use individual transfers for smaller batches or non-bulk endpoints
+          const transferCount = await this.transferDocumentsIndividual(
+            targetDb,
+            targetDbId,
+            targetCollectionId,
+            documentsToTransfer
+          );
+          totalTransferred += transferCount;
+        }
+      }
+
+      // Process document updates (always individual since bulk update with permissions needs special handling)
+      if (documentsToUpdate.length > 0) {
+        const updateCount = await this.updateDocumentsIndividual(
+          targetDb,
+          targetDbId,
+          targetCollectionId,
+          documentsToUpdate
+        );
+        totalUpdated += updateCount;
+      }
+
+      if (sourceDocuments.documents.length < 1000) {
+        break;
+      }
+
+      lastId = sourceDocuments.documents[sourceDocuments.documents.length - 1].$id;
+    }
+
+    MessageFormatter.info(
+      `Transfer complete: ${totalTransferred} new, ${totalUpdated} updated, ${totalSkipped} skipped from ${sourceCollectionId} to ${targetCollectionId}`, 
+      { prefix: "Transfer" }
+    );
+  }
+
+  /**
+   * Fetch target documents by IDs in batches to check existence and permissions
+   */
+  private async fetchTargetDocumentsBatch(
+    targetDb: Databases,
+    targetDbId: string,
+    targetCollectionId: string,
+    docIds: string[]
+  ): Promise<Models.Document[]> {
+    const documents: Models.Document[] = [];
+    
+    // Split IDs into chunks of 100 for Query.equal limitations
+    const idChunks = this.chunkArray(docIds, 100);
+    
+    for (const chunk of idChunks) {
+      try {
+        const result = await tryAwaitWithRetry(async () => 
+          targetDb.listDocuments(targetDbId, targetCollectionId, [
+            Query.equal('$id', chunk),
+            Query.limit(100)
+          ])
+        );
+        documents.push(...result.documents);
+      } catch (error) {
+        // If query fails, fall back to individual gets (less efficient but more reliable)
+        MessageFormatter.warning(
+          `Batch query failed for ${chunk.length} documents, falling back to individual checks`, 
+          { prefix: "Transfer" }
+        );
+        
+        for (const docId of chunk) {
           try {
-            // Check if document already exists
+            const doc = await targetDb.getDocument(targetDbId, targetCollectionId, docId);
+            documents.push(doc);
+          } catch (getError) {
+            // Document doesn't exist, which is fine
+          }
+        }
+      }
+    }
+    
+    return documents;
+  }
+
+  /**
+   * Transfer documents using bulk operations with proper batch size handling
+   */
+  private async transferDocumentsBulk(
+    targetDb: Databases,
+    targetDbId: string,
+    targetCollectionId: string,
+    documents: Models.Document[]
+  ): Promise<void> {
+    // Prepare documents for bulk upsert
+    const preparedDocs = documents.map(doc => {
+      const { $id, $createdAt, $updatedAt, $permissions, $databaseId, $collectionId, ...docData } = doc;
+      return {
+        $id,
+        $permissions,
+        ...docData
+      };
+    });
+
+    // Process in smaller chunks for bulk operations (1000 for Pro, 100 for Free tier)
+    const batchSizes = [1000, 100]; // Start with Pro plan, fallback to Free
+    let processed = false;
+
+    for (const maxBatchSize of batchSizes) {
+      const documentBatches = this.chunkArray(preparedDocs, maxBatchSize);
+      
+      try {
+        for (const batch of documentBatches) {
+          MessageFormatter.info(`Bulk upserting ${batch.length} documents...`, { prefix: "Transfer" });
+          
+          await this.bulkUpsertDocuments(
+            this.targetClient,
+            targetDbId,
+            targetCollectionId,
+            batch
+          );
+          
+          MessageFormatter.success(`✅ Bulk upserted ${batch.length} documents`, { prefix: "Transfer" });
+          
+          // Add delay between batches to respect rate limits
+          if (documentBatches.indexOf(batch) < documentBatches.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        }
+        
+        processed = true;
+        break; // Success, exit batch size loop
+      } catch (error) {
+        MessageFormatter.warning(
+          `Bulk upsert with batch size ${maxBatchSize} failed, trying smaller size...`, 
+          { prefix: "Transfer" }
+        );
+        continue; // Try next smaller batch size
+      }
+    }
+
+    if (!processed) {
+      MessageFormatter.warning(
+        `All bulk operations failed, falling back to individual transfers`, 
+        { prefix: "Transfer" }
+      );
+      
+      // Fall back to individual transfers
+      await this.transferDocumentsIndividual(targetDb, targetDbId, targetCollectionId, documents);
+    }
+  }
+
+  /**
+   * Direct HTTP implementation of bulk upsert API
+   */
+  private async bulkUpsertDocuments(
+    client: any,
+    dbId: string,
+    collectionId: string,
+    documents: any[]
+  ): Promise<any> {
+    const apiPath = `/databases/${dbId}/collections/${collectionId}/documents`;
+    const url = new URL(client.config.endpoint + apiPath);
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Appwrite-Project': client.config.project,
+      'X-Appwrite-Key': client.config.key
+    };
+    
+    const response = await fetch(url.toString(), {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ documents })
+    });
+    
+    if (!response.ok) {
+      const errorData: any = await response.json().catch(() => ({ message: 'Unknown error' }));
+      throw new Error(`Bulk upsert failed: ${response.status} - ${errorData.message || 'Unknown error'}`);
+    }
+    
+    return await response.json();
+  }
+
+  /**
+   * Transfer documents individually with rate limiting
+   */
+  private async transferDocumentsIndividual(
+    targetDb: Databases,
+    targetDbId: string,
+    targetCollectionId: string,
+    documents: Models.Document[]
+  ): Promise<number> {
+    let successCount = 0;
+
+    const transferTasks = documents.map(doc => 
+      this.limit(async () => {
+        try {
+          const { $id, $createdAt, $updatedAt, $permissions, $databaseId, $collectionId, ...docData } = doc;
+          
+          await tryAwaitWithRetry(async () =>
+            targetDb.createDocument(
+              targetDbId,
+              targetCollectionId,
+              doc.$id,
+              docData,
+              doc.$permissions
+            )
+          );
+
+          successCount++;
+          MessageFormatter.success(`Transferred document ${doc.$id}`, { prefix: "Transfer" });
+        } catch (error) {
+          MessageFormatter.error(
+            `Failed to transfer document ${doc.$id}`, 
+            error instanceof Error ? error : new Error(String(error)), 
+            { prefix: "Transfer" }
+          );
+        }
+      })
+    );
+
+    await Promise.all(transferTasks);
+    return successCount;
+  }
+
+  /**
+   * Update documents individually with content and/or permission changes
+   */
+  private async updateDocumentsIndividual(
+    targetDb: Databases,
+    targetDbId: string,
+    targetCollectionId: string,
+    documentPairs: { doc: Models.Document; targetDoc: Models.Document; reason: string }[]
+  ): Promise<number> {
+    let successCount = 0;
+
+    const updateTasks = documentPairs.map(({ doc, targetDoc, reason }) => 
+      this.limit(async () => {
+        try {
+          const { $id, $createdAt, $updatedAt, $permissions, $databaseId, $collectionId, ...docData } = doc;
+          
+          await tryAwaitWithRetry(async () =>
+            targetDb.updateDocument(
+              targetDbId,
+              targetCollectionId,
+              doc.$id,
+              docData,
+              doc.$permissions
+            )
+          );
+
+          successCount++;
+          MessageFormatter.success(
+            `Updated document ${doc.$id} (${reason}) - permissions: [${targetDoc.$permissions?.join(', ')}] → [${doc.$permissions?.join(', ')}]`, 
+            { prefix: "Transfer" }
+          );
+        } catch (error) {
+          MessageFormatter.error(
+            `Failed to update document ${doc.$id} (${reason})`, 
+            error instanceof Error ? error : new Error(String(error)), 
+            { prefix: "Transfer" }
+          );
+        }
+      })
+    );
+
+    await Promise.all(updateTasks);
+    return successCount;
+  }
+
+  /**
+   * Utility method to chunk arrays
+   */
+  private chunkArray<T>(array: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += size) {
+      chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+  }
+
+  /**
+   * Helper method to fetch all teams with pagination
+   */
+  private async fetchAllTeams(teams: Teams): Promise<Models.Team<Models.Preferences>[]> {
+    const teamsList: Models.Team<Models.Preferences>[] = [];
+    let lastId: string | undefined;
+
+    while (true) {
+      const queries = [Query.limit(100)];
+      if (lastId) {
+        queries.push(Query.cursorAfter(lastId));
+      }
+
+      const result = await tryAwaitWithRetry(async () => teams.list(queries));
+      
+      if (result.teams.length === 0) {
+        break;
+      }
+
+      teamsList.push(...result.teams);
+      
+      if (result.teams.length < 100) {
+        break;
+      }
+      
+      lastId = result.teams[result.teams.length - 1].$id;
+    }
+
+    return teamsList;
+  }
+
+  /**
+   * Helper method to fetch all memberships for a team with pagination
+   */
+  private async fetchAllMemberships(teamId: string): Promise<Models.Membership[]> {
+    const membershipsList: Models.Membership[] = [];
+    let lastId: string | undefined;
+
+    while (true) {
+      const queries = [Query.limit(100)];
+      if (lastId) {
+        queries.push(Query.cursorAfter(lastId));
+      }
+
+      const result = await tryAwaitWithRetry(async () => 
+        this.sourceTeams.listMemberships(teamId, queries)
+      );
+      
+      if (result.memberships.length === 0) {
+        break;
+      }
+
+      membershipsList.push(...result.memberships);
+      
+      if (result.memberships.length < 100) {
+        break;
+      }
+      
+      lastId = result.memberships[result.memberships.length - 1].$id;
+    }
+
+    return membershipsList;
+  }
+
+  /**
+   * Helper method to transfer team memberships
+   */
+  private async transferTeamMemberships(teamId: string): Promise<void> {
+    MessageFormatter.info(`Transferring memberships for team ${teamId}`, { prefix: "Transfer" });
+
+    try {
+      // Fetch all memberships for this team
+      const memberships = await this.fetchAllMemberships(teamId);
+      
+      if (memberships.length === 0) {
+        MessageFormatter.info(`No memberships found for team ${teamId}`, { prefix: "Transfer" });
+        return;
+      }
+
+      MessageFormatter.info(`Found ${memberships.length} memberships for team ${teamId}`, { prefix: "Transfer" });
+
+      let totalTransferred = 0;
+
+      // Transfer memberships with rate limiting
+      const transferTasks = memberships.map(membership => 
+        this.userLimit(async () => { // Use userLimit for team operations (more sensitive)
+          try {
+            // Check if membership already exists and compare roles
+            let existingMembership: Models.Membership | null = null;
             try {
-              await targetDb.getDocument(targetDbId, targetCollectionId, doc.$id);
-              MessageFormatter.info(`Document ${doc.$id} already exists, skipping`, { prefix: "Transfer" });
+              existingMembership = await this.targetTeams.getMembership(teamId, membership.$id);
+              
+              // Compare roles between source and target membership
+              const sourceRoles = JSON.stringify(membership.roles?.sort() || []);
+              const targetRoles = JSON.stringify(existingMembership.roles?.sort() || []);
+              
+              if (sourceRoles !== targetRoles) {
+                MessageFormatter.warning(
+                  `Membership ${membership.$id} exists but has different roles. Source: ${sourceRoles}, Target: ${targetRoles}`, 
+                  { prefix: "Transfer" }
+                );
+                
+                // Update membership roles to match source
+                try {
+                  await this.targetTeams.updateMembership(
+                    teamId,
+                    membership.$id,
+                    membership.roles
+                  );
+                  MessageFormatter.success(`Updated membership ${membership.$id} roles to match source`, { prefix: "Transfer" });
+                } catch (updateError) {
+                  MessageFormatter.error(
+                    `Failed to update roles for membership ${membership.$id}`, 
+                    updateError instanceof Error ? updateError : new Error(String(updateError)), 
+                    { prefix: "Transfer" }
+                  );
+                }
+              } else {
+                MessageFormatter.info(`Membership ${membership.$id} already exists with matching roles, skipping`, { prefix: "Transfer" });
+              }
               return;
             } catch (error) {
-              // Document doesn't exist, proceed with creation
+              // Membership doesn't exist, proceed with creation
             }
 
-            // Create document in target
-            const { $id, $createdAt, $updatedAt, $permissions, $databaseId, $collectionId, ...docData } = doc;
-            
+            // Get user data from target (users should already be transferred)
+            let userData: Models.User<Record<string, any>> | null = null;
+            try {
+              userData = await this.targetUsers.get(membership.userId);
+            } catch (error) {
+              MessageFormatter.warning(`User ${membership.userId} not found in target, membership ${membership.$id} may fail`, { prefix: "Transfer" });
+            }
+
+            // Create membership using the comprehensive user data
             await tryAwaitWithRetry(async () =>
-              targetDb.createDocument(
-                targetDbId,
-                targetCollectionId,
-                doc.$id,
-                docData,
-                doc.$permissions
+              this.targetTeams.createMembership(
+                teamId,
+                membership.roles,
+                userData?.email || membership.userEmail, // Use target user email if available, fallback to membership email
+                membership.userId, // User ID
+                userData?.phone || undefined, // Use target user phone if available
+                undefined, // Invitation URL placeholder
+                userData?.name || membership.userName // Use target user name if available, fallback to membership name
               )
             );
 
             totalTransferred++;
-            MessageFormatter.success(`Transferred document ${doc.$id}`, { prefix: "Transfer" });
+            MessageFormatter.success(`Transferred membership ${membership.$id} for user ${userData?.name || membership.userName}`, { prefix: "Transfer" });
           } catch (error) {
-            MessageFormatter.error(`Failed to transfer document ${doc.$id}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+            MessageFormatter.error(`Failed to transfer membership ${membership.$id}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
           }
         })
       );
 
       await Promise.all(transferTasks);
-
-      if (documents.documents.length < 50) {
-        break;
-      }
-
-      lastId = documents.documents[documents.documents.length - 1].$id;
+      MessageFormatter.info(`Transferred ${totalTransferred} memberships for team ${teamId}`, { prefix: "Transfer" });
+    } catch (error) {
+      MessageFormatter.error(`Failed to transfer memberships for team ${teamId}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
     }
-
-    MessageFormatter.info(`Transferred ${totalTransferred} documents from ${sourceCollectionId} to ${targetCollectionId}`, { prefix: "Transfer" });
   }
 
   private printSummary(): void {
@@ -993,12 +1647,13 @@ export class ComprehensiveTransfer {
     MessageFormatter.info("=== COMPREHENSIVE TRANSFER SUMMARY ===", { prefix: "Transfer" });
     MessageFormatter.info(`Total Time: ${duration}s`, { prefix: "Transfer" });
     MessageFormatter.info(`Users: ${this.results.users.transferred} transferred, ${this.results.users.skipped} skipped, ${this.results.users.failed} failed`, { prefix: "Transfer" });
+    MessageFormatter.info(`Teams: ${this.results.teams.transferred} transferred, ${this.results.teams.skipped} skipped, ${this.results.teams.failed} failed`, { prefix: "Transfer" });
     MessageFormatter.info(`Databases: ${this.results.databases.transferred} transferred, ${this.results.databases.skipped} skipped, ${this.results.databases.failed} failed`, { prefix: "Transfer" });
     MessageFormatter.info(`Buckets: ${this.results.buckets.transferred} transferred, ${this.results.buckets.skipped} skipped, ${this.results.buckets.failed} failed`, { prefix: "Transfer" });
     MessageFormatter.info(`Functions: ${this.results.functions.transferred} transferred, ${this.results.functions.skipped} skipped, ${this.results.functions.failed} failed`, { prefix: "Transfer" });
     
-    const totalTransferred = this.results.users.transferred + this.results.databases.transferred + this.results.buckets.transferred + this.results.functions.transferred;
-    const totalFailed = this.results.users.failed + this.results.databases.failed + this.results.buckets.failed + this.results.functions.failed;
+    const totalTransferred = this.results.users.transferred + this.results.teams.transferred + this.results.databases.transferred + this.results.buckets.transferred + this.results.functions.transferred;
+    const totalFailed = this.results.users.failed + this.results.teams.failed + this.results.databases.failed + this.results.buckets.failed + this.results.functions.failed;
     
     if (totalFailed === 0) {
       MessageFormatter.success(`All ${totalTransferred} items transferred successfully!`, { prefix: "Transfer" });
