@@ -1186,12 +1186,13 @@ export class InteractiveCLI {
   private async synchronizeConfigurations(): Promise<void> {
     console.log(chalk.blue("Synchronizing configurations..."));
     await this.controller!.init();
-    // Sync databases and buckets first
+    
+    // Sync databases, collections, and buckets
     const { syncDatabases } = await inquirer.prompt([
       {
         type: "confirm",
         name: "syncDatabases",
-        message: "Do you want to synchronize databases and their buckets?",
+        message: "Do you want to synchronize databases, collections, and their buckets?",
         default: true,
       },
     ]);
@@ -1200,9 +1201,13 @@ export class InteractiveCLI {
       const remoteDatabases = await fetchAllDatabases(
         this.controller!.database!
       );
+      
+      // Use the controller's synchronizeConfigurations method which handles collections properly
+      console.log(chalk.blue("Pulling collections and generating collection files..."));
+      await this.controller!.synchronizeConfigurations(remoteDatabases);
+      
+      // Also configure buckets for any new databases
       const localDatabases = this.controller!.config?.databases || [];
-
-      // Update config with remote databases that don't exist locally
       const updatedConfig = await this.configureBuckets({
         ...this.controller!.config!,
         databases: [
@@ -1437,12 +1442,7 @@ export class InteractiveCLI {
         }
       }
 
-      // Update schemas after all changes
-      const schemaGenerator = new SchemaGenerator(
-        this.controller!.config!,
-        this.controller!.getAppwriteFolderPath()!
-      );
-      await schemaGenerator.updateConfig(this.controller!.config!);
+      // Schema generation and collection file writing is handled by controller.synchronizeConfigurations()
     }
 
     console.log(chalk.green("✨ Configurations synchronized successfully!"));

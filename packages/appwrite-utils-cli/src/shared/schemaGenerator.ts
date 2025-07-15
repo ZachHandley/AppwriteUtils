@@ -197,14 +197,18 @@ export class SchemaGenerator {
     });
   }
 
-  public async updateConfig(config: AppwriteConfig): Promise<void> {
-    // Check if user is using YAML config
-    const { findYamlConfig } = await import("../config/yamlConfig.js");
-    const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
-    
-    if (yamlConfigPath) {
-      // User has YAML config - update it and generate individual collection files
-      await this.updateYamlConfig(config, yamlConfigPath);
+  public async updateConfig(config: AppwriteConfig, isYamlConfig: boolean = false): Promise<void> {
+    if (isYamlConfig) {
+      // User has YAML config - find the config file and update it + generate individual collection files
+      const { findYamlConfig } = await import("../config/yamlConfig.js");
+      const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
+      
+      if (yamlConfigPath) {
+        await this.updateYamlConfig(config, yamlConfigPath);
+      } else {
+        console.warn("⚠️ YAML config expected but not found, falling back to TypeScript");
+        this.updateTypeScriptConfig(config);
+      }
     } else {
       // User has TypeScript config - update the TS file
       this.updateTypeScriptConfig(config);

@@ -6,6 +6,8 @@ import { z } from "zod";
  * User Management:
  * - users.read:     Access to read your project's users
  * - users.write:    Access to create, update, and delete your project's users
+ * - sessions.read:  Access to read your project's user sessions
+ * - sessions.write: Access to create, update, and delete your project's user sessions
  *
  * Team Management:
  * - teams.read:     Access to read your project's teams
@@ -51,8 +53,14 @@ import { z } from "zod";
  * - locale.read:    Access to your project's Locale service
  * - avatars.read:   Access to your project's Avatars service
  * - health.read:    Access to read your project's health status
- * - migrations.read:  Access to read your project's migrations
- * - migrations.write: Access to create, update, and delete your project's migrations
+ * - migrations.read:  Access to read your project's migration status
+ * - migrations.write: Access to create migrations
+ * - sites.read:     Access to read your project's sites and deployments
+ * - sites.write:    Access to create, update, and delete your project's sites and deployments
+ * - log.read:       Access to read your sites's logs
+ * - log.write:      Access to delete your site's logs
+ * - tokens.read:    Access to read your project's file tokens
+ * - tokens.write:   Access to create file tokens
  *
  * Infrastructure:
  * - assistant.read: Access to read the Assistant service
@@ -64,6 +72,8 @@ import { z } from "zod";
 export const FunctionScopes = z.enum([
   "users.read",
   "users.write",
+  "sessions.read",
+  "sessions.write",
   "teams.read",
   "teams.write",
   "databases.read",
@@ -91,6 +101,12 @@ export const FunctionScopes = z.enum([
   "rules.write",
   "migrations.read",
   "migrations.write",
+  "sites.read",
+  "sites.write",
+  "log.read",
+  "log.write",
+  "tokens.read",
+  "tokens.write",
   "vcs.read",
   "vcs.write",
   "assistant.read",

@@ -248,10 +248,10 @@ export const loadYamlConfig = async (configPath: string): Promise<AppwriteConfig
 export const findYamlConfig = (startDir: string): string | null => {
   // First check current directory for YAML configs
   const possiblePaths = [
-    path.join(startDir, ".appwrite", "appwriteConfig.yaml"),
-    path.join(startDir, ".appwrite", "appwriteConfig.yml"),
     path.join(startDir, ".appwrite", "config.yaml"),
     path.join(startDir, ".appwrite", "config.yml"),
+    path.join(startDir, ".appwrite", "appwriteConfig.yaml"),
+    path.join(startDir, ".appwrite", "appwriteConfig.yml"),
     path.join(startDir, "appwrite.yaml"),
     path.join(startDir, "appwrite.yml"),
   ];
@@ -272,6 +272,8 @@ export const findYamlConfig = (startDir: string): string | null => {
   const parentDir = path.dirname(startDir);
   if (parentDir !== startDir && path.basename(parentDir) !== 'node_modules') {
     const parentPossiblePaths = [
+      path.join(parentDir, ".appwrite", "config.yaml"),
+      path.join(parentDir, ".appwrite", "config.yml"),
       path.join(parentDir, ".appwrite", "appwriteConfig.yaml"),
       path.join(parentDir, ".appwrite", "appwriteConfig.yml"),
       path.join(parentDir, "appwrite.yaml"),
@@ -349,10 +351,10 @@ const findYamlConfigRecursive = (dir: string, depth: number = 0): string | null 
         // Check if this is an .appwrite directory
         if (entry.name === ".appwrite") {
           const configPaths = [
-            path.join(fullPath, "appwriteConfig.yaml"),
-            path.join(fullPath, "appwriteConfig.yml"),
             path.join(fullPath, "config.yaml"),
             path.join(fullPath, "config.yml"),
+            path.join(fullPath, "appwriteConfig.yaml"),
+            path.join(fullPath, "appwriteConfig.yml"),
           ];
           
           for (const configPath of configPaths) {

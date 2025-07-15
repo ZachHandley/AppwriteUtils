@@ -566,6 +566,9 @@ export class UtilsController {
       this.storage
     );
     await appwriteToX.toSchemas(databases);
+    
+    // Update the controller's config with the synchronized collections
+    this.config = appwriteToX.updatedConfig;
   }
 
   async syncDb(

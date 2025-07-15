@@ -27,7 +27,7 @@ import {
 } from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 import { listBuckets } from "../storage/methods.js";
-import { listFunctions } from "../functions/methods.js";
+import { listFunctions, listFunctionDeployments } from "../functions/methods.js";
 
 export class AppwriteToX {
   config: AppwriteConfig;
@@ -241,22 +241,9 @@ export class AppwriteToX {
     const remoteFunctions = await listFunctions(this.config.appwriteClient!, [
       Query.limit(1000),
     ]);
-    const functionDeployments = await Promise.all(
-      remoteFunctions.functions.map(async (func) => {
-        const deployments =
-          await this.config.appwriteClient!.functions.listDeployments(
-            func.$id,
-            [Query.orderDesc("$createdAt"), Query.limit(1)]
-          );
-        return {
-          function: func,
-          schemaStrings: deployments.deployments[0]?.schemaStrings || [],
-        };
-      })
-    );
 
-    this.updatedConfig.functions = functionDeployments.map(
-      ({ function: func, schemaStrings }) => ({
+    this.updatedConfig.functions = remoteFunctions.functions.map(
+      (func) => ({
         $id: func.$id,
         name: func.name,
         runtime: func.runtime as Runtime,
@@ -270,7 +257,6 @@ export class AppwriteToX {
         commands: func.commands || "npm install",
         dirPath: `functions/${func.name}`,
         specification: func.specification as Specification,
-        schemaStrings,
       })
     );
 

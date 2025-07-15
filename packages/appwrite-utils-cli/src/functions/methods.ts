@@ -161,6 +161,16 @@ export const listSpecifications = async (client: Client) => {
   return specifications;
 };
 
+export const listFunctionDeployments = async (
+  client: Client,
+  functionId: string,
+  queries?: string[]
+) => {
+  const functions = new Functions(client);
+  const deployments = await functions.listDeployments(functionId, queries);
+  return deployments;
+};
+
 export const updateFunction = async (
   client: Client,
   functionConfig: AppwriteFunction
