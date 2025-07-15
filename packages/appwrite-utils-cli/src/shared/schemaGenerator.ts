@@ -197,7 +197,38 @@ export class SchemaGenerator {
     });
   }
 
-  public updateConfig(config: AppwriteConfig): void {
+  public async updateConfig(config: AppwriteConfig): Promise<void> {
+    // Check if user is using YAML config
+    const { findYamlConfig } = await import("../config/yamlConfig.js");
+    const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
+    
+    if (yamlConfigPath) {
+      // User has YAML config - update it and generate individual collection files
+      await this.updateYamlConfig(config, yamlConfigPath);
+    } else {
+      // User has TypeScript config - update the TS file
+      this.updateTypeScriptConfig(config);
+    }
+  }
+
+  private async updateYamlConfig(config: AppwriteConfig, yamlConfigPath: string): Promise<void> {
+    try {
+      const { writeYamlConfig } = await import("../config/yamlConfig.js");
+      
+      // Write the main YAML config (without collections)
+      await writeYamlConfig(yamlConfigPath, config);
+      
+      // Generate individual collection YAML files
+      this.updateYamlCollections();
+      
+      console.log("✅ Updated YAML configuration and collection files");
+    } catch (error) {
+      console.error("❌ Error updating YAML config:", error instanceof Error ? error.message : error);
+      throw error;
+    }
+  }
+
+  private updateTypeScriptConfig(config: AppwriteConfig): void {
     const configPath = path.join(this.appwriteFolderPath, "appwriteConfig.ts");
     const configContent = `import { type AppwriteConfig } from "appwrite-utils";
 
@@ -219,7 +250,7 @@ const appwriteConfig: AppwriteConfig = {
       $id: func.$id || ulid(),
       name: func.name,
       runtime: func.runtime,
-      dirPath: func.dirPath || `functions/${func.name}`,
+      dirPath: func.dirPath || "functions/" + func.name,
       entrypoint: func.entrypoint || "src/index.ts",
       execute: func.execute || [],
       events: func.events || [],
@@ -238,12 +269,14 @@ const appwriteConfig: AppwriteConfig = {
     })),
     null,
     4
-  )}
+  )},
+  collections: ${JSON.stringify(config.collections, null, 4)}
 };
 
 export default appwriteConfig;
 `;
     fs.writeFileSync(configPath, configContent, { encoding: "utf-8" });
+    console.log("✅ Updated TypeScript configuration file");
   }
 
   private extractRelationships(): void {

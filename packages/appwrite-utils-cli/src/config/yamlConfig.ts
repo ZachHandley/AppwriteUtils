@@ -216,7 +216,7 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
       templateBranch: func.templateBranch || "",
       specification: func.specification || "s-0.5vcpu-512mb",
     })),
-    collections: [],
+    collections: [], // Note: Collections are managed separately in YAML configs via individual collection files
   };
 
   return appwriteConfig;
@@ -425,6 +425,135 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
   const finalContent = schemaReference + "# Appwrite Project Configuration\n" + yamlContent;
 
   fs.writeFileSync(outputPath, finalContent, "utf8");
+};
+
+/**
+ * Converts AppwriteConfig back to YAML format and writes to file
+ * @param configPath Path to the YAML config file
+ * @param config The AppwriteConfig to convert and save
+ */
+export const writeYamlConfig = async (configPath: string, config: AppwriteConfig): Promise<void> => {
+  try {
+    // Convert AppwriteConfig back to YAML format
+    const yamlConfig: YamlConfig = {
+      appwrite: {
+        endpoint: config.appwriteEndpoint,
+        project: config.appwriteProject,
+        key: config.appwriteKey,
+      },
+      logging: {
+        enabled: config.logging?.enabled || false,
+        level: config.logging?.level || "info",
+        directory: config.logging?.logDirectory,
+        console: config.logging?.console || false,
+      },
+      backups: {
+        enabled: config.enableBackups !== false,
+        interval: config.backupInterval || 3600,
+        retention: config.backupRetention || 30,
+        cleanup: config.enableBackupCleanup !== false,
+      },
+      data: {
+        enableMockData: config.enableMockData || false,
+        documentBucketId: config.documentBucketId || "documents",
+        usersCollectionName: config.usersCollectionName || "Members",
+        importDirectory: config.schemaConfig?.importDirectory || "importData",
+      },
+      schemas: {
+        outputDirectory: config.schemaConfig?.outputDirectory || "schemas",
+        yamlSchemaDirectory: config.schemaConfig?.yamlSchemaDirectory || ".yaml_schemas",
+      },
+      migrations: {
+        enabled: config.useMigrations !== false,
+      },
+      databases: config.databases?.map(db => ({
+        id: db.$id,
+        name: db.name,
+        bucket: db.bucket ? {
+          id: db.bucket.$id,
+          name: db.bucket.name,
+          permissions: db.bucket.permissions || [],
+          fileSecurity: db.bucket.fileSecurity,
+          enabled: db.bucket.enabled,
+          maximumFileSize: db.bucket.maximumFileSize,
+          allowedFileExtensions: db.bucket.allowedFileExtensions,
+          compression: db.bucket.compression as "none" | "gzip" | "zstd",
+          encryption: db.bucket.encryption,
+          antivirus: db.bucket.antivirus,
+        } : undefined,
+      })) || [],
+      buckets: config.buckets?.map(bucket => ({
+        id: bucket.$id,
+        name: bucket.name,
+        permissions: bucket.permissions || [],
+        fileSecurity: bucket.fileSecurity,
+        enabled: bucket.enabled,
+        maximumFileSize: bucket.maximumFileSize,
+        allowedFileExtensions: bucket.allowedFileExtensions,
+        compression: bucket.compression as "none" | "gzip" | "zstd",
+        encryption: bucket.encryption,
+        antivirus: bucket.antivirus,
+      })) || [],
+      functions: config.functions?.map(func => ({
+        id: func.$id,
+        name: func.name,
+        runtime: func.runtime,
+        execute: func.execute,
+        events: func.events,
+        schedule: func.schedule,
+        timeout: func.timeout,
+        enabled: func.enabled,
+        logging: func.logging,
+        entrypoint: func.entrypoint,
+        commands: func.commands,
+        scopes: func.scopes,
+        installationId: func.installationId,
+        providerRepositoryId: func.providerRepositoryId,
+        providerBranch: func.providerBranch,
+        providerSilentMode: func.providerSilentMode,
+        providerRootDirectory: func.providerRootDirectory,
+        templateRepository: func.templateRepository,
+        templateOwner: func.templateOwner,
+        templateRootDirectory: func.templateRootDirectory,
+        // templateBranch: func.templateBranch, // Not available in AppwriteFunction type
+        specification: func.specification,
+      })) || [],
+    };
+
+    // Write YAML config
+    const yamlContent = yaml.dump(yamlConfig, {
+      indent: 2,
+      lineWidth: 120,
+      sortKeys: false,
+    });
+
+    // Preserve schema reference if it exists
+    let finalContent = yamlContent;
+    if (fs.existsSync(configPath)) {
+      const existingContent = fs.readFileSync(configPath, "utf8");
+      const lines = existingContent.split('\n');
+      const schemaLine = lines.find(line => line.startsWith('# yaml-language-server:'));
+      const commentLine = lines.find(line => line.startsWith('# Appwrite Project Configuration'));
+      
+      if (schemaLine) {
+        finalContent = schemaLine + '\n';
+        if (commentLine) {
+          finalContent += commentLine + '\n';
+        }
+        finalContent += yamlContent;
+      }
+    } else {
+      // Add schema reference for new files
+      const schemaReference = "# yaml-language-server: $schema=./.yaml_schemas/appwrite-config.schema.json\n";
+      finalContent = schemaReference + "# Appwrite Project Configuration\n" + yamlContent;
+    }
+
+    fs.writeFileSync(configPath, finalContent, "utf8");
+    console.log(`✅ Updated YAML configuration at ${configPath}`);
+  } catch (error) {
+    console.error("❌ Error writing YAML config:", error instanceof Error ? error.message : error);
+    throw error;
+  }
 };
 
 /**

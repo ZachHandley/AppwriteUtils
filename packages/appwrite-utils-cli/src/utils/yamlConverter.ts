@@ -129,3 +129,4 @@ export function sanitizeFilename(name: string): string {
 export function getCollectionYamlFilename(collection: Collection | CollectionCreate): string {
   return `${sanitizeFilename(collection.name)}.yaml`;
 }
+

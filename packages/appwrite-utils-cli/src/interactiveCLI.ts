@@ -1442,7 +1442,7 @@ export class InteractiveCLI {
         this.controller!.config!,
         this.controller!.getAppwriteFolderPath()!
       );
-      schemaGenerator.updateConfig(this.controller!.config!);
+      await schemaGenerator.updateConfig(this.controller!.config!);
     }
 
     console.log(chalk.green("✨ Configurations synchronized successfully!"));
