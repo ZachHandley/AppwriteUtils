@@ -1898,7 +1898,7 @@ export class ComprehensiveTransfer {
               targetCollectionId,
               doc.$id,
               docData,
-              doc.$permissions
+              $permissions,
             )
           );
 

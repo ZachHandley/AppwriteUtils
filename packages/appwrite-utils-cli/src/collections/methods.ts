@@ -640,9 +640,14 @@ const transferDocumentWithRetry = async (
     return true;
   } catch (error: any) {
     // Check if document already exists
-    if (error.code === 409 || error.message?.includes('already exists')) {
-      console.log(chalk.yellow(`Document ${documentId} already exists, skipping...`));
-      return true;
+    if (error.code === 409 || error.message?.toLowerCase().includes('already exists')) {
+      await db.updateDocument(
+        dbId,
+        collectionId,
+        documentId,
+        documentData,
+        permissions
+      );
     }
     
     if (retryCount < maxRetries) {
