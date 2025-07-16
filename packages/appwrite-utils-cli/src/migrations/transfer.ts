@@ -45,7 +45,10 @@ export const transferStorageLocalToLocal = async (
   fromBucketId: string,
   toBucketId: string
 ) => {
-  MessageFormatter.info(`Transferring files from ${fromBucketId} to ${toBucketId}`, { prefix: "Transfer" });
+  MessageFormatter.info(
+    `Transferring files from ${fromBucketId} to ${toBucketId}`,
+    { prefix: "Transfer" }
+  );
   let lastFileId: string | undefined;
   let fromFiles = await tryAwaitWithRetry(
     async () => await storage.listFiles(fromBucketId, [Query.limit(100)])
@@ -59,7 +62,11 @@ export const transferStorageLocalToLocal = async (
       try {
         return await storage.getFileDownload(bucketId, fileId);
       } catch (error) {
-        MessageFormatter.error(`Error downloading file ${fileId}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Transfer" });
+        MessageFormatter.error(
+          `Error downloading file ${fileId}`,
+          error instanceof Error ? error : new Error(String(error)),
+          { prefix: "Transfer" }
+        );
         attempts--;
         if (attempts === 0) throw error;
       }
@@ -72,14 +79,20 @@ export const transferStorageLocalToLocal = async (
         async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
       if (!fileData) {
-        MessageFormatter.error(`Error downloading file ${file.$id}`, undefined, { prefix: "Transfer" });
+        MessageFormatter.error(
+          `Error downloading file ${file.$id}`,
+          undefined,
+          { prefix: "Transfer" }
+        );
         continue;
       }
       const fileToCreate = InputFile.fromBuffer(
         new Uint8Array(fileData),
         file.name
       );
-      MessageFormatter.progress(`Creating file: ${file.name}`, { prefix: "Transfer" });
+      MessageFormatter.progress(`Creating file: ${file.name}`, {
+        prefix: "Transfer",
+      });
       try {
         await tryAwaitWithRetry(
           async () =>
@@ -118,7 +131,11 @@ export const transferStorageLocalToLocal = async (
         async () => await downloadFileWithRetry(file.bucketId, file.$id)
       );
       if (!fileData) {
-        MessageFormatter.error(`Error downloading file ${file.$id}`, undefined, { prefix: "Transfer" });
+        MessageFormatter.error(
+          `Error downloading file ${file.$id}`,
+          undefined,
+          { prefix: "Transfer" }
+        );
         continue;
       }
       const fileToCreate = InputFile.fromBuffer(
@@ -137,7 +154,10 @@ export const transferStorageLocalToLocal = async (
         );
       } catch (error: any) {
         // File already exists, so we can skip it
-        MessageFormatter.warning(`File ${file.$id} already exists, skipping...`, { prefix: "Transfer" });
+        MessageFormatter.warning(
+          `File ${file.$id} already exists, skipping...`,
+          { prefix: "Transfer" }
+        );
         continue;
       }
       numberOfFiles++;
@@ -208,7 +228,9 @@ export const transferStorageLocalToRemote = async (
       );
     } catch (error: any) {
       // File already exists, so we can skip it
-      MessageFormatter.warning(`File ${file.$id} already exists, skipping...`, { prefix: "Transfer" });
+      MessageFormatter.warning(`File ${file.$id} already exists, skipping...`, {
+        prefix: "Transfer",
+      });
       continue;
     }
     numberOfFiles++;
@@ -308,22 +330,37 @@ export const transferDatabaseLocalToLocal = async (
       }
 
       // Handle attributes with enhanced status checking
-      console.log(chalk.blue(`Creating attributes for collection ${collection.name} with enhanced monitoring...`));
-      
-      const allAttributes = collection.attributes.map(attr => parseAttribute(attr as any));
-      const attributeSuccess = await createUpdateCollectionAttributesWithStatusCheck(
-        localDb,
-        targetDbId,
-        targetCollection,
-        allAttributes
+      console.log(
+        chalk.blue(
+          `Creating attributes for collection ${collection.name} with enhanced monitoring...`
+        )
       );
-      
+
+      const allAttributes = collection.attributes.map((attr) =>
+        parseAttribute(attr as any)
+      );
+      const attributeSuccess =
+        await createUpdateCollectionAttributesWithStatusCheck(
+          localDb,
+          targetDbId,
+          targetCollection,
+          allAttributes
+        );
+
       if (!attributeSuccess) {
-        console.log(chalk.red(`❌ Failed to create all attributes for collection ${collection.name}, skipping to next collection`));
+        console.log(
+          chalk.red(
+            `❌ Failed to create all attributes for collection ${collection.name}, skipping to next collection`
+          )
+        );
         continue;
       }
-      
-      console.log(chalk.green(`✅ All attributes created successfully for collection ${collection.name}`));
+
+      console.log(
+        chalk.green(
+          `✅ All attributes created successfully for collection ${collection.name}`
+        )
+      );
 
       // Handle indexes
       const existingIndexes = await tryAwaitWithRetry(
@@ -361,7 +398,9 @@ export const transferDatabaseLocalToLocal = async (
       }
 
       // Transfer documents
-      const { transferDocumentsBetweenDbsLocalToLocal } = await import("../collections/methods.js");
+      const { transferDocumentsBetweenDbsLocalToLocal } = await import(
+        "../collections/methods.js"
+      );
       await transferDocumentsBetweenDbsLocalToLocal(
         localDb,
         fromDbId,
@@ -456,27 +495,46 @@ export const transferDatabaseLocalToRemote = async (
       }
 
       // Handle attributes with enhanced status checking
-      console.log(chalk.blue(`Creating attributes for collection ${collection.name} with enhanced monitoring...`));
-      
-      const attributesToCreate = collection.attributes.map(attr => parseAttribute(attr as any));
-      
-      const attributesSuccess = await createUpdateCollectionAttributesWithStatusCheck(
-        remoteDb,
-        toDbId,
-        targetCollection,
-        attributesToCreate
+      console.log(
+        chalk.blue(
+          `Creating attributes for collection ${collection.name} with enhanced monitoring...`
+        )
       );
-      
+
+      const attributesToCreate = collection.attributes.map((attr) =>
+        parseAttribute(attr as any)
+      );
+
+      const attributesSuccess =
+        await createUpdateCollectionAttributesWithStatusCheck(
+          remoteDb,
+          toDbId,
+          targetCollection,
+          attributesToCreate
+        );
+
       if (!attributesSuccess) {
-        console.log(chalk.red(`Failed to create some attributes for collection ${collection.name}`));
+        console.log(
+          chalk.red(
+            `Failed to create some attributes for collection ${collection.name}`
+          )
+        );
         // Continue with the transfer even if some attributes failed
       } else {
-        console.log(chalk.green(`All attributes created successfully for collection ${collection.name}`));
+        console.log(
+          chalk.green(
+            `All attributes created successfully for collection ${collection.name}`
+          )
+        );
       }
 
       // Handle indexes with enhanced status checking
-      console.log(chalk.blue(`Creating indexes for collection ${collection.name} with enhanced monitoring...`));
-      
+      console.log(
+        chalk.blue(
+          `Creating indexes for collection ${collection.name} with enhanced monitoring...`
+        )
+      );
+
       const indexesSuccess = await createOrUpdateIndexesWithStatusCheck(
         toDbId,
         remoteDb,
@@ -484,16 +542,26 @@ export const transferDatabaseLocalToRemote = async (
         targetCollection,
         collection.indexes as any
       );
-      
+
       if (!indexesSuccess) {
-        console.log(chalk.red(`Failed to create some indexes for collection ${collection.name}`));
+        console.log(
+          chalk.red(
+            `Failed to create some indexes for collection ${collection.name}`
+          )
+        );
         // Continue with the transfer even if some indexes failed
       } else {
-        console.log(chalk.green(`All indexes created successfully for collection ${collection.name}`));
+        console.log(
+          chalk.green(
+            `All indexes created successfully for collection ${collection.name}`
+          )
+        );
       }
 
       // Transfer documents
-      const { transferDocumentsBetweenDbsLocalToRemote } = await import("../collections/methods.js");
+      const { transferDocumentsBetweenDbsLocalToRemote } = await import(
+        "../collections/methods.js"
+      );
       await transferDocumentsBetweenDbsLocalToRemote(
         localDb,
         endpoint,
@@ -544,12 +612,102 @@ export const transferUsersLocalToRemote = async (
     for (const user of usersList.users) {
       try {
         // Check if user already exists in remote
+        let remoteUser: Models.User<Models.Preferences> | undefined;
         try {
-          await tryAwaitWithRetry(async () => remoteUsers.get(user.$id));
-          console.log(
-            chalk.yellow(`User ${user.$id} already exists, skipping...`)
+          remoteUser = await tryAwaitWithRetry(async () =>
+            remoteUsers.get(user.$id)
           );
-          continue;
+          
+          // If user exists, update only the differences
+          if (remoteUser) {
+            console.log(chalk.blue(`User ${user.$id} exists, checking for updates...`));
+            let hasUpdates = false;
+
+            // Update name if different
+            if (remoteUser.name !== user.name) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updateName(user.$id, user.name)
+              );
+              console.log(chalk.green(`Updated name for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update email if different
+            if (remoteUser.email !== user.email) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updateEmail(user.$id, user.email)
+              );
+              console.log(chalk.green(`Updated email for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update phone if different
+            const normalizedLocalPhone = user.phone 
+              ? converterFunctions.convertPhoneStringToUSInternational(user.phone)
+              : undefined;
+            if (remoteUser.phone !== normalizedLocalPhone) {
+              if (normalizedLocalPhone) {
+                await tryAwaitWithRetry(async () =>
+                  remoteUsers.updatePhone(user.$id, normalizedLocalPhone)
+                );
+              }
+              console.log(chalk.green(`Updated phone for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update preferences if different
+            if (JSON.stringify(remoteUser.prefs) !== JSON.stringify(user.prefs)) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updatePrefs(user.$id, user.prefs)
+              );
+              console.log(chalk.green(`Updated preferences for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update labels if different
+            if (JSON.stringify(remoteUser.labels) !== JSON.stringify(user.labels)) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updateLabels(user.$id, user.labels)
+              );
+              console.log(chalk.green(`Updated labels for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update email verification if different
+            if (remoteUser.emailVerification !== user.emailVerification) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updateEmailVerification(user.$id, user.emailVerification)
+              );
+              console.log(chalk.green(`Updated email verification for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update phone verification if different
+            if (remoteUser.phoneVerification !== user.phoneVerification) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updatePhoneVerification(user.$id, user.phoneVerification)
+              );
+              console.log(chalk.green(`Updated phone verification for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            // Update status if different
+            if (remoteUser.status !== user.status) {
+              await tryAwaitWithRetry(async () =>
+                remoteUsers.updateStatus(user.$id, user.status)
+              );
+              console.log(chalk.green(`Updated status for user ${user.$id}`));
+              hasUpdates = true;
+            }
+
+            if (!hasUpdates) {
+              console.log(chalk.yellow(`User ${user.$id} is already up to date, skipping...`));
+            } else {
+              totalTransferred++;
+              console.log(chalk.green(`Updated user ${user.$id}`));
+            }
+            continue;
+          }
         } catch (error: any) {
           // User doesn't exist, proceed with creation
         }
@@ -564,10 +722,10 @@ export const transferUsersLocalToRemote = async (
           const hashType = user.hash.toLowerCase();
           const hashedPassword = user.password; // This is already hashed
           const hashOptions = (user.hashOptions as Record<string, any>) || {};
-          
+
           try {
             switch (hashType) {
-              case 'argon2':
+              case "argon2":
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createArgon2User(
                     user.$id,
@@ -577,8 +735,8 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'bcrypt':
+
+              case "bcrypt":
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createBcryptUser(
                     user.$id,
@@ -588,20 +746,40 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'scrypt':
+
+              case "scrypt":
                 // Scrypt requires additional parameters from hashOptions
-                const salt = typeof hashOptions.salt === 'string' ? hashOptions.salt : '';
-                const costCpu = typeof hashOptions.costCpu === 'number' ? hashOptions.costCpu : 32768;
-                const costMemory = typeof hashOptions.costMemory === 'number' ? hashOptions.costMemory : 14;
-                const costParallel = typeof hashOptions.costParallel === 'number' ? hashOptions.costParallel : 1;
-                const length = typeof hashOptions.length === 'number' ? hashOptions.length : 64;
-                
+                const salt =
+                  typeof hashOptions.salt === "string" ? hashOptions.salt : "";
+                const costCpu =
+                  typeof hashOptions.costCpu === "number"
+                    ? hashOptions.costCpu
+                    : 32768;
+                const costMemory =
+                  typeof hashOptions.costMemory === "number"
+                    ? hashOptions.costMemory
+                    : 14;
+                const costParallel =
+                  typeof hashOptions.costParallel === "number"
+                    ? hashOptions.costParallel
+                    : 1;
+                const length =
+                  typeof hashOptions.length === "number"
+                    ? hashOptions.length
+                    : 64;
+
                 // Warn if using default values due to missing hash options
-                if (!hashOptions.salt || typeof hashOptions.costCpu !== 'number') {
-                  console.log(chalk.yellow(`User ${user.$id}: Using default Scrypt parameters due to missing hashOptions`));
+                if (
+                  !hashOptions.salt ||
+                  typeof hashOptions.costCpu !== "number"
+                ) {
+                  console.log(
+                    chalk.yellow(
+                      `User ${user.$id}: Using default Scrypt parameters due to missing hashOptions`
+                    )
+                  );
                 }
-                
+
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createScryptUser(
                     user.$id,
@@ -616,18 +794,33 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'scryptmodified':
+
+              case "scryptmodified":
                 // Scrypt Modified (Firebase) requires salt, separator, and signer key
-                const modSalt = typeof hashOptions.salt === 'string' ? hashOptions.salt : '';
-                const saltSeparator = typeof hashOptions.saltSeparator === 'string' ? hashOptions.saltSeparator : '';
-                const signerKey = typeof hashOptions.signerKey === 'string' ? hashOptions.signerKey : '';
-                
+                const modSalt =
+                  typeof hashOptions.salt === "string" ? hashOptions.salt : "";
+                const saltSeparator =
+                  typeof hashOptions.saltSeparator === "string"
+                    ? hashOptions.saltSeparator
+                    : "";
+                const signerKey =
+                  typeof hashOptions.signerKey === "string"
+                    ? hashOptions.signerKey
+                    : "";
+
                 // Warn if critical parameters are missing
-                if (!hashOptions.salt || !hashOptions.saltSeparator || !hashOptions.signerKey) {
-                  console.log(chalk.yellow(`User ${user.$id}: Missing critical Scrypt Modified parameters in hashOptions`));
+                if (
+                  !hashOptions.salt ||
+                  !hashOptions.saltSeparator ||
+                  !hashOptions.signerKey
+                ) {
+                  console.log(
+                    chalk.yellow(
+                      `User ${user.$id}: Missing critical Scrypt Modified parameters in hashOptions`
+                    )
+                  );
                 }
-                
+
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createScryptModifiedUser(
                     user.$id,
@@ -640,8 +833,8 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'md5':
+
+              case "md5":
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createMD5User(
                     user.$id,
@@ -651,21 +844,25 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'sha':
-              case 'sha1':
-              case 'sha256':
-              case 'sha512':
+
+              case "sha":
+              case "sha1":
+              case "sha256":
+              case "sha512":
                 // SHA variants - determine version from hash type
                 const getPasswordHashVersion = (hash: string) => {
                   switch (hash.toLowerCase()) {
-                    case 'sha1': return 'sha1' as any;
-                    case 'sha256': return 'sha256' as any;
-                    case 'sha512': return 'sha512' as any;
-                    default: return 'sha256' as any; // Default to SHA256
+                    case "sha1":
+                      return "sha1" as any;
+                    case "sha256":
+                      return "sha256" as any;
+                    case "sha512":
+                      return "sha512" as any;
+                    default:
+                      return "sha256" as any; // Default to SHA256
                   }
                 };
-                
+
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createSHAUser(
                     user.$id,
@@ -676,8 +873,8 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
-              case 'phpass':
+
+              case "phpass":
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createPHPassUser(
                     user.$id,
@@ -687,9 +884,13 @@ export const transferUsersLocalToRemote = async (
                   )
                 );
                 break;
-                
+
               default:
-                console.log(chalk.yellow(`Unknown hash type '${hashType}' for user ${user.$id}, falling back to Argon2`));
+                console.log(
+                  chalk.yellow(
+                    `Unknown hash type '${hashType}' for user ${user.$id}, falling back to Argon2`
+                  )
+                );
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createArgon2User(
                     user.$id,
@@ -700,12 +901,19 @@ export const transferUsersLocalToRemote = async (
                 );
                 break;
             }
-            
-            console.log(chalk.green(`User ${user.$id} created with preserved ${hashType} password`));
-            
+
+            console.log(
+              chalk.green(
+                `User ${user.$id} created with preserved ${hashType} password`
+              )
+            );
           } catch (error) {
-            console.log(chalk.yellow(`Failed to create user ${user.$id} with ${hashType} hash, trying with temporary password`));
-            
+            console.log(
+              chalk.yellow(
+                `Failed to create user ${user.$id} with ${hashType} hash, trying with temporary password`
+              )
+            );
+
             // Fallback to creating user with temporary password
             await tryAwaitWithRetry(async () =>
               remoteUsers.create(
@@ -716,14 +924,17 @@ export const transferUsersLocalToRemote = async (
                 user.name
               )
             );
-            
-            console.log(chalk.yellow(`User ${user.$id} created with temporary password - password reset required`));
+
+            console.log(
+              chalk.yellow(
+                `User ${user.$id} created with temporary password - password reset required`
+              )
+            );
           }
-          
         } else {
           // No hash or password - create with temporary password
           const tempPassword = user.password || `changeMe${user.email}`;
-          
+
           await tryAwaitWithRetry(async () =>
             remoteUsers.create(
               user.$id,
@@ -733,33 +944,47 @@ export const transferUsersLocalToRemote = async (
               user.name
             )
           );
-          
+
           if (!user.password) {
-            console.log(chalk.yellow(`User ${user.$id} created with temporary password - password reset required`));
+            console.log(
+              chalk.yellow(
+                `User ${user.$id} created with temporary password - password reset required`
+              )
+            );
           }
         }
-        
-        // Update phone, labels, and other attributes
+
+        // Update phone, labels, and other attributes for newly created users
         if (phone) {
           await tryAwaitWithRetry(async () =>
             remoteUsers.updatePhone(user.$id, phone)
           );
         }
-        
+
         if (user.labels && user.labels.length > 0) {
           await tryAwaitWithRetry(async () =>
             remoteUsers.updateLabels(user.$id, user.labels)
           );
         }
 
-        // Update user preferences and status
+        // Update user preferences and status for newly created users
         await tryAwaitWithRetry(async () =>
           remoteUsers.updatePrefs(user.$id, user.prefs)
         );
 
-        if (!user.emailVerification) {
+        if (user.emailVerification) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updateEmailVerification(user.$id, true)
+          );
+        } else {
           await tryAwaitWithRetry(async () =>
             remoteUsers.updateEmailVerification(user.$id, false)
+          );
+        }
+
+        if (user.phoneVerification) {
+          await tryAwaitWithRetry(async () =>
+            remoteUsers.updatePhoneVerification(user.$id, true)
           );
         }
 

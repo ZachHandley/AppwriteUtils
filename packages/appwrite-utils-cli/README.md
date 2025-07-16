@@ -637,6 +637,9 @@ npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages
 
 ### Changelog
 
+- 1.2.18: Fix users transfer comparison not counting email or phone validation as a reason
+- 1.2.17: Fixed users transfer not keeping validation of email / phone, temporarily disable bulk transfer to see if permissions aren't being updated by it
+- 1.2.15: Fixed various transfer and sync functionalities
 - 1.0.5: Fixed `.` directories being ignored. Normally a good thing
 - 1.0.4: Fixed `appwriteConfig.yaml` being the name for the converted config, instead of `config.yaml`
 - 1.0.3: Fixed appwriteConfig detection for `--it` so it detects when you can migrate your config

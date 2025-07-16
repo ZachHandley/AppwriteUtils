@@ -109,7 +109,7 @@ export const createOrUpdateIndexWithStatusCheck = async (
   collection: Models.Collection,
   index: Index,
   retryCount: number = 0,
-  maxRetries: number = 5
+  maxRetries: number = 3,
 ): Promise<boolean> => {
   console.log(chalk.blue(`Creating/updating index '${index.key}' (attempt ${retryCount + 1}/${maxRetries + 1})`));
   
@@ -171,10 +171,10 @@ export const createOrUpdateIndexWithStatusCheck = async (
     console.log(chalk.red(`Error creating index '${index.key}': ${errorMessage}`));
     
     // Check if this is a permanent error that shouldn't be retried
-    if (errorMessage.includes('not found') || 
-        errorMessage.includes('missing') || 
-        errorMessage.includes('does not exist') ||
-        errorMessage.includes('attribute') && errorMessage.includes('not found')) {
+    if (errorMessage.toLowerCase().includes('not found') || 
+        errorMessage.toLowerCase().includes('missing') || 
+        errorMessage.toLowerCase().includes('does not exist') ||
+        errorMessage.toLowerCase().includes('attribute') && errorMessage.toLowerCase().includes('not found')) {
       console.log(chalk.red(`❌ Index '${index.key}' has permanent error - not retrying`));
       return false;
     }
@@ -285,8 +285,7 @@ export const createOrUpdateIndex = async (
       (existingIndex) =>
         (existingIndex.key === index.key &&
           existingIndex.type === index.type &&
-          existingIndex.attributes === index.attributes) ||
-        JSON.stringify(existingIndex) === JSON.stringify(index)
+          existingIndex.attributes === index.attributes)
     )
   ) {
     await db.deleteIndex(dbId, collectionId, existingIndex.indexes[0].key);
