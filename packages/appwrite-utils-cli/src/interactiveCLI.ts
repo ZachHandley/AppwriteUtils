@@ -44,6 +44,7 @@ import { deployLocalFunction } from "./functions/deployments.js";
 import { join } from "node:path";
 import path from "path";
 import fs from "node:fs";
+import os from "node:os";
 import { SchemaGenerator } from "./shared/schemaGenerator.js";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 import { MessageFormatter } from "./shared/messageFormatter.js";
@@ -620,10 +621,32 @@ export class InteractiveCLI {
         .toLowerCase()
         .replace(/\s+/g, "-");
 
+      // Debug logging
+      console.log(chalk.blue(`🔍 Function deployment debug:`));
+      console.log(chalk.gray(`  Function name: ${functionConfig.name}`));
+      console.log(chalk.gray(`  Function ID: ${functionConfig.$id}`));
+      console.log(chalk.gray(`  Config dirPath: ${functionConfig.dirPath || 'undefined'}`));
+      if (functionConfig.dirPath) {
+        const expandedPath = functionConfig.dirPath.startsWith('~/') 
+          ? functionConfig.dirPath.replace('~', os.homedir())
+          : functionConfig.dirPath;
+        console.log(chalk.gray(`  Expanded dirPath: ${expandedPath}`));
+      }
+      console.log(chalk.gray(`  Appwrite folder: ${this.controller.getAppwriteFolderPath()}`));
+      console.log(chalk.gray(`  Current working dir: ${process.cwd()}`));
+
+      // Helper function to expand tilde in paths
+      const expandTildePath = (path: string): string => {
+        if (path.startsWith('~/')) {
+          return path.replace('~', os.homedir());
+        }
+        return path;
+      };
+
       // Check locations in priority order:
       const priorityLocations = [
-        // 1. Config dirPath if specified
-        functionConfig.dirPath,
+        // 1. Config dirPath if specified (with tilde expansion)
+        functionConfig.dirPath ? expandTildePath(functionConfig.dirPath) : undefined,
         // 2. Appwrite config folder/functions/name
         join(
           this.controller.getAppwriteFolderPath()!,
@@ -636,12 +659,18 @@ export class InteractiveCLI {
         join(process.cwd(), functionNameLower),
       ].filter((val): val is string => val !== undefined); // Remove undefined entries (in case dirPath is undefined)
 
+      console.log(chalk.blue(`🔍 Priority locations to check:`));
+      priorityLocations.forEach((loc, i) => {
+        console.log(chalk.gray(`  ${i + 1}. ${loc}`));
+      });
+
       let functionPath: string | null = null;
 
       // Check each priority location
       for (const location of priorityLocations) {
+        console.log(chalk.gray(`  Checking: ${location} - ${fs.existsSync(location) ? 'EXISTS' : 'NOT FOUND'}`));
         if (fs.existsSync(location)) {
-          console.log(chalk.green(`Found function at: ${location}`));
+          console.log(chalk.green(`✅ Found function at: ${location}`));
           functionPath = location;
           break;
         }
@@ -728,7 +757,8 @@ export class InteractiveCLI {
           {
             ...functionConfig,
             dirPath: functionPath,
-          }
+          },
+          functionPath
         );
         MessageFormatter.success("Function deployed successfully!", { prefix: "Functions" });
       } catch (error) {

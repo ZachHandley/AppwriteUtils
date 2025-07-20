@@ -68,6 +68,8 @@ import { deployLocalFunction } from "./functions/deployments.js";
 import fs from "node:fs";
 import { configureLogging, updateLogger } from "./shared/logging.js";
 import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
+import { SchemaGenerator } from "./shared/schemaGenerator.js";
+import { findYamlConfig } from "./config/yamlConfig.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -569,6 +571,12 @@ export class UtilsController {
     
     // Update the controller's config with the synchronized collections
     this.config = appwriteToX.updatedConfig;
+    
+    // Write the updated config back to disk
+    const generator = new SchemaGenerator(this.config, this.appwriteFolderPath);
+    const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
+    const isYamlProject = !!yamlConfigPath;
+    await generator.updateConfig(this.config, isYamlProject);
   }
 
   async syncDb(

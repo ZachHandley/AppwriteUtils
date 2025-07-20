@@ -129,6 +129,12 @@ const YamlConfigSchema = z.object({
         templateRootDirectory: z.string().optional(),
         templateBranch: z.string().optional(),
         specification: FunctionSpecifications.optional(),
+        // Critical missing fields for function deployment
+        dirPath: z.string().optional(),
+        predeployCommands: z.array(z.string()).optional(),
+        deployDir: z.string().optional(),
+        ignore: z.array(z.string()).optional(),
+        templateVersion: z.string().optional(),
       })
     )
     .optional()
@@ -215,6 +221,12 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
       templateRootDirectory: func.templateRootDirectory || "",
       templateBranch: func.templateBranch || "",
       specification: func.specification || "s-0.5vcpu-512mb",
+      // Include critical missing fields for function deployment
+      dirPath: func.dirPath,
+      predeployCommands: func.predeployCommands,
+      deployDir: func.deployDir,
+      ignore: func.ignore,
+      templateVersion: func.templateVersion,
     })),
     collections: [], // Note: Collections are managed separately in YAML configs via individual collection files
   };
@@ -517,8 +529,13 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
         templateRepository: func.templateRepository,
         templateOwner: func.templateOwner,
         templateRootDirectory: func.templateRootDirectory,
-        // templateBranch: func.templateBranch, // Not available in AppwriteFunction type
         specification: func.specification,
+        // Include critical fields for function deployment
+        dirPath: func.dirPath,
+        predeployCommands: func.predeployCommands,
+        deployDir: func.deployDir,
+        ignore: func.ignore,
+        templateVersion: func.templateVersion,
       })) || [],
     };
 
@@ -588,7 +605,13 @@ export const addFunctionToYamlConfig = async (configPath: string, newFunction: A
       entrypoint: newFunction.entrypoint || "",
       commands: newFunction.commands || "",
       scopes: newFunction.scopes || [],
-      specification: newFunction.specification || "s-0.5vcpu-512mb"
+      specification: newFunction.specification || "s-0.5vcpu-512mb",
+      // Include critical fields for function deployment if they exist
+      ...(newFunction.dirPath && { dirPath: newFunction.dirPath }),
+      ...(newFunction.predeployCommands && { predeployCommands: newFunction.predeployCommands }),
+      ...(newFunction.deployDir && { deployDir: newFunction.deployDir }),
+      ...(newFunction.ignore && { ignore: newFunction.ignore }),
+      ...(newFunction.templateVersion && { templateVersion: newFunction.templateVersion }),
     };
     
     // Add new function

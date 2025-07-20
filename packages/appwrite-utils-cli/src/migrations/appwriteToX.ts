@@ -261,10 +261,8 @@ export class AppwriteToX {
     );
 
     // Make sure to update the config with all changes
-    this.updatedConfig = {
-      ...updatedConfig,
-      functions: this.updatedConfig.functions,
-    };
+    updatedConfig.functions = this.updatedConfig.functions;
+    this.updatedConfig = updatedConfig;
   }
 
   async toSchemas(databases?: Models.Database[]) {
@@ -281,9 +279,11 @@ export class AppwriteToX {
     if (isYamlProject) {
       console.log("📄 Detected YAML configuration - generating YAML collection definitions");
       generator.updateYamlCollections();
+      await generator.updateConfig(this.updatedConfig, true);
     } else {
       console.log("📝 Generating TypeScript collection definitions");
       generator.updateTsSchemas();
+      await generator.updateConfig(this.updatedConfig, false);
     }
     
     generator.generateSchemas();
