@@ -552,8 +552,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || -2147483647,
-              finalAttribute.max || 2147483647,
+              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
+              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null,
@@ -568,8 +568,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || -2147483647,
-              finalAttribute.max || 2147483647,
+              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
+              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null
