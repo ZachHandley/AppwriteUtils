@@ -43,14 +43,18 @@ export const attributesSame = (
 
       // Use type-specific default values when comparing
       if (databaseAttribute.type === "integer") {
-        const defaultMin = attr === "min" ? -2147483647 : undefined;
-        const defaultMax = attr === "max" ? 2147483647 : undefined;
-        return (dbValue ?? defaultMin) === (configValue ?? defaultMax);
+        if (attr === "min") {
+          return (dbValue ?? -2147483647) === (configValue ?? -2147483647);
+        } else { // attr === "max"
+          return (dbValue ?? 2147483647) === (configValue ?? 2147483647);
+        }
       }
       if (databaseAttribute.type === "double" || databaseAttribute.type === "float") {
-        const defaultMin = attr === "min" ? -2147483647 : undefined;
-        const defaultMax = attr === "max" ? 2147483647 : undefined;
-        return (dbValue ?? defaultMin) === (configValue ?? defaultMax);
+        if (attr === "min") {
+          return (dbValue ?? -2147483647) === (configValue ?? -2147483647);
+        } else { // attr === "max"
+          return (dbValue ?? 2147483647) === (configValue ?? 2147483647);
+        }
       }
     }
 

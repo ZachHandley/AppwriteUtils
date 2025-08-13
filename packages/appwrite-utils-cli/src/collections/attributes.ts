@@ -437,7 +437,8 @@ export const createOrUpdateAttribute = async (
         );
       }
     }
-    if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
+    // Only queue relationship attributes that have dependencies
+    if (finalAttribute.type === "relationship" && !(relatedCollectionId && collectionFoundViaRelatedCollection)) {
       // console.log(`Enqueueing operation for attribute: ${finalAttribute.key}`);
       enqueueOperation({
         type: "attribute",
@@ -505,8 +506,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || -2147483647,
-              finalAttribute.max || 2147483647,
+              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
+              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null,
@@ -533,8 +534,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min || -2147483647,
-              finalAttribute.max || 2147483647,
+              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
+              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null

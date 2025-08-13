@@ -8,8 +8,8 @@ import {
 } from "node-appwrite";
 import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
 import { nameToIdMapping, processQueue } from "../shared/operationQueue.js";
-import { createUpdateCollectionAttributes } from "./attributes.js";
-import { createOrUpdateIndexes } from "./indexes.js";
+import { createUpdateCollectionAttributes, createUpdateCollectionAttributesWithStatusCheck } from "./attributes.js";
+import { createOrUpdateIndexes, createOrUpdateIndexesWithStatusCheck } from "./indexes.js";
 import { SchemaGenerator } from "../shared/schemaGenerator.js";
 import {
   isNull,
@@ -426,7 +426,7 @@ export const createOrUpdateCollections = async (
 
     // Update attributes and indexes for the collection
     MessageFormatter.progress("Creating Attributes", { prefix: "Collections" });
-    await createUpdateCollectionAttributes(
+    await createUpdateCollectionAttributesWithStatusCheck(
       database,
       databaseId,
       collectionToUse!,
@@ -438,16 +438,17 @@ export const createOrUpdateCollections = async (
     await delay(250);
 
     const indexesToUse =
-      indexes.length > 0
+      indexes && indexes.length > 0
         ? indexes
         : config.collections?.find((c) => c.$id === collectionToUse!.$id)
             ?.indexes ?? [];
 
     MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
-    await createOrUpdateIndexes(
+    await createOrUpdateIndexesWithStatusCheck(
       databaseId,
       database,
       collectionToUse!.$id,
+      collectionToUse!,
       indexesToUse as Indexes
     );
 

@@ -327,6 +327,58 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+### 1.3.0 - Zod v4 Upgrade & Collection Management Fixes
+
+**🎉 Major Release - Zod v4 Compatibility & Reliability Improvements**
+
+#### Breaking Changes
+- **Zod v4 Upgrade**: Updated to Zod v4.0.0 for enhanced schema validation
+  - ⚠️ **Potential Breaking Change**: Some schema validations may behave differently
+  - Function event types are now more flexible to accommodate Zod v4 changes
+  - Review your validation schemas if you experience issues
+
+#### Major Bug Fixes
+- **Fixed Duplicate Attribute Creation**: Resolved issue where attributes were being created multiple times
+  - Implemented intelligent filtering to only process new or changed attributes
+  - Enhanced status monitoring and error handling
+  - Significantly improved sync performance and reliability
+
+- **Fixed Index Creation Issues**: Resolved indexes not being created from collection configurations
+  - Added proper null checks for index arrays from different collection sources
+  - Enhanced index creation with comprehensive status monitoring
+  - Improved error handling and retry logic for stuck indexes
+
+#### Enhanced Collection Management
+- **Smart Attribute Processing**: Attributes are now only created/updated when needed
+  - Compares existing vs. config attributes before processing
+  - Skips unchanged attributes with clear logging
+  - Better handling of edge cases and error conditions
+
+- **Improved Index Handling**: More robust index creation from collection configs
+  - Proper fallback logic when indexes are undefined
+  - Enhanced compatibility with different collection sources
+  - Better error reporting and debugging information
+
+#### Performance Improvements
+- **Optimized Sync Operations**: Collections now process only necessary changes
+- **Enhanced Status Monitoring**: Real-time feedback for attribute and index operations
+- **Better Resource Management**: Reduced API calls through intelligent filtering
+
+#### Developer Experience
+- **Build Stability**: Resolved TypeScript compilation issues with function schemas
+- **Type Safety**: Maintained strict typing while accommodating Zod v4 changes
+- **Enhanced Logging**: Better progress reporting and error messages
+
+#### Migration Guide
+1. **Update Dependencies**: Ensure compatibility with Zod v4.0.0
+2. **Test Collection Operations**: Verify that attribute and index creation works as expected
+3. **Review Validations**: Check any custom validation schemas for potential breaking changes
+4. **Function Events**: Function event arrays are now `string[]` for enhanced flexibility
+
+**Integration Note**: This version significantly improves collection management reliability and provides full Zod v4 compatibility. The fixes address core synchronization issues that could cause duplicate resources or missing indexes.
+
+---
+
 ### 1.1.0 - Enhanced Transfer System with Fault Tolerance
 
 **🔧 Robust Transfer Operations with Status Monitoring**

@@ -124,3 +124,4 @@ export { AppwriteFunctionSchema, type AppwriteFunction } from "./schemas/functio
 export { FunctionScopes, type FunctionScope } from "./schemas/functionScopes.js";
 export { FunctionSpecifications, type FunctionSpecification } from "./schemas/functionSpecifications.js";
 export { RuntimeSchema, type Runtime } from "./schemas/runtime.js";
+export { EventTypeSchema, DocumentEventTypeSchema, type EventType, type DocumentEventType } from "./schemas/eventTypes.js";

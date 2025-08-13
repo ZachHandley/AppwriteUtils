@@ -232,6 +232,46 @@ const documents = await listDocumentsBatched(
 
 ## Changelog
 
+### 1.3.0 - Zod v4 Upgrade & Enhanced Collection Management
+
+**🎉 Major Release - Zod v4 Compatibility & Performance Improvements**
+
+#### Breaking Changes
+- **Zod v4 Upgrade**: Updated to Zod v4.0.0 for enhanced schema validation
+  - ⚠️ **Potential Breaking Change**: Some schema validations may behave differently
+  - Function event types are now more flexible to accommodate Zod v4 changes
+  - Review your validation schemas if you experience issues
+
+#### Enhanced Collection Management
+- **Optimized Attribute Creation**: Fixed duplicate attribute creation issue
+  - Attributes are now only created/updated when needed
+  - Improved filtering logic to skip unchanged attributes
+  - Better status monitoring and error handling
+
+- **Fixed Index Creation**: Resolved indexes not being created from collection configs
+  - Proper null checks for index arrays from different collection sources
+  - Enhanced index creation with status monitoring
+  - Better error handling and retry logic
+
+#### Performance Improvements
+- **Smart Filtering**: Collections now skip processing unchanged attributes
+- **Status Monitoring**: Enhanced attribute and index creation with real-time status checking
+- **Better Error Handling**: Improved retry logic for failed operations
+
+#### Developer Experience
+- **Build Stability**: Resolved TypeScript compilation issues with function schemas
+- **Type Safety**: Maintained strict typing while accommodating Zod v4 changes
+- **Better Logging**: Enhanced progress reporting during collection operations
+
+#### Migration Guide
+1. **Update Dependencies**: Ensure compatibility with Zod v4.0.0
+2. **Test Validations**: Review any custom validation schemas for potential breaking changes
+3. **Function Events**: Function event arrays are now `string[]` instead of strictly typed enums for flexibility
+
+**Integration Note**: This version provides enhanced reliability for collection management operations and full Zod v4 compatibility.
+
+---
+
 ### 1.0.0 - YAML-First Architecture Integration
 
 **🎉 Major Release - CLI Architecture Alignment**

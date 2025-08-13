@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RuntimeSchema } from "./runtime.js";
 import { FunctionScopes } from "./functionScopes.js";
 import { FunctionSpecifications } from "./functionSpecifications.js";
+import { EventTypeSchema } from "./eventTypes.js";
 
 /**
  * THIS IS SERVER-SIDE SCHEMA, DO NOT EXPECT THIS TO BE COMPATIBLE WITH CLIENT-SIDE SCHEMA

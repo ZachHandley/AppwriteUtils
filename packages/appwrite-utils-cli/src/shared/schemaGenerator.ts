@@ -443,60 +443,87 @@ export default appwriteConfig;
         return [relatedCollectionName, key, isArray];
       });
 
-    let relatedTypes = "";
-    let relatedTypesLazy = "";
-    let curNum = 0;
-    let maxNum = relatedCollections.length;
-    relatedCollections.forEach((relatedCollection) => {
-      console.log(relatedCollection);
-      let relatedPascalName = toPascalCase(relatedCollection[0]);
-      let relatedCamelName = toCamelCase(relatedCollection[0]);
-      curNum++;
-      let endNameTypes = relatedPascalName;
-      let endNameLazy = `${relatedPascalName}Schema`;
-      if (relatedCollection[2] === "array") {
-        endNameTypes += "[]";
-        endNameLazy += ".array().default([])";
-      } else if (!(relatedCollection[2] === "array")) {
-        endNameTypes += " | null";
-        endNameLazy += ".nullish()";
-      }
-      imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
-      relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
-      if (relatedTypes.length > 0 && curNum !== maxNum) {
-        relatedTypes += "  ";
-      }
-      relatedTypesLazy += `${relatedCollection[1]}: z.lazy(() => ${endNameLazy}),\n`;
-      if (relatedTypesLazy.length > 0 && curNum !== maxNum) {
-        relatedTypesLazy += "  ";
-      }
-    });
-
+    // Check if we have any relationships - if not, generate simple schema
+    const hasRelationships = relatedCollections.length > 0;
+    
     let schemaString = `${imports}\n\n`;
-    schemaString += `export const ${pascalName}SchemaBase = z.object({\n`;
-    schemaString += `  $id: z.string().optional(),\n`;
-    schemaString += `  $createdAt: z.string().optional(),\n`;
-    schemaString += `  $updatedAt: z.string().optional(),\n`;
-    for (const attribute of attributes) {
-      if (attribute.type === "relationship") {
-        continue;
+
+    if (!hasRelationships) {
+      // Simple case: no relationships, generate single schema directly
+      schemaString += `export const ${pascalName}Schema = z.object({\n`;
+      schemaString += `  $id: z.string(),\n`;
+      schemaString += `  $createdAt: z.string(),\n`;
+      schemaString += `  $updatedAt: z.string(),\n`;
+      schemaString += `  $permissions: z.array(z.string()),\n`;
+      for (const attribute of attributes) {
+        if (attribute.type === "relationship") {
+          continue;
+        }
+        schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
       }
-      schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
-    }
-    schemaString += `});\n\n`;
-    schemaString += `export type ${pascalName}Base = z.infer<typeof ${pascalName}SchemaBase>`;
-    if (relatedTypes.length > 0) {
-      schemaString += ` & {\n  ${relatedTypes}};\n\n`;
+      schemaString += `});\n\n`;
+      schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
     } else {
-      schemaString += `;\n\n`;
+      // Complex case: has relationships, generate BaseSchema + extended schema pattern
+      let relatedTypes = "";
+      let relatedTypesLazy = "";
+      let curNum = 0;
+      let maxNum = relatedCollections.length;
+      
+      relatedCollections.forEach((relatedCollection) => {
+        console.log(relatedCollection);
+        let relatedPascalName = toPascalCase(relatedCollection[0]);
+        let relatedCamelName = toCamelCase(relatedCollection[0]);
+        curNum++;
+        let endNameTypes = relatedPascalName;
+        let endNameLazy = `${relatedPascalName}Schema`;
+        if (relatedCollection[2] === "array") {
+          endNameTypes += "[]";
+          endNameLazy += ".array().default([])";
+        } else if (!(relatedCollection[2] === "array")) {
+          endNameTypes += " | null";
+          endNameLazy += ".nullish()";
+        }
+        imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
+        relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
+        if (relatedTypes.length > 0 && curNum !== maxNum) {
+          relatedTypes += "  ";
+        }
+        relatedTypesLazy += `${relatedCollection[1]}: z.lazy(() => ${endNameLazy}),\n`;
+        if (relatedTypesLazy.length > 0 && curNum !== maxNum) {
+          relatedTypesLazy += "  ";
+        }
+      });
+
+      // Re-add imports after processing relationships
+      schemaString = `${imports}\n\n`;
+      
+      schemaString += `export const ${pascalName}SchemaBase = z.object({\n`;
+      schemaString += `  $id: z.string(),\n`;
+      schemaString += `  $createdAt: z.string(),\n`;
+      schemaString += `  $updatedAt: z.string(),\n`;
+      schemaString += `  $permissions: z.array(z.string()),\n`;
+      for (const attribute of attributes) {
+        if (attribute.type === "relationship") {
+          continue;
+        }
+        schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
+      }
+      schemaString += `});\n\n`;
+      schemaString += `export type ${pascalName}Base = z.infer<typeof ${pascalName}SchemaBase>`;
+      if (relatedTypes.length > 0) {
+        schemaString += ` & {\n  ${relatedTypes}};\n\n`;
+      } else {
+        schemaString += `;\n\n`;
+      }
+      schemaString += `export const ${pascalName}Schema: z.ZodType<${pascalName}Base> = ${pascalName}SchemaBase`;
+      if (relatedTypes.length > 0) {
+        schemaString += `.extend({\n  ${relatedTypesLazy}});\n\n`;
+      } else {
+        schemaString += `;\n`;
+      }
+      schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
     }
-    schemaString += `export const ${pascalName}Schema: z.ZodType<${pascalName}Base> = ${pascalName}SchemaBase`;
-    if (relatedTypes.length > 0) {
-      schemaString += `.extend({\n  ${relatedTypesLazy}});\n\n`;
-    } else {
-      schemaString += `;\n`;
-    }
-    schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
 
     return schemaString;
   };
