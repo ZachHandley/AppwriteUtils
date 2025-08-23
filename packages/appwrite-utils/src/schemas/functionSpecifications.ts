@@ -21,7 +21,7 @@ import { z } from "zod";
  * 
  * s-8vcpu-8gb -- 8 vCPU, 8 GB RAM
  */
-export const FunctionSpecifications = z.enum([
+const functionSpecificationValues = [
   "s-0.5vcpu-512mb",
   "s-1vcpu-512mb",
   "s-1vcpu-1gb",
@@ -31,6 +31,11 @@ export const FunctionSpecifications = z.enum([
   "s-4vcpu-8gb",
   "s-8vcpu-4gb",
   "s-8vcpu-8gb",
-]);
+] as const;
 
-export type FunctionSpecification = z.infer<typeof FunctionSpecifications>;
+export const FunctionSpecifications = z.string().refine(
+  (val): val is typeof functionSpecificationValues[number] => functionSpecificationValues.includes(val as any),
+  { message: "Invalid function specification" }
+);
+
+export type FunctionSpecification = typeof functionSpecificationValues[number];

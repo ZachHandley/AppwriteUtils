@@ -17,6 +17,20 @@ import {
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
 
+/**
+ * Validates and filters events array for Appwrite functions
+ * - Filters out empty/invalid strings
+ * - Limits to 100 items maximum (Appwrite limit)
+ * - Returns empty array if input is invalid
+ */
+const validateEvents = (events?: string[]): string[] => {
+  if (!events || !Array.isArray(events)) return [];
+  
+  return events
+    .filter(event => event && typeof event === 'string' && event.trim().length > 0)
+    .slice(0, 100);
+};
+
 export const listFunctions = async (
   client: Client,
   queries?: string[],
@@ -101,7 +115,7 @@ export const createFunction = async (
     functionConfig.name,
     functionConfig.runtime as Runtime,
     functionConfig.execute,
-    functionConfig.events,
+    validateEvents(functionConfig.events),
     functionConfig.schedule,
     functionConfig.timeout,
     functionConfig.enabled,
@@ -181,7 +195,7 @@ export const updateFunction = async (
     functionConfig.name,
     functionConfig.runtime as Runtime,
     functionConfig.execute,
-    functionConfig.events,
+    validateEvents(functionConfig.events),
     functionConfig.schedule,
     functionConfig.timeout,
     functionConfig.enabled,

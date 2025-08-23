@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const RuntimeSchema = z.enum([
+export const runtimeValues = [
   "node-14.5",
   "node-16.0",
   "node-18.0",
@@ -58,6 +58,16 @@ export const RuntimeSchema = z.enum([
   "kotlin-2.0",
   "cpp-17",
   "cpp-20",
-]);
+] as const;
 
-export type Runtime = z.infer<typeof RuntimeSchema>;
+export const RuntimeSchema = z.string().refine(
+  (val): val is typeof runtimeValues[number] => runtimeValues.includes(val as any),
+  { message: "Invalid runtime value" }
+) as any;
+
+// Add Values property for backward compatibility
+(RuntimeSchema as any).Values = Object.fromEntries(
+  runtimeValues.map(value => [value.replace(/[.-]/g, '_').toUpperCase(), value])
+);
+
+export type Runtime = typeof runtimeValues[number];

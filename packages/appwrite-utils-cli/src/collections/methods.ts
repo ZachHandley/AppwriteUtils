@@ -7,7 +7,7 @@ import {
   type Models,
 } from "node-appwrite";
 import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
-import { nameToIdMapping, processQueue } from "../shared/operationQueue.js";
+import { nameToIdMapping, processQueue, queuedOperations } from "../shared/operationQueue.js";
 import { createUpdateCollectionAttributes, createUpdateCollectionAttributesWithStatusCheck } from "./attributes.js";
 import { createOrUpdateIndexes, createOrUpdateIndexesWithStatusCheck } from "./indexes.js";
 import { SchemaGenerator } from "../shared/schemaGenerator.js";
@@ -455,8 +455,13 @@ export const createOrUpdateCollections = async (
     // Add delay after creating indexes
     await delay(250);
   }
-  // Process any remaining tasks in the queue
-  await processQueue(database, databaseId);
+  // Process any remaining tasks in the queue (only if there are operations to process)
+  if (queuedOperations.length > 0) {
+    MessageFormatter.info(`Processing ${queuedOperations.length} queued operations (relationship dependencies)`, { prefix: "Collections" });
+    await processQueue(database, databaseId);
+  } else {
+    MessageFormatter.info("No queued operations to process", { prefix: "Collections" });
+  }
 };
 
 export const generateMockData = async (

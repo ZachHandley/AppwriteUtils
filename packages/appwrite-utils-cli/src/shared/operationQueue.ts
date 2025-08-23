@@ -1,8 +1,9 @@
 import { Query, type Databases, type Models } from "node-appwrite";
 import type { Attribute } from "appwrite-utils";
-import { createOrUpdateAttribute } from "../collections/attributes.js";
+import { createOrUpdateAttributeWithStatusCheck } from "../collections/attributes.js";
 import { fetchAndCacheCollectionByName } from "../collections/methods.js";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import chalk from "chalk";
 
 export interface QueuedOperation {
   type: "attribute";
@@ -81,24 +82,30 @@ export const processQueue = async (db: Databases, dbId: string) => {
 
       // Process the operation if the collection is found
       if (collectionFound && operation.attribute) {
-        console.log(
-          `\tProcessing attribute: ${operation.attribute.key} for collection ID: ${collectionFound.$id}`
-        );
-        await createOrUpdateAttribute(
+        console.log(chalk.cyan(
+          `\t📋 Queue processing relationship attribute: ${operation.attribute.key} for collection: ${collectionFound.name}`
+        ));
+        const success = await createOrUpdateAttributeWithStatusCheck(
           db,
           dbId,
           collectionFound,
           operation.attribute
         );
-        queuedOperations.splice(i, 1);
-        i--; // Adjust index since we're modifying the array
-        progress = true;
+        
+        if (success) {
+          console.log(chalk.green(`\t✅ Successfully processed queued attribute: ${operation.attribute.key}`));
+          queuedOperations.splice(i, 1);
+          i--; // Adjust index since we're modifying the array
+          progress = true;
+        } else {
+          console.log(chalk.red(`\t❌ Failed to process queued attribute: ${operation.attribute.key}, removing from queue`));
+          queuedOperations.splice(i, 1);
+          i--; // Adjust index since we're modifying the array
+        }
       } else {
-        console.error(
-          `\tCollection not found for operation, removing from queue: ${JSON.stringify(
-            operation
-          )}`
-        );
+        console.log(chalk.yellow(
+          `\t⚠️ Collection not found for queued operation, removing from queue: ${operation.attribute?.key || 'unknown'}`
+        ));
         queuedOperations.splice(i, 1);
         i--; // Adjust index since we're modifying the array
       }

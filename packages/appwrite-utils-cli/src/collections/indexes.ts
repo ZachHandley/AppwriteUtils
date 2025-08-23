@@ -277,10 +277,14 @@ export const createOrUpdateIndex = async (
   const existingIndex = await db.listIndexes(dbId, collectionId, [
     Query.equal("key", index.key),
   ]);
+  
   let createIndex = false;
   let newIndex: Models.Index | null = null;
-  if (
-    existingIndex.total > 0 &&
+  
+  if (existingIndex.total === 0) {
+    // No existing index, create it
+    createIndex = true;
+  } else if (
     !existingIndex.indexes.some(
       (existingIndex) =>
         (existingIndex.key === index.key &&
@@ -288,9 +292,11 @@ export const createOrUpdateIndex = async (
           existingIndex.attributes === index.attributes)
     )
   ) {
+    // Existing index doesn't match, delete and recreate
     await db.deleteIndex(dbId, collectionId, existingIndex.indexes[0].key);
     createIndex = true;
   }
+  
   if (createIndex) {
     newIndex = await db.createIndex(
       dbId,
@@ -301,6 +307,7 @@ export const createOrUpdateIndex = async (
       index.orders
     );
   }
+  
   return newIndex;
 };
 

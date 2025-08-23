@@ -408,7 +408,7 @@ export const createOrUpdateAttribute = async (
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
   let relatedCollectionId: string | undefined;
-  if (finalAttribute.type === "relationship") {
+  if (finalAttribute.type === "relationship" && finalAttribute.relatedCollection) {
     if (nameToIdMapping.has(finalAttribute.relatedCollection)) {
       relatedCollectionId = nameToIdMapping.get(
         finalAttribute.relatedCollection
@@ -437,9 +437,9 @@ export const createOrUpdateAttribute = async (
         );
       }
     }
-    // Only queue relationship attributes that have dependencies
-    if (finalAttribute.type === "relationship" && !(relatedCollectionId && collectionFoundViaRelatedCollection)) {
-      // console.log(`Enqueueing operation for attribute: ${finalAttribute.key}`);
+    // ONLY queue relationship attributes that have actual unresolved dependencies
+    if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
+      console.log(chalk.yellow(`⏳ Queueing relationship attribute '${finalAttribute.key}' - related collection '${finalAttribute.relatedCollection}' not found yet`));
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
@@ -553,8 +553,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
-              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
+              finalAttribute.min,
+              finalAttribute.max,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null,
@@ -569,8 +569,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
-              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
+              finalAttribute.min,
+              finalAttribute.max,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null

@@ -69,7 +69,7 @@ import { z } from "zod";
  * - vcs.read:        Access to read your project's VCS repositories
  * - vcs.write:       Access to create, update, and delete your project's VCS repositories
  */
-export const FunctionScopes = z.enum([
+const functionScopeValues = [
   "users.read",
   "users.write",
   "sessions.read",
@@ -120,6 +120,11 @@ export const FunctionScopes = z.enum([
   "topics.write",
   "subscribers.read",
   "subscribers.write",
-]);
+] as const;
 
-export type FunctionScope = z.infer<typeof FunctionScopes>;
+export const FunctionScopes = z.string().refine(
+  (val): val is typeof functionScopeValues[number] => functionScopeValues.includes(val as any),
+  { message: "Invalid function scope" }
+);
+
+export type FunctionScope = typeof functionScopeValues[number];

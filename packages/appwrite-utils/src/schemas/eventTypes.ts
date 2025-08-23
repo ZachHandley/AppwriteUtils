@@ -4,7 +4,7 @@ import { z } from "zod";
  * Valid event types for Appwrite Functions
  * These correspond to database and collection events that can trigger functions
  */
-export const EventTypeSchema = z.enum([
+const eventTypeValues = [
   "buckets.*.create",
   "buckets.*.delete",
   "buckets.*.files.*.create",
@@ -35,7 +35,12 @@ export const EventTypeSchema = z.enum([
   "users.*.sessions.*.create",
   "users.*.sessions.*.delete",
   "users.*.update",
-]);
+] as const;
+
+export const EventTypeSchema = z.string().refine(
+  (val): val is typeof eventTypeValues[number] => eventTypeValues.includes(val as any),
+  { message: "Invalid event type" }
+);
 
 /**
  * Common database event patterns for documents
@@ -47,5 +52,5 @@ export const DocumentEventTypeSchema = z.enum([
   "upsert"
 ]);
 
-export type EventType = z.infer<typeof EventTypeSchema>;
+export type EventType = typeof eventTypeValues[number];
 export type DocumentEventType = z.infer<typeof DocumentEventTypeSchema>;

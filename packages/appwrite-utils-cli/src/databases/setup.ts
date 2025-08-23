@@ -1,5 +1,5 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { createOrUpdateAttribute } from "../collections/attributes.js";
+import { createOrUpdateAttributeWithStatusCheck } from "../collections/attributes.js";
 import { getMigrationCollectionSchemas } from "../storage/schemas.js";
 import {
   areCollectionNamesSame,
@@ -90,7 +90,7 @@ export const setupMigrationDatabase = async (config: AppwriteConfig) => {
 
     for (const attribute of attributes) {
       try {
-        await createOrUpdateAttribute(
+        await createOrUpdateAttributeWithStatusCheck(
           database,
           db.$id,
           collectionFound,
