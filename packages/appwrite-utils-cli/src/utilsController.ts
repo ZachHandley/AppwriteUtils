@@ -128,6 +128,8 @@ export class UtilsController {
           appwriteEndpoint: directConfig.appwriteEndpoint!,
           appwriteProject: directConfig.appwriteProject!,
           appwriteKey: directConfig.appwriteKey!,
+          appwriteClient: null,
+          apiMode: "auto", // Default to auto-detect for dual API support
           enableBackups: false,
           backupInterval: 0,
           backupRetention: 0,

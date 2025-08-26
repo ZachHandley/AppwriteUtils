@@ -17,7 +17,6 @@ export interface YamlCollectionData {
     required?: boolean;
     array?: boolean;
     default?: any;
-    description?: string;
     min?: number;
     max?: number;
     elements?: string[];
@@ -70,7 +69,6 @@ export function collectionToYaml(collection: Collection | CollectionCreate, sche
       if (attr.required !== undefined) yamlAttr.required = attr.required;
       if (attr.array !== undefined) yamlAttr.array = attr.array;
       if ('xdefault' in attr && attr.xdefault !== undefined) yamlAttr.default = attr.xdefault;
-      if (attr.description !== undefined) yamlAttr.description = attr.description;
       if ('min' in attr && attr.min !== undefined) yamlAttr.min = attr.min;
       if ('max' in attr && attr.max !== undefined) yamlAttr.max = attr.max;
       if ('elements' in attr && attr.elements !== undefined) yamlAttr.elements = attr.elements;

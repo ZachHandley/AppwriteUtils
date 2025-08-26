@@ -25,13 +25,6 @@ export const booleanAttributeSchema = z.object({
     .boolean()
     .nullish()
     .describe("The default value of the attribute"),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .nullish()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type BooleanAttribute = z.infer<typeof booleanAttributeSchema>;

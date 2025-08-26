@@ -303,7 +303,6 @@ async function convertCollectionToYaml(tsFilePath: string, targetDir: string): P
           required: attr.required ?? false,
           array: attr.array,
           default: attr.xdefault || attr.default,
-          description: attr.description,
           min: attr.min,
           max: attr.max,
           elements: attr.elements,

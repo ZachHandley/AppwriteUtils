@@ -36,13 +36,6 @@ export const integerAttributeSchema = z.object({
     .int()
     .nullish()
     .describe("The default value of the attribute"),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .nullish()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type IntegerAttribute = z.infer<typeof integerAttributeSchema>;

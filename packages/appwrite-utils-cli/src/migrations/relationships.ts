@@ -218,7 +218,7 @@ async function prepareDocumentUpdates(
         dbId,
         relatedCollection,
         targetField!,
-        originalId
+        String(originalId)
       );
 
       if (foundDocuments && foundDocuments.length > 0) {

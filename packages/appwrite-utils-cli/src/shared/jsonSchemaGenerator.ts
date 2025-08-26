@@ -6,7 +6,6 @@ import chalk from "chalk";
 
 export interface JsonSchemaProperty {
   type: string | string[];
-  description?: string;
   format?: string;
   minimum?: number;
   maximum?: number;
@@ -27,7 +26,6 @@ export interface JsonSchema {
   $schema: string;
   $id: string;
   title: string;
-  description?: string;
   type: "object";
   properties: Record<string, JsonSchemaProperty>;
   required: string[];
@@ -72,12 +70,6 @@ export class JsonSchemaGenerator {
       type: "string" // Default type
     };
 
-    // Set description if available
-    if (attribute.description) {
-      property.description = typeof attribute.description === 'string' 
-        ? attribute.description 
-        : JSON.stringify(attribute.description);
-    }
 
     // Handle array attributes
     if (attribute.array) {
@@ -167,7 +159,6 @@ export class JsonSchemaGenerator {
           schema.$ref = `#/definitions/${toPascalCase(attribute.relatedCollection)}`;
         } else {
           schema.type = "string";
-          schema.description = "Document ID reference";
         }
         break;
 
@@ -184,31 +175,26 @@ export class JsonSchemaGenerator {
       $schema: "https://json-schema.org/draft/2020-12/schema",
       $id: `https://example.com/schemas/${toCamelCase(collection.name)}.json`,
       title: pascalName,
-      description: collection.description || `Schema for ${collection.name} collection`,
       type: "object",
       properties: {
         // Standard Appwrite document fields
         $id: {
           type: "string",
-          description: "Document ID",
           pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$"
         },
         $createdAt: {
           type: "string",
-          format: "date-time",
-          description: "Document creation date"
+          format: "date-time"
         },
         $updatedAt: {
           type: "string", 
-          format: "date-time",
-          description: "Document last update date"
+          format: "date-time"
         },
         $permissions: {
           type: "array",
           items: {
             type: "string"
-          },
-          description: "Document permissions"
+          }
         }
       },
       required: ["$id", "$createdAt", "$updatedAt"],
@@ -244,8 +230,7 @@ export class JsonSchemaGenerator {
             $createdAt: { type: "string", format: "date-time" },
             $updatedAt: { type: "string", format: "date-time" }
           },
-          additionalProperties: true,
-          description: `Reference to ${rel.relatedCollection} document`
+          additionalProperties: true
         };
       });
     }

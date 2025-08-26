@@ -94,11 +94,16 @@ export const AppwriteConfigSchema = z.object({
     .array(AppwriteFunctionSchema)
     .optional()
     .describe("Functions to create"),
+  apiMode: z
+    .enum(["auto", "legacy", "tablesdb"])
+    .default("auto")
+    .describe("API mode selection: auto-detect, force legacy Databases API, or force new TablesDB API"),
   schemaConfig: z
     .object({
       outputDirectory: z.string().default("schemas"),
       yamlSchemaDirectory: z.string().default(".yaml_schemas"),
       importDirectory: z.string().default("importData"),
+      collectionsDirectory: z.string().default("collections").describe("Directory name for collections/tables definitions"),
     })
     .optional()
     .describe("Schema and data directory configuration"),

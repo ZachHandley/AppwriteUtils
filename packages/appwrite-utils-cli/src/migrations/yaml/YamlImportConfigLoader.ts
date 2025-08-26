@@ -70,7 +70,12 @@ export const YamlImportConfigSchema = z.object({
       originalIdField: z.string().describe("Field in source data for matching"),
       targetField: z.string().describe("Field in collection to match against"),
     }).optional().describe("Configuration for update operations"),
-  }).default({}),
+  }).default(() => ({
+    batchSize: 50,
+    skipValidation: false,
+    dryRun: false,
+    continueOnError: true
+  })),
 });
 
 export type YamlImportConfig = z.infer<typeof YamlImportConfigSchema>;
@@ -112,7 +117,7 @@ export class YamlImportConfigLoader {
       
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const errorMessages = error.errors.map(err => `${err.path.join('.')}: ${err.message}`);
+        const errorMessages = error.issues.map(err => `${err.path.join('.')}: ${err.message}`);
         throw new Error(`Invalid import configuration in ${configPath}:\n${errorMessages.join('\n')}`);
       }
       throw new Error(`Failed to load import configuration ${configPath}: ${error}`);

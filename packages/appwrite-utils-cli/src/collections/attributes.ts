@@ -12,7 +12,7 @@ import chalk from "chalk";
 interface AttributeWithStatus {
   key: string;
   type: string;
-  status: 'available' | 'processing' | 'deleting' | 'stuck' | 'failed';
+  status: "available" | "processing" | "deleting" | "stuck" | "failed";
   error: string;
   required: boolean;
   array?: boolean;
@@ -35,72 +35,108 @@ const waitForAttributeAvailable = async (
 ): Promise<boolean> => {
   const startTime = Date.now();
   let checkInterval = 2000; // Start with 2 seconds
-  
+
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
   if (retryCount > 0) {
     const exponentialDelay = Math.min(2000 * Math.pow(2, retryCount), 30000);
-    console.log(chalk.blue(`Waiting for attribute '${attributeKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`));
+    console.log(
+      chalk.blue(
+        `Waiting for attribute '${attributeKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`
+      )
+    );
     await delay(exponentialDelay);
   } else {
-    console.log(chalk.blue(`Waiting for attribute '${attributeKey}' to become available...`));
+    console.log(
+      chalk.blue(
+        `Waiting for attribute '${attributeKey}' to become available...`
+      )
+    );
   }
-  
+
   while (Date.now() - startTime < maxWaitTime) {
     try {
       const collection = await db.getCollection(dbId, collectionId);
       const attribute = (collection.attributes as any[]).find(
         (attr: AttributeWithStatus) => attr.key === attributeKey
       ) as AttributeWithStatus | undefined;
-      
+
       if (!attribute) {
         console.log(chalk.red(`Attribute '${attributeKey}' not found`));
         return false;
       }
-      
-      console.log(chalk.gray(`Attribute '${attributeKey}' status: ${attribute.status}`));
-      
+
+      console.log(
+        chalk.gray(`Attribute '${attributeKey}' status: ${attribute.status}`)
+      );
+
       switch (attribute.status) {
-        case 'available':
-          console.log(chalk.green(`✅ Attribute '${attributeKey}' is now available`));
+        case "available":
+          console.log(
+            chalk.green(`✅ Attribute '${attributeKey}' is now available`)
+          );
           return true;
-          
-        case 'failed':
-          console.log(chalk.red(`❌ Attribute '${attributeKey}' failed: ${attribute.error}`));
+
+        case "failed":
+          console.log(
+            chalk.red(
+              `❌ Attribute '${attributeKey}' failed: ${attribute.error}`
+            )
+          );
           return false;
-          
-        case 'stuck':
-          console.log(chalk.yellow(`⚠️ Attribute '${attributeKey}' is stuck, will retry...`));
+
+        case "stuck":
+          console.log(
+            chalk.yellow(
+              `⚠️ Attribute '${attributeKey}' is stuck, will retry...`
+            )
+          );
           return false;
-          
-        case 'processing':
+
+        case "processing":
           // Continue waiting
           break;
-          
-        case 'deleting':
-          console.log(chalk.yellow(`Attribute '${attributeKey}' is being deleted`));
+
+        case "deleting":
+          console.log(
+            chalk.yellow(`Attribute '${attributeKey}' is being deleted`)
+          );
           break;
-          
+
         default:
-          console.log(chalk.yellow(`Unknown status '${attribute.status}' for attribute '${attributeKey}'`));
+          console.log(
+            chalk.yellow(
+              `Unknown status '${attribute.status}' for attribute '${attributeKey}'`
+            )
+          );
           break;
       }
-      
+
       await delay(checkInterval);
     } catch (error) {
       console.log(chalk.red(`Error checking attribute status: ${error}`));
       return false;
     }
   }
-  
+
   // Timeout reached
-  console.log(chalk.yellow(`⏰ Timeout waiting for attribute '${attributeKey}' (${maxWaitTime}ms)`));
-  
+  console.log(
+    chalk.yellow(
+      `⏰ Timeout waiting for attribute '${attributeKey}' (${maxWaitTime}ms)`
+    )
+  );
+
   // If we have retries left and this isn't the last retry, try recreating
   if (retryCount < maxRetries) {
-    console.log(chalk.yellow(`🔄 Retrying attribute creation (attempt ${retryCount + 1}/${maxRetries})`));
+    console.log(
+      chalk.yellow(
+        `🔄 Retrying attribute creation (attempt ${
+          retryCount + 1
+        }/${maxRetries})`
+      )
+    );
     return false; // Signal that we need to retry
   }
-  
+
   return false;
 };
 
@@ -114,17 +150,27 @@ const waitForAllAttributesAvailable = async (
   attributeKeys: string[],
   maxWaitTime: number = 60000
 ): Promise<string[]> => {
-  console.log(chalk.blue(`Waiting for ${attributeKeys.length} attributes to become available...`));
-  
+  console.log(
+    chalk.blue(
+      `Waiting for ${attributeKeys.length} attributes to become available...`
+    )
+  );
+
   const failedAttributes: string[] = [];
-  
+
   for (const attributeKey of attributeKeys) {
-    const success = await waitForAttributeAvailable(db, dbId, collectionId, attributeKey, maxWaitTime);
+    const success = await waitForAttributeAvailable(
+      db,
+      dbId,
+      collectionId,
+      attributeKey,
+      maxWaitTime
+    );
     if (!success) {
       failedAttributes.push(attributeKey);
     }
   }
-  
+
   return failedAttributes;
 };
 
@@ -138,15 +184,19 @@ const deleteAndRecreateCollection = async (
   retryCount: number
 ): Promise<Models.Collection | null> => {
   try {
-    console.log(chalk.yellow(`🗑️ Deleting collection '${collection.name}' for retry ${retryCount}`));
-    
+    console.log(
+      chalk.yellow(
+        `🗑️ Deleting collection '${collection.name}' for retry ${retryCount}`
+      )
+    );
+
     // Delete the collection
     await db.deleteCollection(dbId, collection.$id);
     console.log(chalk.yellow(`Deleted collection '${collection.name}'`));
-    
+
     // Wait a bit before recreating
     await delay(2000);
-    
+
     // Recreate the collection
     console.log(chalk.blue(`🔄 Recreating collection '${collection.name}'`));
     const newCollection = await db.createCollection(
@@ -157,12 +207,15 @@ const deleteAndRecreateCollection = async (
       collection.documentSecurity,
       collection.enabled
     );
-    
+
     console.log(chalk.green(`✅ Recreated collection '${collection.name}'`));
     return newCollection;
-    
   } catch (error) {
-    console.log(chalk.red(`Failed to delete/recreate collection '${collection.name}': ${error}`));
+    console.log(
+      chalk.red(
+        `Failed to delete/recreate collection '${collection.name}': ${error}`
+      )
+    );
     return null;
   }
 };
@@ -242,111 +295,147 @@ export const createOrUpdateAttributeWithStatusCheck = async (
   retryCount: number = 0,
   maxRetries: number = 5
 ): Promise<boolean> => {
-  console.log(chalk.blue(`Creating/updating attribute '${attribute.key}' (attempt ${retryCount + 1}/${maxRetries + 1})`));
-  
+  console.log(
+    chalk.blue(
+      `Creating/updating attribute '${attribute.key}' (attempt ${
+        retryCount + 1
+      }/${maxRetries + 1})`
+    )
+  );
+
   try {
     // First, try to create/update the attribute using existing logic
     await createOrUpdateAttribute(db, dbId, collection, attribute);
-    
+
     // Now wait for the attribute to become available
     const success = await waitForAttributeAvailable(
-      db, 
-      dbId, 
-      collection.$id, 
-      attribute.key, 
+      db,
+      dbId,
+      collection.$id,
+      attribute.key,
       60000, // 1 minute timeout
-      retryCount, 
+      retryCount,
       maxRetries
     );
-    
+
     if (success) {
       return true;
     }
-    
+
     // If not successful and we have retries left, delete specific attribute and try again
     if (retryCount < maxRetries) {
-      console.log(chalk.yellow(`Attribute '${attribute.key}' failed/stuck, deleting and retrying...`));
-      
+      console.log(
+        chalk.yellow(
+          `Attribute '${attribute.key}' failed/stuck, deleting and retrying...`
+        )
+      );
+
       // Try to delete the specific stuck attribute instead of the entire collection
       try {
         await db.deleteAttribute(dbId, collection.$id, attribute.key);
-        console.log(chalk.yellow(`Deleted stuck attribute '${attribute.key}', will retry creation`));
-        
+        console.log(
+          chalk.yellow(
+            `Deleted stuck attribute '${attribute.key}', will retry creation`
+          )
+        );
+
         // Wait a bit before retry
         await delay(3000);
-        
+
         // Get fresh collection data
         const freshCollection = await db.getCollection(dbId, collection.$id);
-        
+
         // Retry with the same collection (attribute should be gone now)
         return await createOrUpdateAttributeWithStatusCheck(
-          db, 
-          dbId, 
-          freshCollection, 
-          attribute, 
-          retryCount + 1, 
+          db,
+          dbId,
+          freshCollection,
+          attribute,
+          retryCount + 1,
           maxRetries
         );
       } catch (deleteError) {
-        console.log(chalk.red(`Failed to delete stuck attribute '${attribute.key}': ${deleteError}`));
-        
+        console.log(
+          chalk.red(
+            `Failed to delete stuck attribute '${attribute.key}': ${deleteError}`
+          )
+        );
+
         // If attribute deletion fails, only then try collection recreation as last resort
         if (retryCount >= maxRetries - 1) {
-          console.log(chalk.yellow(`Last resort: Recreating collection for attribute '${attribute.key}'`));
-          
+          console.log(
+            chalk.yellow(
+              `Last resort: Recreating collection for attribute '${attribute.key}'`
+            )
+          );
+
           // Get fresh collection data
           const freshCollection = await db.getCollection(dbId, collection.$id);
-          
+
           // Delete and recreate collection
-          const newCollection = await deleteAndRecreateCollection(db, dbId, freshCollection, retryCount + 1);
-          
+          const newCollection = await deleteAndRecreateCollection(
+            db,
+            dbId,
+            freshCollection,
+            retryCount + 1
+          );
+
           if (newCollection) {
             // Retry with the new collection
             return await createOrUpdateAttributeWithStatusCheck(
-              db, 
-              dbId, 
-              newCollection, 
-              attribute, 
-              retryCount + 1, 
+              db,
+              dbId,
+              newCollection,
+              attribute,
+              retryCount + 1,
               maxRetries
             );
           }
         } else {
           // Continue to next retry without collection recreation
           return await createOrUpdateAttributeWithStatusCheck(
-            db, 
-            dbId, 
-            collection, 
-            attribute, 
-            retryCount + 1, 
+            db,
+            dbId,
+            collection,
+            attribute,
+            retryCount + 1,
             maxRetries
           );
         }
       }
     }
-    
-    console.log(chalk.red(`❌ Failed to create attribute '${attribute.key}' after ${maxRetries + 1} attempts`));
+
+    console.log(
+      chalk.red(
+        `❌ Failed to create attribute '${attribute.key}' after ${
+          maxRetries + 1
+        } attempts`
+      )
+    );
     return false;
-    
   } catch (error) {
-    console.log(chalk.red(`Error creating attribute '${attribute.key}': ${error}`));
-    
+    console.log(
+      chalk.red(`Error creating attribute '${attribute.key}': ${error}`)
+    );
+
     if (retryCount < maxRetries) {
-      console.log(chalk.yellow(`Retrying attribute '${attribute.key}' due to error...`));
-      
+      console.log(
+        chalk.yellow(`Retrying attribute '${attribute.key}' due to error...`)
+      );
+
       // Wait a bit before retry
       await delay(2000);
-      
+
       return await createOrUpdateAttributeWithStatusCheck(
-        db, 
-        dbId, 
-        collection, 
-        attribute, 
-        retryCount + 1, 
+        db,
+        dbId,
+        collection,
+        attribute,
+        retryCount + 1,
         maxRetries
       );
     }
-    
+
     return false;
   }
 };
@@ -408,7 +497,10 @@ export const createOrUpdateAttribute = async (
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
   let relatedCollectionId: string | undefined;
-  if (finalAttribute.type === "relationship" && finalAttribute.relatedCollection) {
+  if (
+    finalAttribute.type === "relationship" &&
+    finalAttribute.relatedCollection
+  ) {
     if (nameToIdMapping.has(finalAttribute.relatedCollection)) {
       relatedCollectionId = nameToIdMapping.get(
         finalAttribute.relatedCollection
@@ -439,7 +531,11 @@ export const createOrUpdateAttribute = async (
     }
     // ONLY queue relationship attributes that have actual unresolved dependencies
     if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
-      console.log(chalk.yellow(`⏳ Queueing relationship attribute '${finalAttribute.key}' - related collection '${finalAttribute.relatedCollection}' not found yet`));
+      console.log(
+        chalk.yellow(
+          `⏳ Queueing relationship attribute '${finalAttribute.key}' - related collection '${finalAttribute.relatedCollection}' not found yet`
+        )
+      );
       enqueueOperation({
         type: "attribute",
         collectionId: collection.$id,
@@ -480,7 +576,8 @@ export const createOrUpdateAttribute = async (
               finalAttribute.required || false,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
-                : null
+                : null,
+              finalAttribute.size
             )
         );
       }
@@ -491,14 +588,27 @@ export const createOrUpdateAttribute = async (
           finalAttribute.min &&
           BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
         ) {
-          delete finalAttribute.min;
+          finalAttribute.min = undefined;
         }
         if (
           finalAttribute.max &&
           BigInt(finalAttribute.max) === BigInt(9223372036854776000)
         ) {
-          delete finalAttribute.max;
+          finalAttribute.max = undefined;
         }
+        const minValue =
+          finalAttribute.min !== undefined && finalAttribute.min !== null
+            ? parseInt(finalAttribute.min)
+            : -9007199254740991;
+        const maxValue =
+          finalAttribute.max !== undefined && finalAttribute.max !== null
+            ? parseInt(finalAttribute.max)
+            : 9007199254740991;
+        console.log(
+          `DEBUG: Creating integer attribute '${
+            finalAttribute.key
+          }' with min=${minValue}, max=${maxValue}, minType=${typeof minValue}, maxType=${typeof maxValue}`
+        );
         await tryAwaitWithRetry(
           async () =>
             await db.createIntegerAttribute(
@@ -506,8 +616,8 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
-              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
+              minValue,
+              maxValue,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
                 : null,
@@ -519,14 +629,27 @@ export const createOrUpdateAttribute = async (
           finalAttribute.min &&
           BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
         ) {
-          delete finalAttribute.min;
+          finalAttribute.min = undefined;
         }
         if (
           finalAttribute.max &&
           BigInt(finalAttribute.max) === BigInt(9223372036854776000)
         ) {
-          delete finalAttribute.max;
+          finalAttribute.max = undefined;
         }
+        const minValue =
+          finalAttribute.min !== undefined && finalAttribute.min !== null
+            ? parseInt(finalAttribute.min)
+            : 9007199254740991;
+        const maxValue =
+          finalAttribute.max !== undefined && finalAttribute.max !== null
+            ? parseInt(finalAttribute.max)
+            : 9007199254740991;
+        console.log(
+          `DEBUG: Updating integer attribute '${
+            finalAttribute.key
+          }' with min=${minValue}, max=${maxValue}, minType=${typeof minValue}, maxType=${typeof maxValue}`
+        );
         await tryAwaitWithRetry(
           async () =>
             await db.updateIntegerAttribute(
@@ -534,11 +657,11 @@ export const createOrUpdateAttribute = async (
               collection.$id,
               finalAttribute.key,
               finalAttribute.required || false,
-              finalAttribute.min !== undefined ? finalAttribute.min : -2147483647,
-              finalAttribute.max !== undefined ? finalAttribute.max : 2147483647,
               finalAttribute.xdefault !== undefined && !finalAttribute.required
                 ? finalAttribute.xdefault
-                : null
+                : null,
+              minValue,
+              maxValue
             )
         );
       }
@@ -850,115 +973,186 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   }
 
   // First, get fresh collection data and determine which attributes actually need processing
-  console.log(chalk.blue(`Analyzing ${attributes.length} attributes to determine which need processing...`));
-  
+  console.log(
+    chalk.blue(
+      `Analyzing ${attributes.length} attributes to determine which need processing...`
+    )
+  );
+
   let currentCollection = collection;
   try {
     currentCollection = await db.getCollection(dbId, collection.$id);
   } catch (error) {
-    console.log(chalk.yellow(`Warning: Could not refresh collection data: ${error}`));
+    console.log(
+      chalk.yellow(`Warning: Could not refresh collection data: ${error}`)
+    );
   }
-  
+
   const existingAttributesMap = new Map<string, Attribute>();
   try {
-    // @ts-expect-error
-    const parsedAttributes = currentCollection.attributes.map((attr) => parseAttribute(attr));
-    parsedAttributes.forEach(attr => existingAttributesMap.set(attr.key, attr));
+    const parsedAttributes = currentCollection.attributes.map((attr) =>
+      // @ts-expect-error
+      parseAttribute(attr)
+    );
+    parsedAttributes.forEach((attr) =>
+      existingAttributesMap.set(attr.key, attr)
+    );
   } catch (error) {
-    console.log(chalk.yellow(`Warning: Could not parse existing attributes: ${error}`));
+    console.log(
+      chalk.yellow(`Warning: Could not parse existing attributes: ${error}`)
+    );
   }
-  
+
   // Filter to only attributes that need processing (new or changed)
-  const attributesToProcess = attributes.filter(attribute => {
+  const attributesToProcess = attributes.filter((attribute) => {
     const existing = existingAttributesMap.get(attribute.key);
     if (!existing) {
       console.log(chalk.blue(`➕ New attribute: ${attribute.key}`));
       return true;
     }
-    
+
     const needsUpdate = !attributesSame(existing, attribute);
     if (needsUpdate) {
       console.log(chalk.blue(`🔄 Changed attribute: ${attribute.key}`));
     } else {
-      console.log(chalk.gray(`✅ Unchanged attribute: ${attribute.key} (skipping)`));
+      console.log(
+        chalk.gray(`✅ Unchanged attribute: ${attribute.key} (skipping)`)
+      );
     }
     return needsUpdate;
   });
-  
+
   if (attributesToProcess.length === 0) {
-    console.log(chalk.green(`✅ All ${attributes.length} attributes are already up to date for collection: ${collection.name}`));
+    console.log(
+      chalk.green(
+        `✅ All ${attributes.length} attributes are already up to date for collection: ${collection.name}`
+      )
+    );
     return true;
   }
-  
-  console.log(chalk.blue(`Creating ${attributesToProcess.length} attributes sequentially with status monitoring...`));
-  
+
+  console.log(
+    chalk.blue(
+      `Creating ${attributesToProcess.length} attributes sequentially with status monitoring...`
+    )
+  );
+
   let remainingAttributes = [...attributesToProcess];
   let overallRetryCount = 0;
   const maxOverallRetries = 3;
-  
-  while (remainingAttributes.length > 0 && overallRetryCount < maxOverallRetries) {
+
+  while (
+    remainingAttributes.length > 0 &&
+    overallRetryCount < maxOverallRetries
+  ) {
     const attributesToProcessThisRound = [...remainingAttributes];
     remainingAttributes = []; // Reset for next iteration
-    
-    console.log(chalk.blue(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${attributesToProcessThisRound.length} attributes ===`));
-    
+
+    console.log(
+      chalk.blue(
+        `\n=== Attempt ${
+          overallRetryCount + 1
+        }/${maxOverallRetries} - Processing ${
+          attributesToProcessThisRound.length
+        } attributes ===`
+      )
+    );
+
     for (const attribute of attributesToProcessThisRound) {
-      console.log(chalk.blue(`\n--- Processing attribute: ${attribute.key} ---`));
-      
+      console.log(
+        chalk.blue(`\n--- Processing attribute: ${attribute.key} ---`)
+      );
+
       const success = await createOrUpdateAttributeWithStatusCheck(
-        db, 
-        dbId, 
-        currentCollection, 
+        db,
+        dbId,
+        currentCollection,
         attribute
       );
-      
+
       if (success) {
-        console.log(chalk.green(`✅ Successfully created attribute: ${attribute.key}`));
-        
+        console.log(
+          chalk.green(`✅ Successfully created attribute: ${attribute.key}`)
+        );
+
         // Get updated collection data for next iteration
         try {
           currentCollection = await db.getCollection(dbId, collection.$id);
         } catch (error) {
-          console.log(chalk.yellow(`Warning: Could not refresh collection data: ${error}`));
+          console.log(
+            chalk.yellow(`Warning: Could not refresh collection data: ${error}`)
+          );
         }
-        
+
         // Add delay between successful attributes
         await delay(1000);
       } else {
-        console.log(chalk.red(`❌ Failed to create attribute: ${attribute.key}, will retry in next round`));
+        console.log(
+          chalk.red(
+            `❌ Failed to create attribute: ${attribute.key}, will retry in next round`
+          )
+        );
         remainingAttributes.push(attribute); // Add back to retry list
       }
     }
-    
+
     if (remainingAttributes.length === 0) {
-      console.log(chalk.green(`\n✅ Successfully created all ${attributesToProcess.length} attributes for collection: ${collection.name}`));
+      console.log(
+        chalk.green(
+          `\n✅ Successfully created all ${attributesToProcess.length} attributes for collection: ${collection.name}`
+        )
+      );
       return true;
     }
-    
+
     overallRetryCount++;
-    
+
     if (overallRetryCount < maxOverallRetries) {
-      console.log(chalk.yellow(`\n⏳ Waiting 5 seconds before retrying ${attributesToProcess.length} failed attributes...`));
+      console.log(
+        chalk.yellow(
+          `\n⏳ Waiting 5 seconds before retrying ${attributesToProcess.length} failed attributes...`
+        )
+      );
       await delay(5000);
-      
+
       // Refresh collection data before retry
       try {
         currentCollection = await db.getCollection(dbId, collection.$id);
         console.log(chalk.blue(`Refreshed collection data for retry`));
       } catch (error) {
-        console.log(chalk.yellow(`Warning: Could not refresh collection data for retry: ${error}`));
+        console.log(
+          chalk.yellow(
+            `Warning: Could not refresh collection data for retry: ${error}`
+          )
+        );
       }
     }
   }
-  
+
   // If we get here, some attributes still failed after all retries
   if (attributesToProcess.length > 0) {
-    console.log(chalk.red(`\n❌ Failed to create ${attributesToProcess.length} attributes after ${maxOverallRetries} attempts: ${attributesToProcess.map(a => a.key).join(', ')}`));
-    console.log(chalk.red(`This may indicate a fundamental issue with the attribute definitions or Appwrite instance`));
+    console.log(
+      chalk.red(
+        `\n❌ Failed to create ${
+          attributesToProcess.length
+        } attributes after ${maxOverallRetries} attempts: ${attributesToProcess
+          .map((a) => a.key)
+          .join(", ")}`
+      )
+    );
+    console.log(
+      chalk.red(
+        `This may indicate a fundamental issue with the attribute definitions or Appwrite instance`
+      )
+    );
     return false;
   }
-  
-  console.log(chalk.green(`\n✅ Successfully created all ${attributes.length} attributes for collection: ${collection.name}`));
+
+  console.log(
+    chalk.green(
+      `\n✅ Successfully created all ${attributes.length} attributes for collection: ${collection.name}`
+    )
+  );
   return true;
 };
 

@@ -7,7 +7,7 @@ export const AuthUserSchema = z.object({
   name: z.string().nullish(),
   email: z.string().email("Invalid Email Address").nullish(),
   phone: z.string().nullish(),
-  prefs: z.record(z.string()).optional().default({}),
+  prefs: z.record(z.string(), z.string()).optional().default({}),
   labels: z.array(z.string()).optional().default([]),
 });
 

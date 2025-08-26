@@ -7,6 +7,8 @@ import {
   type Models,
 } from "node-appwrite";
 import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { getAdapterFromConfig } from "../utils/getClientFromConfig.js";
 import { nameToIdMapping, processQueue, queuedOperations } from "../shared/operationQueue.js";
 import { createUpdateCollectionAttributes, createUpdateCollectionAttributesWithStatusCheck } from "./attributes.js";
 import { createOrUpdateIndexes, createOrUpdateIndexesWithStatusCheck } from "./indexes.js";
@@ -26,13 +28,15 @@ import { ProgressManager } from "../shared/progressManager.js";
 import chalk from "chalk";
 
 export const documentExists = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   targetCollectionId: string,
   toCreateObject: any
 ): Promise<Models.Document | null> => {
-  const collection = await db.getCollection(dbId, targetCollectionId);
-  const attributes = collection.attributes as any[];
+  const collection = await (db instanceof Databases ? 
+    db.getCollection(dbId, targetCollectionId) :
+    db.getTable({ databaseId: dbId, tableId: targetCollectionId }));
+  const attributes = (collection as any).attributes as any[];
   let arrayTypeAttributes = attributes
     .filter((attribute: any) => attribute.array === true)
     .map((attribute: any) => attribute.key);
@@ -77,28 +81,30 @@ export const documentExists = async (
   );
 
   // Execute the query with the validated and prepared parameters
-  const result = await db.listDocuments(
-    dbId,
-    targetCollectionId,
-    validQueryParams
-  );
-  return result.documents[0] || null;
+  const result = await (db instanceof Databases ?
+    db.listDocuments(dbId, targetCollectionId, validQueryParams) :
+    db.listRows({ databaseId: dbId, tableId: targetCollectionId, queries: validQueryParams }));
+  
+  const items = db instanceof Databases ? result.documents : ((result as any).rows || result.documents);
+  return items?.[0] || null;
 };
 
 export const checkForCollection = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Partial<CollectionCreate>
 ): Promise<Models.Collection | null> => {
   try {
     MessageFormatter.progress(`Checking for collection with name: ${collection.name}`, { prefix: "Collections" });
     const response = await tryAwaitWithRetry(
-      async () =>
-        await db.listCollections(dbId, [Query.equal("name", collection.name!)])
+      async () => db instanceof Databases ?
+        await db.listCollections(dbId, [Query.equal("name", collection.name!)]) :
+        await db.listTables({ databaseId: dbId, queries: [Query.equal("name", collection.name!)] })
     );
-    if (response.collections.length > 0) {
-      MessageFormatter.info(`Collection found: ${response.collections[0].$id}`, { prefix: "Collections" });
-      return { ...collection, ...response.collections[0] };
+    const items = db instanceof Databases ? response.collections : ((response as any).tables || response.collections);
+    if (items && items.length > 0) {
+      MessageFormatter.info(`Collection found: ${items[0].$id}`, { prefix: "Collections" });
+      return { ...collection, ...items[0] } as Models.Collection;
     } else {
       MessageFormatter.info(`No collection found with name: ${collection.name}`, { prefix: "Collections" });
       return null;
@@ -111,7 +117,7 @@ export const checkForCollection = async (
 
 // Helper function to fetch and cache collection by name
 export const fetchAndCacheCollectionByName = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collectionName: string
 ): Promise<Models.Collection | undefined> => {
@@ -119,16 +125,20 @@ export const fetchAndCacheCollectionByName = async (
     const collectionId = nameToIdMapping.get(collectionName);
     MessageFormatter.debug(`Collection found in cache: ${collectionId}`, undefined, { prefix: "Collections" });
     return await tryAwaitWithRetry(
-      async () => await db.getCollection(dbId, collectionId!)
-    );
+      async () => db instanceof Databases ?
+        await db.getCollection(dbId, collectionId!) :
+        await db.getTable({ databaseId: dbId, tableId: collectionId! })
+    ) as Models.Collection;
   } else {
     MessageFormatter.progress(`Fetching collection by name: ${collectionName}`, { prefix: "Collections" });
     const collectionsPulled = await tryAwaitWithRetry(
-      async () =>
-        await db.listCollections(dbId, [Query.equal("name", collectionName)])
+      async () => db instanceof Databases ?
+        await db.listCollections(dbId, [Query.equal("name", collectionName)]) :
+        await db.listTables({ databaseId: dbId, queries: [Query.equal("name", collectionName)] })
     );
-    if (collectionsPulled.total > 0) {
-      const collection = collectionsPulled.collections[0];
+    const items = db instanceof Databases ? collectionsPulled.collections : ((collectionsPulled as any).tables || collectionsPulled.collections);
+    if ((collectionsPulled.total || items?.length) > 0) {
+      const collection = items[0];
       MessageFormatter.info(`Collection found: ${collection.$id}`, { prefix: "Collections" });
       nameToIdMapping.set(collectionName, collection.$id);
       return collection;
@@ -535,7 +545,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
     return;
   } else if (fromCollDocs.documents.length < 50) {
     const batchedPromises = fromCollDocs.documents.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
+      const toCreateObject: any = {
         ...doc,
       };
       delete toCreateObject.$databaseId;
@@ -559,7 +569,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
     totalDocumentsTransferred += fromCollDocs.documents.length;
   } else {
     const batchedPromises = fromCollDocs.documents.map((doc) => {
-      const toCreateObject: Partial<typeof doc> = {
+      const toCreateObject: any = {
         ...doc,
       };
       delete toCreateObject.$databaseId;
@@ -591,7 +601,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
           ])
       );
       const batchedPromises = fromCollDocs.documents.map((doc) => {
-        const toCreateObject: Partial<typeof doc> = {
+        const toCreateObject: any = {
           ...doc,
         };
         delete toCreateObject.$databaseId;

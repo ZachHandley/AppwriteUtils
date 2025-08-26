@@ -806,7 +806,7 @@ export class DataLoader {
     if (!userData.success || !(userData.data.email || userData.data.phone)) {
       logger.error(
         `Invalid user data: ${JSON.stringify(
-          userData.error?.errors,
+          userData.error?.issues,
           undefined,
           2
         )} or missing email/phone`
@@ -908,6 +908,7 @@ export class DataLoader {
     const userDataToAdd = {
       rawData: item,
       finalData: userData.data,
+      context: {},
     };
     this.importMap.set(this.getCollectionKey("users"), {
       data: [...(usersMap?.data || []), userDataToAdd],

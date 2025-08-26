@@ -1682,6 +1682,7 @@ export class ComprehensiveTransfer {
         $permissions,
         $databaseId,
         $collectionId,
+        $sequence,
         ...docData
       } = doc;
       return {
@@ -1799,6 +1800,7 @@ export class ComprehensiveTransfer {
             $permissions,
             $databaseId,
             $collectionId,
+            $sequence,
             ...docData
           } = doc;
 
@@ -1827,6 +1829,7 @@ export class ComprehensiveTransfer {
                 $permissions,
                 $databaseId,
                 $collectionId,
+                $sequence,
                 ...docData
               } = doc;
               await tryAwaitWithRetry(async () =>
@@ -1889,6 +1892,7 @@ export class ComprehensiveTransfer {
             $permissions,
             $databaseId,
             $collectionId,
+            $sequence,
             ...docData
           } = doc;
 

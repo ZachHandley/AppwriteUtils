@@ -46,15 +46,17 @@ const YamlConfigSchema = z.object({
     .object({
       outputDirectory: z.string().default("schemas"),
       yamlSchemaDirectory: z.string().default(".yaml_schemas"),
+      collectionsDirectory: z.string().default("collections"),
     })
     .optional()
     .default({
       outputDirectory: "schemas",
       yamlSchemaDirectory: ".yaml_schemas",
+      collectionsDirectory: "collections",
     }),
   migrations: z
     .object({
-      enabled: z.boolean().default(true),
+      enabled: z.boolean().default(false),
     })
     .optional()
     .default({
@@ -148,6 +150,7 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
     appwriteEndpoint: yamlConfig.appwrite.endpoint,
     appwriteProject: yamlConfig.appwrite.project,
     appwriteKey: yamlConfig.appwrite.key,
+    apiMode: "auto", // Default to auto-detect for dual API support
     appwriteClient: null,
     logging: {
       enabled: yamlConfig.logging.enabled,
@@ -167,6 +170,7 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
       outputDirectory: yamlConfig.schemas.outputDirectory,
       yamlSchemaDirectory: yamlConfig.schemas.yamlSchemaDirectory,
       importDirectory: yamlConfig.data.importDirectory,
+      collectionsDirectory: yamlConfig.schemas.collectionsDirectory || "collections",
     },
     databases: yamlConfig.databases.map((db) => ({
       $id: db.id,
@@ -244,7 +248,7 @@ export const loadYamlConfig = async (configPath: string): Promise<AppwriteConfig
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error("❌ YAML config validation failed:");
-      error.errors.forEach((err) => {
+      error.issues.forEach((err) => {
         console.error(`  ${err.path.join('.')} → ${err.message}`);
       });
     } else {
@@ -415,6 +419,7 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
     schemas: {
       outputDirectory: "schemas",
       yamlSchemaDirectory: ".yaml_schemas",
+      collectionsDirectory: "collections",
     },
     migrations: {
       enabled: true,
@@ -476,6 +481,7 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
       schemas: {
         outputDirectory: config.schemaConfig?.outputDirectory || "schemas",
         yamlSchemaDirectory: config.schemaConfig?.yamlSchemaDirectory || ".yaml_schemas",
+        collectionsDirectory: config.schemaConfig?.collectionsDirectory || "collections",
       },
       migrations: {
         enabled: config.useMigrations !== false,

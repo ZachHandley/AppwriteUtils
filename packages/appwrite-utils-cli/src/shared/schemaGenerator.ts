@@ -414,11 +414,6 @@ export default appwriteConfig;
   createSchemaString = (name: string, attributes: Attribute[]): string => {
     const pascalName = toPascalCase(name);
     let imports = `import { z } from "zod";\n`;
-    const hasDescription = attributes.some((attr) => attr.description);
-    if (hasDescription) {
-      imports += `import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi";\n`;
-      imports += `extendZodWithOpenApi(z);\n`;
-    }
 
     // Use the relationshipMap to find related collections
     const relationshipDetails = this.relationshipMap.get(name) || [];
@@ -555,14 +550,14 @@ export default appwriteConfig;
         baseSchemaCode = "z.number().int()";
         if (finalAttribute.min !== undefined) {
           if (BigInt(finalAttribute.min) === BigInt(-9223372036854776000)) {
-            delete finalAttribute.min;
+            finalAttribute.min = undefined;
           } else {
             baseSchemaCode += `.min(${finalAttribute.min}, "Minimum value of ${finalAttribute.min} not met")`;
           }
         }
         if (finalAttribute.max !== undefined) {
           if (BigInt(finalAttribute.max) === BigInt(9223372036854776000)) {
-            delete finalAttribute.max;
+            finalAttribute.max = undefined;
           } else {
             baseSchemaCode += `.max(${finalAttribute.max}, "Maximum value of ${finalAttribute.max} exceeded")`;
           }
@@ -658,15 +653,6 @@ export default appwriteConfig;
     }
     if (attribute.array && !attribute.required) {
       baseSchemaCode += ".nullish()";
-    }
-    if (attribute.description) {
-      if (typeof attribute.description === "string") {
-        baseSchemaCode += `.openapi({ description: "${attribute.description}" })`;
-      } else {
-        baseSchemaCode += `.openapi(${Object.entries(attribute.description)
-          .map(([key, value]) => `"${key}": ${value}`)
-          .join(", ")})`;
-      }
     }
 
     return baseSchemaCode;

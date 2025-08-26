@@ -54,13 +54,6 @@ export const relationshipAttributeSchema = z.object({
     .describe(
       "Configuration for mapping and resolving relationships during data import"
     ),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .nullish()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type RelationshipAttribute = z.infer<typeof relationshipAttributeSchema>;

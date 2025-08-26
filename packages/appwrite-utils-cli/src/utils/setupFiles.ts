@@ -12,6 +12,8 @@ const baseConfig: AppwriteConfig = {
   appwriteEndpoint: "https://cloud.appwrite.io/v1",
   appwriteProject: "YOUR_PROJECT_ID",
   appwriteKey: "YOUR_API_KEY",
+  appwriteClient: null,
+  apiMode: "auto", // Enable dual API support - auto-detect TablesDB vs legacy
   logging: {
     enabled: false,
     level: "info",

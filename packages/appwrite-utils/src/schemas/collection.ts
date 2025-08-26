@@ -19,12 +19,6 @@ export const CollectionSchema = z.object({
     .default(false)
     .optional()
     .describe("Whether document security is enabled or not"),
-  description: z
-    .string()
-    .optional()
-    .describe(
-      "The description of the collection, if any, used to generate OpenAPI documentation"
-    ),
   $createdAt: z.string(),
   $updatedAt: z.string(),
   $permissions: z

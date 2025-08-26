@@ -23,13 +23,6 @@ export const enumAttributeSchema = z.object({
     .describe("The elements of the enum attribute")
     .default([]),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .nullish()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type EnumAttribute = z.infer<typeof enumAttributeSchema>;

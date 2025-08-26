@@ -22,13 +22,6 @@ export const datetimeAttributeSchema = z.object({
     .optional()
     .describe("Whether the attribute is an array or not"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .nullish()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type DatetimeAttribute = z.infer<typeof datetimeAttributeSchema>;

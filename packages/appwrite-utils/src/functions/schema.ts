@@ -47,13 +47,13 @@ export const parseAttribute = (
         attributeToParse.min &&
         BigInt(attributeToParse.min) === BigInt(-9223372036854776000)
       ) {
-        delete attributeToParse.min;
+        attributeToParse.min = undefined;
       }
       if (
         attributeToParse.max &&
         BigInt(attributeToParse.max) === BigInt(9223372036854776000)
       ) {
-        delete attributeToParse.max;
+        attributeToParse.max = undefined;
       }
       return integerAttributeSchema.parse(attributeToParse);
     case "double":

@@ -105,14 +105,14 @@ export class UsersController {
     return allUsers;
   }
 
-  async createUsersAndReturn(items: AuthUserCreate[]) {
+  async createUsersAndReturn(items: AuthUserCreate[]): Promise<any[]> {
     const users = await Promise.all(
       items.map((item) => this.createUserAndReturn(item))
     );
     return users;
   }
 
-  async createUserAndReturn(item: AuthUserCreate) {
+  async createUserAndReturn(item: AuthUserCreate): Promise<any> {
     try {
       const user = await tryAwaitWithRetry(async () => {
         const createdUser = await this.users.create(

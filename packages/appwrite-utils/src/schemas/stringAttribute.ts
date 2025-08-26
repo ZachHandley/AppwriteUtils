@@ -32,13 +32,6 @@ export const stringAttributeSchema = z.object({
     .optional()
     .describe("Whether the attribute is encrypted or not"),
   format: z.string().nullish().describe("The format of the attribute"),
-  description: z
-    .string()
-    .or(z.record(z.string()))
-    .optional()
-    .describe(
-      "The description of the attribute, also used for OpenApi Generation"
-    ),
 });
 
 export type StringAttribute = z.infer<typeof stringAttributeSchema>;

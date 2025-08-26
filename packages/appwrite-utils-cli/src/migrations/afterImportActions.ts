@@ -219,7 +219,7 @@ export const afterImportActions = {
         }
         const nextCursor = documents[documents.length - 1].$id;
         const nextBatch = await fetchAllMatchingDocuments(nextCursor);
-        return documents.concat(nextBatch);
+        return documents.concat(nextBatch as any);
       };
 
       const matchingDocuments = await fetchAllMatchingDocuments();
@@ -316,7 +316,7 @@ export const afterImportActions = {
         }
         const nextCursor = documents[documents.length - 1].$id;
         const nextBatch = await fetchAllMatchingDocuments(nextCursor);
-        return documents.concat(nextBatch);
+        return documents.concat(nextBatch as any);
       };
 
       const matchingDocuments = await fetchAllMatchingDocuments();
