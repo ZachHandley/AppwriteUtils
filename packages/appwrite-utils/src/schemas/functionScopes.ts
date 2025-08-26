@@ -16,14 +16,18 @@ import { z } from "zod";
  * Database Management:
  * - databases.read:     Access to read your project's databases
  * - databases.write:    Access to create, update, and delete your project's databases
- * - collections.read:   Access to read your project's database collections
- * - collections.write:  Access to create, update, and delete your project's database collections
+ * - collections.read:   Access to read your project's database collections (legacy)
+ * - collections.write:  Access to create, update, and delete your project's database collections (legacy)
+ * - tables.read:        Access to read your project's database tables (new)
+ * - tables.write:       Access to create, update, and delete your project's database tables (new)
  * - attributes.read:    Access to read your project's database collection's attributes
  * - attributes.write:   Access to create, update, and delete your project's database collection's attributes
  * - indexes.read:       Access to read your project's database collection's indexes
  * - indexes.write:      Access to create, update, and delete your project's database collection's indexes
- * - documents.read:     Access to read your project's database documents
- * - documents.write:    Access to create, update, and delete your project's database documents
+ * - documents.read:     Access to read your project's database documents (legacy)
+ * - documents.write:    Access to create, update, and delete your project's database documents (legacy)
+ * - rows.read:          Access to read your project's database rows (new)
+ * - rows.write:         Access to create, update, and delete your project's database rows (new)
  *
  * Storage Management:
  * - files.read:     Access to read your project's storage files and preview images
@@ -80,12 +84,16 @@ const functionScopeValues = [
   "databases.write",
   "collections.read",
   "collections.write",
+  "tables.read",
+  "tables.write",
   "attributes.read",
   "attributes.write",
   "indexes.read",
   "indexes.write",
   "documents.read",
   "documents.write",
+  "rows.read",
+  "rows.write",
   "files.read",
   "files.write",
   "buckets.read",

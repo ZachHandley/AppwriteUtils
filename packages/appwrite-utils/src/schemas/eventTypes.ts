@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /**
  * Valid event types for Appwrite Functions
- * These correspond to database and collection events that can trigger functions
+ * These correspond to database, collection/table, and document/row events that can trigger functions
+ * Supports both legacy (collections/documents) and new (tables/rows) naming conventions
  */
 const eventTypeValues = [
   "buckets.*.create",
@@ -16,6 +17,12 @@ const eventTypeValues = [
   "collections.*.documents.*.delete", 
   "collections.*.documents.*.update",
   "collections.*.documents.*.upsert",
+  "tables.*.create",
+  "tables.*.delete",
+  "tables.*.rows.*.create",
+  "tables.*.rows.*.delete",
+  "tables.*.rows.*.update",
+  "tables.*.rows.*.upsert",
   "databases.*.create",
   "databases.*.delete",
   "functions.*.deployments.*.create",
@@ -43,7 +50,7 @@ export const EventTypeSchema = z.string().refine(
 );
 
 /**
- * Common database event patterns for documents
+ * Common database event patterns for documents/rows
  */
 export const DocumentEventTypeSchema = z.enum([
   "create",
