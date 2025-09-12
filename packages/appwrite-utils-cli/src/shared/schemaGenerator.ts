@@ -33,6 +33,13 @@ export class SchemaGenerator {
     this.extractRelationships();
   }
 
+  private resolveCollectionName = (idOrName: string): string => {
+    const col = this.config.collections?.find(
+      (c) => c.$id === (idOrName as any) || c.name === idOrName
+    );
+    return col?.name ?? idOrName;
+  };
+
   public updateYamlCollections(): void {
     const collections = this.config.collections;
     delete this.config.collections;
@@ -318,9 +325,9 @@ export default appwriteConfig;
           }
           this.addRelationship(
             collection.name,
-            relationshipAttr.relatedCollection,
+            this.resolveCollectionName(relationshipAttr.relatedCollection),
             attr.key,
-            relationshipAttr.twoWayKey,
+            relationshipAttr.twoWayKey!,
             isArrayParent,
             isArrayChild
           );
@@ -383,7 +390,7 @@ export default appwriteConfig;
     // Generate Zod schemas (TypeScript)
     if (format === "zod" || format === "both") {
       this.config.collections.forEach((collection) => {
-        const schemaString = this.createSchemaString(
+        const schemaString = this.createSchemaStringV4(
           collection.name,
           collection.attributes || []
         );
@@ -411,13 +418,14 @@ export default appwriteConfig;
     }
   }
 
-  createSchemaString = (name: string, attributes: Attribute[]): string => {
+  // Zod v4 recursive getter-based schemas
+  createSchemaStringV4 = (name: string, attributes: Attribute[]): string => {
     const pascalName = toPascalCase(name);
     let imports = `import { z } from "zod";\n`;
 
     // Use the relationshipMap to find related collections
     const relationshipDetails = this.relationshipMap.get(name) || [];
-    const relatedCollections = relationshipDetails
+    let relatedCollections = relationshipDetails
       .filter((detail, index, self) => {
         const uniqueKey = `${detail.parentCollection}-${detail.childCollection}-${detail.parentKey}-${detail.childKey}`;
         return (
@@ -438,87 +446,73 @@ export default appwriteConfig;
         return [relatedCollectionName, key, isArray];
       });
 
-    // Check if we have any relationships - if not, generate simple schema
-    const hasRelationships = relatedCollections.length > 0;
-    
-    let schemaString = `${imports}\n\n`;
-
-    if (!hasRelationships) {
-      // Simple case: no relationships, generate single schema directly
-      schemaString += `export const ${pascalName}Schema = z.object({\n`;
-      schemaString += `  $id: z.string(),\n`;
-      schemaString += `  $createdAt: z.string(),\n`;
-      schemaString += `  $updatedAt: z.string(),\n`;
-      schemaString += `  $permissions: z.array(z.string()),\n`;
-      for (const attribute of attributes) {
-        if (attribute.type === "relationship") {
-          continue;
-        }
-        schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
+    // Include one-way relationship attributes directly (no twoWayKey)
+    const oneWayRels: Array<[string, string, string]> = [];
+    for (const attr of attributes) {
+      if (attr.type === "relationship" && attr.relatedCollection) {
+        const relatedName = this.resolveCollectionName(attr.relatedCollection);
+        const isArray =
+          attr.relationType === "oneToMany" || attr.relationType === "manyToMany"
+            ? "array"
+            : "";
+        oneWayRels.push([relatedName, attr.key, isArray]);
       }
-      schemaString += `});\n\n`;
-      schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
-    } else {
-      // Complex case: has relationships, generate BaseSchema + extended schema pattern
-      let relatedTypes = "";
-      let relatedTypesLazy = "";
-      let curNum = 0;
-      let maxNum = relatedCollections.length;
-      
-      relatedCollections.forEach((relatedCollection) => {
-        console.log(relatedCollection);
-        let relatedPascalName = toPascalCase(relatedCollection[0]);
-        let relatedCamelName = toCamelCase(relatedCollection[0]);
-        curNum++;
-        let endNameTypes = relatedPascalName;
-        let endNameLazy = `${relatedPascalName}Schema`;
-        if (relatedCollection[2] === "array") {
-          endNameTypes += "[]";
-          endNameLazy += ".array().default([])";
-        } else if (!(relatedCollection[2] === "array")) {
-          endNameTypes += " | null";
-          endNameLazy += ".nullish()";
-        }
-        imports += `import { ${relatedPascalName}Schema, type ${relatedPascalName} } from "./${relatedCamelName}";\n`;
-        relatedTypes += `${relatedCollection[1]}?: ${endNameTypes};\n`;
-        if (relatedTypes.length > 0 && curNum !== maxNum) {
-          relatedTypes += "  ";
-        }
-        relatedTypesLazy += `${relatedCollection[1]}: z.lazy(() => ${endNameLazy}),\n`;
-        if (relatedTypesLazy.length > 0 && curNum !== maxNum) {
-          relatedTypesLazy += "  ";
-        }
-      });
-
-      // Re-add imports after processing relationships
-      schemaString = `${imports}\n\n`;
-      
-      schemaString += `export const ${pascalName}SchemaBase = z.object({\n`;
-      schemaString += `  $id: z.string(),\n`;
-      schemaString += `  $createdAt: z.string(),\n`;
-      schemaString += `  $updatedAt: z.string(),\n`;
-      schemaString += `  $permissions: z.array(z.string()),\n`;
-      for (const attribute of attributes) {
-        if (attribute.type === "relationship") {
-          continue;
-        }
-        schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
-      }
-      schemaString += `});\n\n`;
-      schemaString += `export type ${pascalName}Base = z.infer<typeof ${pascalName}SchemaBase>`;
-      if (relatedTypes.length > 0) {
-        schemaString += ` & {\n  ${relatedTypes}};\n\n`;
-      } else {
-        schemaString += `;\n\n`;
-      }
-      schemaString += `export const ${pascalName}Schema: z.ZodType<${pascalName}Base> = ${pascalName}SchemaBase`;
-      if (relatedTypes.length > 0) {
-        schemaString += `.extend({\n  ${relatedTypesLazy}});\n\n`;
-      } else {
-        schemaString += `;\n`;
-      }
-      schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
     }
+
+    // Merge and dedupe (by relatedName+key)
+    relatedCollections = [...relatedCollections, ...oneWayRels].filter(
+      (item, idx, self) =>
+        idx === self.findIndex((o) => `${o[0]}::${o[1]}` === `${item[0]}::${item[1]}`)
+    );
+
+    const hasRelationships = relatedCollections.length > 0;
+
+    // Build imports for related collections
+    if (hasRelationships) {
+      const importLines = relatedCollections.map((rel) => {
+        const relatedPascalName = toPascalCase(rel[0]);
+        const relatedCamelName = toCamelCase(rel[0]);
+        return `import { ${relatedPascalName}Schema } from "./${relatedCamelName}";`;
+      });
+      const unique = Array.from(new Set(importLines));
+      imports += unique.join("\n") + (unique.length ? "\n" : "");
+    }
+
+    let schemaString = `${imports}\n`;
+
+    // Single object schema with recursive getters (Zod v4)
+    schemaString += `export const ${pascalName}Schema = z.object({\n`;
+    schemaString += `  $id: z.string(),\n`;
+    schemaString += `  $createdAt: z.string(),\n`;
+    schemaString += `  $updatedAt: z.string(),\n`;
+    schemaString += `  $permissions: z.array(z.string()),\n`;
+    for (const attribute of attributes) {
+      if (attribute.type === "relationship") continue;
+      schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
+    }
+
+    // Add recursive getters for relationships (respect required flag)
+    relatedCollections.forEach((rel) => {
+      const relatedPascalName = toPascalCase(rel[0]);
+      const isArray = rel[2] === "array";
+      const key = String(rel[1]);
+      const attrMeta = attributes.find(a => a.key === key && a.type === "relationship");
+      const isRequired = !!attrMeta?.required;
+      let getterBody = "";
+      if (isArray) {
+        getterBody = isRequired
+          ? `${relatedPascalName}Schema.array()`
+          : `${relatedPascalName}Schema.array().nullish()`;
+      } else {
+        getterBody = isRequired
+          ? `${relatedPascalName}Schema`
+          : `${relatedPascalName}Schema.nullish()`;
+      }
+      schemaString += `  get ${key}(){\n    return ${getterBody}\n  },\n`;
+    });
+
+    schemaString += `});\n\n`;
+    schemaString += `export type ${pascalName} = z.infer<typeof ${pascalName}Schema>;\n\n`;
 
     return schemaString;
   };

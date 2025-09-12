@@ -34,6 +34,7 @@ import {
   fetchAllCollections,
   wipeCollection,
 } from "./collections/methods.js";
+import { wipeAllTables, wipeTableRows } from "./collections/methods.js";
 import {
   backupDatabase,
   ensureDatabaseConfigBucketsExist,
@@ -58,6 +59,7 @@ import {
   type TransferOptions,
 } from "./migrations/transfer.js";
 import { getClient } from "./utils/getClientFromConfig.js";
+import { getAdapterFromConfig } from "./utils/getClientFromConfig.js";
 import { fetchAllDatabases } from "./databases/methods.js";
 import {
   listFunctions,
@@ -415,8 +417,17 @@ export class UtilsController {
 
   async wipeDatabase(database: Models.Database, wipeBucket: boolean = false) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
-    await wipeDatabase(this.database, database.$id);
+    if (!this.database || !this.config) throw new Error("Database not initialized");
+    try {
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config);
+      if (apiMode === 'tablesdb') {
+        await wipeAllTables(adapter, database.$id);
+      } else {
+        await wipeDatabase(this.database, database.$id);
+      }
+    } catch {
+      await wipeDatabase(this.database, database.$id);
+    }
     if (wipeBucket) {
       await this.wipeBucketFromDatabase(database);
     }
@@ -453,8 +464,17 @@ export class UtilsController {
     collection: Models.Collection
   ) {
     await this.init();
-    if (!this.database) throw new Error("Database not initialized");
-    await wipeCollection(this.database, database.$id, collection.$id);
+    if (!this.database || !this.config) throw new Error("Database not initialized");
+    try {
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config);
+      if (apiMode === 'tablesdb') {
+        await wipeTableRows(adapter, database.$id, collection.$id);
+      } else {
+        await wipeCollection(this.database, database.$id, collection.$id);
+      }
+    } catch {
+      await wipeCollection(this.database, database.$id, collection.$id);
+    }
   }
 
   async wipeDocumentStorage(bucketId: string) {

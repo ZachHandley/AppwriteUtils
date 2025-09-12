@@ -327,6 +327,27 @@ This updated CLI ensures that developers have robust tools at their fingertips t
 
 ## Changelog
 
+### 1.5.0 - Recursive Zod v4 Schemas + One‑Way Relationship Support
+
+Highlights
+- Recursive getters: Generated schemas now use Zod v4 recursive getters (no `z.lazy`, no `BaseSchema` layering). Cleaner types and fully inferred mutual recursion.
+- One‑way relationships: Relationship attributes are now included even when `twoWay: false`. Related imports resolve collection IDs to names.
+- Required semantics: Relationship getters respect `required` and `array`:
+  - required scalar → `RelatedSchema`
+  - optional scalar → `RelatedSchema.nullish()`
+  - required array → `RelatedSchema.array()`
+  - optional array → `RelatedSchema.array().nullish()`
+- JSON Schemas: `$ref` definitions use resolved collection names when YAML provides IDs.
+
+Validation changes
+- Relationship schema: `twoWayKey` and `side` are now required only when `twoWay` is `true`.
+- Helpful errors: Keeps strong validation but removes false negatives for one‑way relationships.
+
+Developer notes
+- Imports: Schema generators import only `...Schema` from related collections (no type imports needed).
+- Example YAML: `Posts.yaml` demonstrates a required `manyToMany` (`categories`) and a one‑way `manyToOne` (`author`).
+
+
 ### 1.3.0 - Zod v4 Upgrade & Collection Management Fixes
 
 **🎉 Major Release - Zod v4 Compatibility & Reliability Improvements**

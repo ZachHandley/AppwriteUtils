@@ -5,6 +5,7 @@ import { register } from "tsx/esm/api"; // Import the register function
 import { pathToFileURL } from "node:url";
 import chalk from "chalk";
 import { findYamlConfig, loadYamlConfig } from "../config/yamlConfig.js";
+import { detectAppwriteVersionCached, fetchServerVersion, isVersionAtLeast } from "./versionDetection.js";
 import yaml from "js-yaml";
 import { z } from "zod";
 import { MessageFormatter } from "../shared/messageFormatter.js";
@@ -165,16 +166,27 @@ export const loadConfigWithPath = async (
     throw new Error("No valid configuration found");
   }
 
-  // Determine collections directory based on actual config file location
+  // Determine directory (collections or tables) based on server version / API mode
+  let dirName = "collections";
+  try {
+    const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
+    if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
+      dirName = 'tables';
+    } else {
+      // Try health version if not provided
+      const ver = await fetchServerVersion(config.appwriteEndpoint);
+      if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName = 'tables';
+    }
+  } catch {}
+
+  // Determine collections directory based on actual config file location and dirName
   let collectionsDir: string;
   const configFileDir = path.dirname(actualConfigPath);
-  
-  // Check if config is in .appwrite directory
-  if (configFileDir.endsWith('.appwrite')) {
-    collectionsDir = path.join(configFileDir, "collections");
-  } else {
-    // Config is in root or other directory
-    collectionsDir = path.join(configFileDir, "collections");
+  collectionsDir = path.join(configFileDir, dirName);
+  // Fallback if not found
+  if (!fs.existsSync(collectionsDir)) {
+    const fallback = path.join(configFileDir, dirName === 'tables' ? 'collections' : 'tables');
+    if (fs.existsSync(fallback)) collectionsDir = fallback;
   }
 
   // Load collections if they exist
@@ -267,21 +279,28 @@ export const loadConfig = async (
     throw new Error("No valid configuration found");
   }
 
-  // Determine collections directory based on actual config file location
+  // Determine directory (collections or tables) based on server version / API mode
+  let dirName2 = "collections";
+  try {
+    const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
+    if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
+      dirName2 = 'tables';
+    } else {
+      const ver = await fetchServerVersion(config.appwriteEndpoint);
+      if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName2 = 'tables';
+    }
+  } catch {}
+
   let collectionsDir: string;
   if (actualConfigPath) {
     const configFileDir = path.dirname(actualConfigPath);
-    
-    // Check if config is in .appwrite directory
-    if (configFileDir.endsWith('.appwrite')) {
-      collectionsDir = path.join(configFileDir, "collections");
-    } else {
-      // Config is in root or other directory
-      collectionsDir = path.join(configFileDir, "collections");
-    }
+    collectionsDir = path.join(configFileDir, dirName2);
   } else {
-    // Fallback to original behavior if no actual config path found
-    collectionsDir = path.join(configDir, "collections");
+    collectionsDir = path.join(configDir, dirName2);
+  }
+  if (!fs.existsSync(collectionsDir)) {
+    const fallback = path.join(path.dirname(actualConfigPath || configDir), dirName2 === 'tables' ? 'collections' : 'tables');
+    if (fs.existsSync(fallback)) collectionsDir = fallback;
   }
 
   // Load collections if they exist

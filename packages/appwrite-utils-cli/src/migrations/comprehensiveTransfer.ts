@@ -17,6 +17,7 @@ import {
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { processQueue, queuedOperations } from "../shared/operationQueue.js";
 import { ProgressManager } from "../shared/progressManager.js";
 import { getClient } from "../utils/getClientFromConfig.js";
 import {
@@ -624,6 +625,19 @@ export class ComprehensiveTransfer {
             { prefix: "Transfer" }
           );
         }
+      }
+      // After processing all collections' attributes and indexes, process any queued
+      // relationship attributes so dependencies are resolved within this phase.
+      if (queuedOperations.length > 0) {
+        MessageFormatter.info(
+          `Processing ${queuedOperations.length} queued relationship operations`,
+          { prefix: "Transfer" }
+        );
+        await processQueue(this.targetDatabases, dbId);
+      } else {
+        MessageFormatter.info("No queued relationship operations to process", {
+          prefix: "Transfer",
+        });
       }
     } catch (error) {
       MessageFormatter.error(

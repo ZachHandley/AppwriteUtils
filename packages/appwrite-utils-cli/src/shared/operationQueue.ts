@@ -49,10 +49,25 @@ export const processQueue = async (db: Databases, dbId: string) => {
         }
         // Attempt to resolve related collection if specified and not already found
         if (!collectionFound && operation.attribute?.relatedCollection) {
-          collectionFound = await fetchAndCacheCollectionByName(
+          // First, try treating relatedCollection as an ID
+          try {
+            const relAttr: any = operation.attribute as any;
+            const byId = await tryAwaitWithRetry(
+              async () => await db.getCollection(dbId, relAttr.relatedCollection as string)
+            );
+            // We still need the target collection (operation.collectionId) to create the attribute on,
+            // so only use this branch to warm caches/mappings and continue to dependency checks.
+            // Do not override collectionFound with the related collection.
+          } catch (_) {
+            // Not an ID or not found; fall back to name-based cache
+          }
+
+          // Warm cache by name (used by attribute creation path), but do not use as target collection
+          const relAttr: any = operation.attribute as any;
+          await fetchAndCacheCollectionByName(
             db,
             dbId,
-            operation.attribute.relatedCollection
+            relAttr.relatedCollection
           );
         }
         // Handle dependencies if collection still not found

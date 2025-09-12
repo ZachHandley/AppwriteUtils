@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const relationshipAttributeSchema = z.object({
+export const relationshipAttributeSchema = z
+  .object({
   key: z.string().describe("The key of the attribute"),
   type: z
     .literal("relationship")
@@ -30,12 +31,16 @@ export const relationshipAttributeSchema = z.object({
   twoWay: z.boolean().describe("Whether the relationship is two way or not"),
   twoWayKey: z
     .string()
-    .describe("The ID of the foreign key in the other collection"),
+    .optional()
+    .describe("The ID of the foreign key in the other collection (required when twoWay is true)"),
   onDelete: z
     .enum(["setNull", "cascade", "restrict"])
     .describe("The action to take when the related document is deleted")
     .default("setNull"),
-  side: z.enum(["parent", "child"]).describe("The side of the relationship"),
+  side: z
+    .enum(["parent", "child"]) 
+    .optional()
+    .describe("The side of the relationship (required when twoWay is true)"),
   importMapping: z
     .object({
       originalIdField: z
@@ -54,6 +59,24 @@ export const relationshipAttributeSchema = z.object({
     .describe(
       "Configuration for mapping and resolving relationships during data import"
     ),
-});
+  })
+  .superRefine((val, ctx) => {
+    if (val.twoWay) {
+      if (!val.twoWayKey) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["twoWayKey"],
+          message: "twoWayKey is required when twoWay is true",
+        });
+      }
+      if (!val.side) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["side"],
+          message: "side is required when twoWay is true",
+        });
+      }
+    }
+  });
 
 export type RelationshipAttribute = z.infer<typeof relationshipAttributeSchema>;

@@ -248,8 +248,9 @@ export class TablesDBAdapter extends BaseAdapter {
   // Attribute Operations
   async createAttribute(params: CreateAttributeParams): Promise<ApiResponse> {
     try {
-      // TablesDB may have different method names for attribute operations
-      const result = await this.tablesDB.createAttribute(params);
+      // Prefer createColumn if available, fallback to createAttribute
+      const fn = this.tablesDB.createColumn || this.tablesDB.createAttribute;
+      const result = await fn.call(this.tablesDB, params);
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -262,7 +263,8 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.updateAttribute(params);
+      const fn = this.tablesDB.updateColumn || this.tablesDB.updateAttribute;
+      const result = await fn.call(this.tablesDB, params);
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -275,7 +277,8 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteAttribute(params);
+      const fn = this.tablesDB.deleteColumn || this.tablesDB.deleteAttribute;
+      const result = await fn.call(this.tablesDB, params);
       return { data: result };
     } catch (error) {
       throw new AdapterError(

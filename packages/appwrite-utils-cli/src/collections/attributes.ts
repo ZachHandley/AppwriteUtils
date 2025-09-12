@@ -305,7 +305,18 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
   try {
     // First, try to create/update the attribute using existing logic
-    await createOrUpdateAttribute(db, dbId, collection, attribute);
+    const result = await createOrUpdateAttribute(db, dbId, collection, attribute);
+
+    // If the attribute was queued (relationship dependency unresolved),
+    // skip status polling and retry logic — the queue will handle it later.
+    if (result === "queued") {
+      console.log(
+        chalk.yellow(
+          `⏭️  Deferred relationship attribute '${attribute.key}' — queued for later once dependencies are available`
+        )
+      );
+      return true;
+    }
 
     // Now wait for the attribute to become available
     const success = await waitForAttributeAvailable(
@@ -445,7 +456,7 @@ export const createOrUpdateAttribute = async (
   dbId: string,
   collection: Models.Collection,
   attribute: Attribute
-): Promise<void> => {
+): Promise<"queued" | "processed"> => {
   let action = "create";
   let foundAttribute: Attribute | undefined;
   const updateEnabled = true;
@@ -466,7 +477,7 @@ export const createOrUpdateAttribute = async (
     updateEnabled
   ) {
     // No need to do anything, they are the same
-    return;
+    return "processed";
   } else if (
     foundAttribute &&
     !attributesSame(foundAttribute, attribute) &&
@@ -489,7 +500,7 @@ export const createOrUpdateAttribute = async (
     console.log(
       `Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`
     );
-    return;
+    return "processed";
   }
 
   // console.log(`${action}-ing attribute: ${finalAttribute.key}`);
@@ -501,7 +512,18 @@ export const createOrUpdateAttribute = async (
     finalAttribute.type === "relationship" &&
     finalAttribute.relatedCollection
   ) {
-    if (nameToIdMapping.has(finalAttribute.relatedCollection)) {
+    // First try treating relatedCollection as an ID directly
+    try {
+      const byIdCollection = await db.getCollection(dbId, finalAttribute.relatedCollection);
+      collectionFoundViaRelatedCollection = byIdCollection;
+      relatedCollectionId = byIdCollection.$id;
+      // Cache by name for subsequent lookups
+      nameToIdMapping.set(byIdCollection.name, byIdCollection.$id);
+    } catch (_) {
+      // Not an ID or not found — fall back to name-based resolution below
+    }
+
+    if (!collectionFoundViaRelatedCollection && nameToIdMapping.has(finalAttribute.relatedCollection)) {
       relatedCollectionId = nameToIdMapping.get(
         finalAttribute.relatedCollection
       );
@@ -516,7 +538,7 @@ export const createOrUpdateAttribute = async (
         // );
         collectionFoundViaRelatedCollection = undefined;
       }
-    } else {
+    } else if (!collectionFoundViaRelatedCollection) {
       const collectionsPulled = await db.listCollections(dbId, [
         Query.equal("name", finalAttribute.relatedCollection),
       ]);
@@ -543,7 +565,7 @@ export const createOrUpdateAttribute = async (
         attribute,
         dependencies: [finalAttribute.relatedCollection],
       });
-      return;
+      return "queued";
     }
   }
   finalAttribute = parseAttribute(finalAttribute);
@@ -914,6 +936,7 @@ export const createOrUpdateAttribute = async (
       console.error("Invalid attribute type");
       break;
   }
+  return "processed";
 };
 
 /**

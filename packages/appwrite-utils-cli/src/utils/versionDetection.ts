@@ -263,3 +263,30 @@ export async function detectSdkSupport(): Promise<{
 export function clearVersionDetectionCache(): void {
   detectionCache.clear();
 }
+
+/**
+ * Fetch server version from /health/version (no auth required)
+ */
+export async function fetchServerVersion(endpoint: string): Promise<string | null> {
+  try {
+    const clean = endpoint.replace(/\/$/, '');
+    const res = await fetch(`${clean}/health/version`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null) as any;
+    const version = (data && (data.version || data.build || data.release)) ?? null;
+    return typeof version === 'string' ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Compare semantic versions (basic) */
+export function isVersionAtLeast(current: string | undefined, target: string): boolean {
+  if (!current) return false;
+  const toNums = (v: string) => v.split('.').map(n => parseInt(n, 10));
+  const [a1=0,a2=0,a3=0] = toNums(current);
+  const [b1,b2,b3] = toNums(target);
+  if (a1 !== b1) return a1 > b1;
+  if (a2 !== b2) return a2 > b2;
+  return a3 >= b3;
+}

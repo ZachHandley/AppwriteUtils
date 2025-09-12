@@ -1,5 +1,6 @@
 import { indexSchema, type Index } from "appwrite-utils";
 import { Databases, IndexType, Query, type Models } from "node-appwrite";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import chalk from "chalk";
 
@@ -19,7 +20,7 @@ interface IndexWithStatus {
  * Wait for index to become available, with retry logic for stuck indexes and exponential backoff
  */
 const waitForIndexAvailable = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collectionId: string,
   indexKey: string,
@@ -41,17 +42,24 @@ const waitForIndexAvailable = async (
   
   while (Date.now() - startTime < maxWaitTime) {
     try {
-      const indexList = await db.listIndexes(dbId, collectionId);
-      const index = indexList.indexes.find(
-        (idx: any) => idx.key === indexKey
-      ) as IndexWithStatus | undefined;
+      const indexList = await (db instanceof Databases
+        ? db.listIndexes(dbId, collectionId)
+        : (db as DatabaseAdapter).listIndexes({ databaseId: dbId, tableId: collectionId }));
+      const indexes: any[] = (db instanceof Databases)
+        ? (indexList as any).indexes
+        : ((indexList as any).data || (indexList as any).indexes || []);
+      const index = indexes.find((idx: any) => idx.key === indexKey) as IndexWithStatus | undefined;
       
       if (!index) {
         console.log(chalk.red(`Index '${indexKey}' not found`));
         return false;
       }
       
-      console.log(chalk.gray(`Index '${indexKey}' status: ${index.status}`));
+      if (db instanceof Databases) {
+        console.log(chalk.gray(`Index '${indexKey}' status: ${(index as any).status}`));
+      } else {
+        console.log(chalk.gray(`Index '${indexKey}' detected (TablesDB)`));
+      }
       
       switch (index.status) {
         case 'available':

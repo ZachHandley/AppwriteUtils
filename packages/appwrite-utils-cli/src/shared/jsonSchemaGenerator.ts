@@ -44,6 +44,13 @@ export class JsonSchemaGenerator {
     this.extractRelationships();
   }
 
+  private resolveCollectionName = (idOrName: string): string => {
+    const col = this.config.collections?.find(
+      (c) => c.$id === (idOrName as any) || c.name === idOrName
+    );
+    return col?.name ?? idOrName;
+  };
+
   private extractRelationships(): void {
     if (!this.config.collections) return;
 
@@ -55,7 +62,7 @@ export class JsonSchemaGenerator {
           const relationships = this.relationshipMap.get(collection.name) || [];
           relationships.push({
             attributeKey: attr.key,
-            relatedCollection: attr.relatedCollection,
+            relatedCollection: this.resolveCollectionName(attr.relatedCollection),
             relationType: attr.relationType,
             isArray: attr.relationType === "oneToMany" || attr.relationType === "manyToMany"
           });
@@ -156,7 +163,7 @@ export class JsonSchemaGenerator {
       case "relationship":
         if (attribute.relatedCollection) {
           // For relationships, reference the related collection schema
-          schema.$ref = `#/definitions/${toPascalCase(attribute.relatedCollection)}`;
+          schema.$ref = `#/definitions/${toPascalCase(this.resolveCollectionName(attribute.relatedCollection))}`;
         } else {
           schema.type = "string";
         }

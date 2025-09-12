@@ -2,6 +2,8 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { AppwriteConfig } from "appwrite-utils";
 import { findAppwriteConfig } from "./loadConfigs.js";
+import { loadYamlConfig } from "../config/yamlConfig.js";
+import { fetchServerVersion, isVersionAtLeast } from "./versionDetection.js";
 import { findYamlConfig } from "../config/yamlConfig.js";
 import { ID } from "node-appwrite";
 import { ulid } from "ulidx";
@@ -265,7 +267,21 @@ export const setupDirsFiles = async (
   const appwriteSchemaFolder = path.join(appwriteFolder, "schemas");
   const appwriteYamlSchemaFolder = path.join(appwriteFolder, ".yaml_schemas");
   const appwriteDataFolder = path.join(appwriteFolder, "importData");
-  const collectionsFolder = path.join(appwriteFolder, "collections");
+  // Decide between collections or tables folder
+  let useTables = false;
+  try {
+    // Try reading YAML config if present to detect version
+    const yamlPath = findYamlConfig(basePath);
+    if (yamlPath) {
+      const cfg = await loadYamlConfig(yamlPath);
+      if (cfg) {
+        const ver = await fetchServerVersion(cfg.appwriteEndpoint);
+        if (isVersionAtLeast(ver || undefined, '1.8.0')) useTables = true;
+      }
+    }
+  } catch {}
+  const targetFolderName = useTables ? "tables" : "collections";
+  const collectionsFolder = path.join(appwriteFolder, targetFolderName);
 
   // Create directory structure
   if (!existsSync(appwriteFolder)) {

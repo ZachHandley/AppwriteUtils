@@ -232,6 +232,12 @@ const documents = await listDocumentsBatched(
 
 ## Changelog
 
+### 1.5.0 - Relationship Schema Relaxation (Two-Way Optional Keys)
+
+- RelationshipAttribute: `twoWayKey` and `side` are now optional unless `twoWay: true`.
+- Added validation guard to require both fields when `twoWay` is enabled.
+- Improves compatibility with one-way relationships and CLI push flows.
+
 ### 1.3.0 - Zod v4 Upgrade & Enhanced Collection Management
 
 **🎉 Major Release - Zod v4 Compatibility & Performance Improvements**

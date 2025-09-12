@@ -6,7 +6,7 @@ import {
   Query,
   type Models,
 } from "node-appwrite";
-import type { AppwriteConfig, CollectionCreate, Indexes } from "appwrite-utils";
+import type { AppwriteConfig, CollectionCreate, Indexes, Attribute } from "appwrite-utils";
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { getAdapterFromConfig } from "../utils/getClientFromConfig.js";
 import { nameToIdMapping, processQueue, queuedOperations } from "../shared/operationQueue.js";
@@ -306,6 +306,76 @@ export const wipeCollection = async (
   await wipeDocumentsFromCollection(database, databaseId, collection.$id);
 };
 
+// TablesDB helpers for wiping
+export const wipeAllTables = async (
+  adapter: DatabaseAdapter,
+  databaseId: string
+): Promise<{ tableId: string; tableName: string }[]> => {
+  MessageFormatter.info(`Wiping tables in database: ${databaseId}`, { prefix: 'Wipe' });
+  const res = await adapter.listTables({ databaseId, queries: [Query.limit(500)] });
+  const tables: any[] = (res as any).tables || [];
+  const deleted: { tableId: string; tableName: string }[] = [];
+  const progress = ProgressManager.create(`wipe-db-${databaseId}`, tables.length, { title: 'Deleting tables' });
+  let processed = 0;
+  for (const t of tables) {
+    try {
+      await adapter.deleteTable({ databaseId, tableId: t.$id });
+      deleted.push({ tableId: t.$id, tableName: t.name });
+    } catch (e) {
+      MessageFormatter.error(`Failed deleting table ${t.$id}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Wipe' });
+    }
+    processed++; progress.update(processed);
+    await delay(100);
+  }
+  progress.stop();
+  return deleted;
+};
+
+export const wipeTableRows = async (
+  adapter: DatabaseAdapter,
+  databaseId: string,
+  tableId: string
+): Promise<void> => {
+  try {
+    const initial = await adapter.listRows({ databaseId, tableId, queries: [Query.limit(1000)] });
+    let rows: any[] = (initial as any).rows || [];
+    let total = rows.length;
+    let cursor = rows.length >= 1000 ? rows[rows.length - 1].$id : undefined;
+    while (cursor) {
+      const resp = await adapter.listRows({ databaseId, tableId, queries: [Query.limit(1000), ...(cursor ? [Query.cursorAfter(cursor)] : [])] });
+      const more: any[] = (resp as any).rows || [];
+      rows.push(...more);
+      total = rows.length;
+      cursor = more.length >= 1000 ? more[more.length - 1].$id : undefined;
+      if (total % 10000 === 0) {
+        MessageFormatter.progress(`Found ${total} rows...`, { prefix: 'Wipe' });
+      }
+    }
+    MessageFormatter.info(`Found ${total} rows to delete`, { prefix: 'Wipe' });
+    if (total === 0) return;
+    const progress = ProgressManager.create(`delete-${tableId}`, total, { title: 'Deleting rows' });
+    let processed = 0;
+    const maxStackSize = 50;
+    const batches = chunk(rows, maxStackSize);
+    for (const batch of batches) {
+      await Promise.all(batch.map(async (row: any) => {
+        try {
+          await adapter.deleteRow({ databaseId, tableId, id: row.$id });
+        } catch (e: any) {
+          // ignore missing rows
+        }
+        processed++; progress.update(processed);
+      }));
+      await delay(50);
+    }
+    progress.stop();
+    MessageFormatter.success(`Completed deletion of ${total} rows from table ${tableId}`, { prefix: 'Wipe' });
+  } catch (error) {
+    MessageFormatter.error(`Error wiping rows from table ${tableId}`, error instanceof Error ? error : new Error(String(error)), { prefix: 'Wipe' });
+    throw error;
+  }
+};
+
 export const generateSchemas = async (
   config: AppwriteConfig,
   appwriteFolderPath: string
@@ -321,6 +391,16 @@ export const createOrUpdateCollections = async (
   deletedCollections?: { collectionId: string; collectionName: string }[],
   selectedCollections: Models.Collection[] = []
 ): Promise<void> => {
+  // If API mode is tablesdb, route to adapter-based implementation
+  try {
+    const { adapter, apiMode } = await getAdapterFromConfig(config);
+    if (apiMode === 'tablesdb') {
+      await createOrUpdateCollectionsViaAdapter(adapter, databaseId, config, deletedCollections, selectedCollections);
+      return;
+    }
+  } catch {
+    // Fallback to legacy path below
+  }
   const collectionsToProcess =
     selectedCollections.length > 0 ? selectedCollections : config.collections;
   if (!collectionsToProcess) {
@@ -471,6 +551,199 @@ export const createOrUpdateCollections = async (
     await processQueue(database, databaseId);
   } else {
     MessageFormatter.info("No queued operations to process", { prefix: "Collections" });
+  }
+};
+
+// New: Adapter-based implementation for TablesDB
+export const createOrUpdateCollectionsViaAdapter = async (
+  adapter: DatabaseAdapter,
+  databaseId: string,
+  config: AppwriteConfig,
+  deletedCollections?: { collectionId: string; collectionName: string }[],
+  selectedCollections: Models.Collection[] = []
+): Promise<void> => {
+  const collectionsToProcess =
+    selectedCollections.length > 0 ? selectedCollections : (config.collections || []);
+  if (!collectionsToProcess || collectionsToProcess.length === 0) return;
+
+  const usedIds = new Set<string>();
+
+  // Helper: create attributes through adapter
+  const createAttr = async (tableId: string, attr: Attribute) => {
+    const base: any = {
+      databaseId,
+      tableId,
+      key: attr.key,
+      type: (attr as any).type,
+      size: (attr as any).size,
+      required: !!(attr as any).required,
+      default: (attr as any).xdefault,
+      array: !!(attr as any).array,
+      min: (attr as any).min,
+      max: (attr as any).max,
+      elements: (attr as any).elements,
+      encrypt: (attr as any).encrypted,
+      relatedCollection: (attr as any).relatedCollection,
+      relationType: (attr as any).relationType,
+      twoWay: (attr as any).twoWay,
+      twoWayKey: (attr as any).twoWayKey,
+      onDelete: (attr as any).onDelete,
+      side: (attr as any).side,
+    };
+    await adapter.createAttribute(base);
+    await delay(150);
+  };
+
+  // Local queue for unresolved relationships
+  const relQueue: { tableId: string; attr: Attribute }[] = [];
+
+  for (const collection of collectionsToProcess) {
+    const { attributes, indexes, ...collectionData } = collection as any;
+
+    // Prepare permissions as strings (reuse Permission helper)
+    const permissions: string[] = [];
+    if (collection.$permissions && collection.$permissions.length > 0) {
+      for (const p of collection.$permissions as any[]) {
+        if (typeof p === 'string') permissions.push(p);
+        else {
+          switch (p.permission) {
+            case 'read': permissions.push(Permission.read(p.target)); break;
+            case 'create': permissions.push(Permission.create(p.target)); break;
+            case 'update': permissions.push(Permission.update(p.target)); break;
+            case 'delete': permissions.push(Permission.delete(p.target)); break;
+            case 'write': permissions.push(Permission.write(p.target)); break;
+            default: break;
+          }
+        }
+      }
+    }
+
+    // Find existing table by name
+    const list = await adapter.listTables({ databaseId, queries: [Query.equal('name', collectionData.name)] });
+    const items: any[] = (list as any).tables || [];
+    let table = items[0];
+    let tableId: string;
+
+    if (!table) {
+      // Determine ID (prefer provided $id or re-use deleted one)
+      let foundColl = deletedCollections?.find(
+        (coll) => coll.collectionName.toLowerCase().trim().replace(" ", "") === collectionData.name.toLowerCase().trim().replace(" ", "")
+      );
+      if (collectionData.$id) tableId = collectionData.$id;
+      else if (foundColl && !usedIds.has(foundColl.collectionId)) tableId = foundColl.collectionId;
+      else tableId = ID.unique();
+      usedIds.add(tableId);
+
+      const res = await adapter.createTable({
+        databaseId,
+        id: tableId,
+        name: collectionData.name,
+        permissions,
+        documentSecurity: !!collectionData.documentSecurity,
+        enabled: collectionData.enabled !== false
+      });
+      table = (res as any).data || res;
+      nameToIdMapping.set(collectionData.name, tableId);
+    } else {
+      tableId = table.$id;
+      await adapter.updateTable({
+        databaseId,
+        id: tableId,
+        name: collectionData.name,
+        permissions,
+        documentSecurity: !!collectionData.documentSecurity,
+        enabled: collectionData.enabled !== false
+      });
+    }
+
+    // Add small delay after table create/update
+    await delay(250);
+
+    // Create attributes: non-relationship first
+    const nonRel = (attributes || []).filter((a: Attribute) => a.type !== 'relationship');
+    for (const attr of nonRel) {
+      await createAttr(tableId, attr as Attribute);
+    }
+
+    // Relationship attributes — resolve relatedCollection to ID
+    const rels = (attributes || []).filter((a: Attribute) => a.type === 'relationship');
+    for (const attr of rels as any[]) {
+      const relNameOrId = attr.relatedCollection as string | undefined;
+      if (!relNameOrId) continue;
+      let relId = nameToIdMapping.get(relNameOrId) || relNameOrId;
+
+      // If looks like a name (not ULID) and not in cache, try query by name
+      if (!nameToIdMapping.has(relNameOrId)) {
+        try {
+          const relList = await adapter.listTables({ databaseId, queries: [Query.equal('name', relNameOrId)] });
+          const relItems: any[] = (relList as any).tables || [];
+          if (relItems[0]?.$id) {
+            relId = relItems[0].$id;
+            nameToIdMapping.set(relNameOrId, relId);
+          }
+        } catch {}
+      }
+
+      if (relId && typeof relId === 'string') {
+        attr.relatedCollection = relId;
+        await createAttr(tableId, attr as Attribute);
+      } else {
+        // Defer if unresolved
+        relQueue.push({ tableId, attr: attr as Attribute });
+      }
+    }
+
+    // Indexes
+    const idxs = (indexes || []) as any[];
+    for (const idx of idxs) {
+      try {
+        await adapter.createIndex({
+          databaseId,
+          tableId,
+          key: idx.key,
+          type: idx.type,
+          attributes: idx.attributes,
+          orders: idx.orders || []
+        });
+        await delay(150);
+      } catch (e) {
+        MessageFormatter.error(`Failed to create index ${idx.key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Indexes' });
+      }
+    }
+  }
+
+  // Process queued relationships once mapping likely populated
+  for (const { tableId, attr } of relQueue) {
+    const relNameOrId = (attr as any).relatedCollection as string | undefined;
+    if (!relNameOrId) continue;
+    const relId = nameToIdMapping.get(relNameOrId) || relNameOrId;
+    if (relId) {
+      (attr as any).relatedCollection = relId;
+      try {
+        await adapter.createAttribute({
+          databaseId,
+          tableId,
+          key: (attr as any).key,
+          type: (attr as any).type,
+          size: (attr as any).size,
+          required: !!(attr as any).required,
+          default: (attr as any).xdefault,
+          array: !!(attr as any).array,
+          min: (attr as any).min,
+          max: (attr as any).max,
+          elements: (attr as any).elements,
+          relatedCollection: relId,
+          relationType: (attr as any).relationType,
+          twoWay: (attr as any).twoWay,
+          twoWayKey: (attr as any).twoWayKey,
+          onDelete: (attr as any).onDelete,
+          side: (attr as any).side
+        });
+        await delay(150);
+      } catch (e) {
+        MessageFormatter.error(`Failed queued relationship ${attr.key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Attributes' });
+      }
+    }
   }
 };
 
