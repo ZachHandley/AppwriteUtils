@@ -35,12 +35,9 @@ const waitForIndexAvailable = async (
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
   if (retryCount > 0) {
     const exponentialDelay = calculateExponentialBackoff(retryCount);
-    MessageFormatter.info(`Waiting for index '${indexKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`);
     await delay(exponentialDelay);
-  } else {
-    MessageFormatter.info(`Waiting for index '${indexKey}' to become available...`);
   }
-  
+
   while (Date.now() - startTime < maxWaitTime) {
     try {
       const indexList = await (isLegacyDatabases(db)
@@ -56,15 +53,8 @@ const waitForIndexAvailable = async (
         return false;
       }
 
-      if (isLegacyDatabases(db)) {
-        MessageFormatter.debug(`Index '${indexKey}' status: ${(index as any).status}`);
-      } else {
-        MessageFormatter.debug(`Index '${indexKey}' detected (TablesDB)`);
-      }
-      
       switch (index.status) {
         case 'available':
-          MessageFormatter.success(`Index '${indexKey}' is now available (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
           return true;
 
         case 'failed':
@@ -229,11 +219,7 @@ export const createOrUpdateIndexesWithStatusCheck = async (
     const remainingIndexes = [...indexesToProcess];
     indexesToProcess = []; // Reset for next iteration
 
-    MessageFormatter.info(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${remainingIndexes.length} indexes ===`);
-    
     for (const index of remainingIndexes) {
-      MessageFormatter.info(`\n--- Processing index: ${index.key} (type: ${index.type}, attributes: [${index.attributes.join(', ')}]) ---`);
-
       const success = await createOrUpdateIndexWithStatusCheck(
         dbId,
         db,
@@ -243,25 +229,24 @@ export const createOrUpdateIndexesWithStatusCheck = async (
       );
 
       if (success) {
-        MessageFormatter.success(`Successfully created index: ${index.key} (type: ${index.type})`);
+        MessageFormatter.info(`✅ ${index.key} (${index.type})`);
 
         // Add delay between successful indexes
         await delay(1000);
       } else {
-        MessageFormatter.error(`Failed to create index: ${index.key} (type: ${index.type}), will retry in next round`);
+        MessageFormatter.info(`❌ ${index.key} (${index.type})`);
         indexesToProcess.push(index); // Add back to retry list
       }
     }
 
     if (indexesToProcess.length === 0) {
-      MessageFormatter.success(`\nSuccessfully created all ${indexes.length} indexes for collection '${collectionId}'`);
       return true;
     }
 
     overallRetryCount++;
 
     if (overallRetryCount < maxOverallRetries) {
-      MessageFormatter.warning(`\nWaiting 5 seconds before retrying ${indexesToProcess.length} failed indexes...`);
+      MessageFormatter.warning(`⏳ Retrying ${indexesToProcess.length} failed indexes...`);
       await delay(5000);
     }
   }

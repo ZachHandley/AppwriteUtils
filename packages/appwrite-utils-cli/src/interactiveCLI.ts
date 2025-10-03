@@ -324,19 +324,15 @@ export class InteractiveCLI {
         ];
 
     if (shouldFilterByDatabase) {
-      // Enhanced filtering for tables with optional databaseId
+      // Show collections that EITHER exist in the remote database OR have matching local databaseId metadata
       allCollections = allCollections.filter((c: any) => {
-        // For remote collections, they should match the selected database
-        if (remoteCollections.some((rc) => rc.name === c.name)) {
-          return c.databaseId === database.$id;
-        }
+        // Include if it exists remotely in this database
+        const existsInRemoteDb = remoteCollections.some((rc) => rc.name === c.name);
 
-        // For local collections/tables:
-        // - Collections without databaseId are kept (backward compatibility)
-        // - Tables with databaseId must match the selected database
-        // - Tables without databaseId are kept (fallback for misconfigured tables)
-        if (!c.databaseId) return true;
-        return c.databaseId === database.$id;
+        // Include if local metadata claims it belongs to this database
+        const hasMatchingLocalMetadata = c.databaseId === database.$id;
+
+        return existsInRemoteDb || hasMatchingLocalMetadata;
       });
     }
 
@@ -436,29 +432,58 @@ export class InteractiveCLI {
     const configCollections = this.getLocalCollections();
     const collectionsCount = configCollections.filter(c => !c._isFromTablesDir).length;
     const tablesCount = configCollections.filter(c => c._isFromTablesDir).length;
+    const totalCount = collectionsCount + tablesCount;
 
     // Provide context about what's available
     if (collectionsCount > 0 && tablesCount > 0) {
-      MessageFormatter.info(`\n📋 Available items for database "${database.name}":`, { prefix: "Collections" });
+      MessageFormatter.info(`\n📋 ${totalCount} total items available:`, { prefix: "Collections" });
       MessageFormatter.info(`   Collections: ${collectionsCount} (from collections/ folder)`, { prefix: "Collections" });
       MessageFormatter.info(`   Tables: ${tablesCount} (from tables/ folder)`, { prefix: "Collections" });
+    } else if (collectionsCount > 0) {
+      MessageFormatter.info(`📁 ${collectionsCount} collections available from collections/ folder`, { prefix: "Collections" });
+    } else if (tablesCount > 0) {
+      MessageFormatter.info(`📊 ${tablesCount} tables available from tables/ folder`, { prefix: "Collections" });
+    }
 
-      if (shouldFilterByDatabase) {
+    // Ask user if they want to filter by database or show all
+    const { filterChoice } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "filterChoice",
+        message: chalk.blue("How would you like to view collections/tables?"),
+        choices: [
+          {
+            name: `Show all available collections/tables (${totalCount} total) - You can push any collection to any database`,
+            value: "all"
+          },
+          {
+            name: `Filter by database "${database.name}" - Show only related collections/tables`,
+            value: "filter"
+          }
+        ],
+        default: "all"
+      }
+    ]);
+
+    // User's choice overrides the parameter
+    const userWantsFiltering = filterChoice === "filter";
+
+    // Show appropriate informational message
+    if (userWantsFiltering) {
+      MessageFormatter.info(`ℹ️  Showing collections/tables related to database "${database.name}"`, { prefix: "Collections" });
+      if (tablesCount > 0) {
         const filteredTables = configCollections.filter(c =>
           c._isFromTablesDir && (!c.databaseId || c.databaseId === database.$id)
         ).length;
         if (filteredTables !== tablesCount) {
-          MessageFormatter.warning(`   Note: ${filteredTables}/${tablesCount} tables match this database`, { prefix: "Collections" });
+          MessageFormatter.info(`   ${filteredTables}/${tablesCount} tables match this database`, { prefix: "Collections" });
         }
       }
-      MessageFormatter.info('', { prefix: "Collections" });
-    } else if (collectionsCount > 0) {
-      MessageFormatter.info(`📁 ${collectionsCount} collections available from collections/ folder\n`, { prefix: "Collections" });
-    } else if (tablesCount > 0) {
-      MessageFormatter.info(`📊 ${tablesCount} tables available from tables/ folder\n`, { prefix: "Collections" });
+    } else {
+      MessageFormatter.info(`ℹ️  Showing all available collections/tables - you can push any collection to any database\n`, { prefix: "Collections" });
     }
 
-    return this.selectCollections(database, databasesClient, message, multiSelect, preferLocal, shouldFilterByDatabase);
+    return this.selectCollections(database, databasesClient, message, multiSelect, preferLocal, userWantsFiltering);
   }
 
   private getTemplateDefaults(template: string) {

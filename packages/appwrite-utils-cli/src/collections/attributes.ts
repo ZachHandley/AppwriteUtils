@@ -17,8 +17,8 @@ import { logger } from "../shared/logging.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { isDatabaseAdapter } from "../utils/typeGuards.js";
 
-// Threshold for treating min/max values as undefined (10 billion)
-const MIN_MAX_THRESHOLD = 10_000_000_000;
+// Threshold for treating min/max values as undefined (1 trillion)
+const MIN_MAX_THRESHOLD = 1_000_000_000_000;
 
 // Extreme values that Appwrite may return, which should be treated as undefined
 const EXTREME_MIN_INTEGER = -9223372036854776000;
@@ -434,7 +434,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null,
         attribute.size
       );
       break;
@@ -444,7 +444,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null,
         normalizedMin !== undefined ? parseInt(String(normalizedMin)) : undefined,
         normalizedMax !== undefined ? parseInt(String(normalizedMax)) : undefined
       );
@@ -458,7 +458,7 @@ const updateLegacyAttribute = async (
         attribute.required || false,
         normalizedMin !== undefined ? Number(normalizedMin) : undefined,
         normalizedMax !== undefined ? Number(normalizedMax) : undefined,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "boolean":
@@ -467,7 +467,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "datetime":
@@ -476,7 +476,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "email":
@@ -485,7 +485,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "ip":
@@ -494,7 +494,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "url":
@@ -503,7 +503,7 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "enum":
@@ -513,7 +513,7 @@ const updateLegacyAttribute = async (
         attribute.key,
         (attribute as any).elements || [],
         attribute.required || false,
-        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
       );
       break;
     case "relationship":
@@ -569,18 +569,7 @@ const waitForAttributeAvailable = async (
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
   if (retryCount > 0) {
     const exponentialDelay = calculateExponentialBackoff(retryCount);
-    MessageFormatter.info(
-      chalk.blue(
-        `Waiting for attribute '${attributeKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`
-      )
-    );
     await delay(exponentialDelay);
-  } else {
-    MessageFormatter.info(
-      chalk.blue(
-        `Waiting for attribute '${attributeKey}' to become available...`
-      )
-    );
   }
 
   while (Date.now() - startTime < maxWaitTime) {
@@ -597,10 +586,6 @@ const waitForAttributeAvailable = async (
         return false;
       }
 
-      MessageFormatter.info(
-        chalk.gray(`Attribute '${attributeKey}' status: ${attribute.status}`)
-      );
-
       const statusInfo = {
         attributeKey,
         status: attribute.status,
@@ -613,27 +598,14 @@ const waitForAttributeAvailable = async (
 
       switch (attribute.status) {
         case "available":
-          MessageFormatter.info(
-            chalk.green(`✅ Attribute '${attributeKey}' is now available`)
-          );
           logger.info(`Attribute '${attributeKey}' became available`, statusInfo);
           return true;
 
         case "failed":
-          MessageFormatter.info(
-            chalk.red(
-              `❌ Attribute '${attributeKey}' failed: ${attribute.error}`
-            )
-          );
           logger.error(`Attribute '${attributeKey}' failed`, statusInfo);
           return false;
 
         case "stuck":
-          MessageFormatter.info(
-            chalk.yellow(
-              `⚠️ Attribute '${attributeKey}' is stuck, will retry...`
-            )
-          );
           logger.warn(`Attribute '${attributeKey}' is stuck`, statusInfo);
           return false;
 
@@ -890,14 +862,6 @@ export const createOrUpdateAttributeWithStatusCheck = async (
   retryCount: number = 0,
   maxRetries: number = 5
 ): Promise<boolean> => {
-  MessageFormatter.info(
-    chalk.blue(
-      `Creating/updating attribute '${attribute.key}' (attempt ${
-        retryCount + 1
-      }/${maxRetries + 1})`
-    )
-  );
-
   try {
     // First, try to create/update the attribute using existing logic
     const result = await createOrUpdateAttribute(db, dbId, collection, attribute);
@@ -911,6 +875,12 @@ export const createOrUpdateAttributeWithStatusCheck = async (
         )
       );
       return true;
+    }
+
+    // If collection creation failed, return false to indicate failure
+    if (result === "error") {
+      MessageFormatter.error(`Failed to create collection for attribute '${attribute.key}'`);
+      return false;
     }
 
     // Now wait for the attribute to become available
@@ -1059,7 +1029,7 @@ export const createOrUpdateAttribute = async (
   dbId: string,
   collection: Models.Collection,
   attribute: Attribute
-): Promise<"queued" | "processed"> => {
+): Promise<"queued" | "processed" | "error"> => {
   let action = "create";
   let foundAttribute: Attribute | undefined;
   const updateEnabled = true;
@@ -1182,6 +1152,56 @@ export const createOrUpdateAttribute = async (
   }
   finalAttribute = parseAttribute(finalAttribute);
 
+  // Ensure collection/table exists - create it if it doesn't
+  try {
+    await (isDatabaseAdapter(db)
+      ? db.getTable({ databaseId: dbId, tableId: collection.$id })
+      : db.getCollection(dbId, collection.$id));
+  } catch (error) {
+    // Collection doesn't exist - create it
+    if ((error as any).code === 404 ||
+        (error instanceof Error && (
+          error.message.includes('collection_not_found') ||
+          error.message.includes('Collection with the requested ID could not be found')
+        ))) {
+
+      MessageFormatter.info(`Collection '${collection.name}' doesn't exist, creating it first...`);
+
+      try {
+        if (isDatabaseAdapter(db)) {
+          await db.createTable({
+            databaseId: dbId,
+            id: collection.$id,
+            name: collection.name,
+            permissions: collection.$permissions || [],
+            documentSecurity: collection.documentSecurity ?? false,
+            enabled: collection.enabled ?? true
+          });
+        } else {
+          await db.createCollection(
+            dbId,
+            collection.$id,
+            collection.name,
+            collection.$permissions || [],
+            collection.documentSecurity ?? false,
+            collection.enabled ?? true
+          );
+        }
+
+        MessageFormatter.success(`Created collection '${collection.name}'`);
+        await delay(500); // Wait for collection to be ready
+      } catch (createError) {
+        MessageFormatter.error(
+          `Failed to create collection '${collection.name}'`,
+          createError instanceof Error ? createError : new Error(String(createError))
+        );
+        return "error";
+      }
+    } else {
+      // Other error - re-throw
+      throw error;
+    }
+  }
 
   // Use adapter-based attribute creation/update
   if (action === "create") {
@@ -1205,12 +1225,6 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   collection: Models.Collection,
   attributes: Attribute[]
 ): Promise<boolean> => {
-  MessageFormatter.info(
-    chalk.green(
-      `Creating/Updating attributes for collection: ${collection.name} with status monitoring`
-    )
-  );
-
   const existingAttributes: Attribute[] =
     // @ts-expect-error
     collection.attributes.map((attr) => parseAttribute(attr)) || [];
@@ -1265,12 +1279,6 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   }
 
   // First, get fresh collection data and determine which attributes actually need processing
-  MessageFormatter.info(
-    chalk.blue(
-      `Analyzing ${attributes.length} attributes to determine which need processing...`
-    )
-  );
-
   let currentCollection = collection;
   try {
     currentCollection = isDatabaseAdapter(db)
@@ -1301,43 +1309,27 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   const attributesToProcess = attributes.filter((attribute) => {
     // Skip if already processed in this session
     if (isAttributeProcessed(currentCollection.$id, attribute.key)) {
-      MessageFormatter.info(
-        chalk.gray(`⏭️ Attribute '${attribute.key}' already processed in this session (skipping)`)
-      );
       return false;
     }
 
     const existing = existingAttributesMap.get(attribute.key);
     if (!existing) {
-      MessageFormatter.info(`➕ New attribute: ${attribute.key}`);
+      MessageFormatter.info(`➕ ${attribute.key}`);
       return true;
     }
 
     const needsUpdate = !attributesSame(existing, attribute);
     if (needsUpdate) {
-      MessageFormatter.info(`🔄 Changed attribute: ${attribute.key}`);
+      MessageFormatter.info(`🔄 ${attribute.key}`);
     } else {
-      MessageFormatter.info(
-        chalk.gray(`✅ Unchanged attribute: ${attribute.key} (skipping)`)
-      );
+      MessageFormatter.info(chalk.gray(`✅ ${attribute.key}`));
     }
     return needsUpdate;
   });
 
   if (attributesToProcess.length === 0) {
-    MessageFormatter.info(
-      chalk.green(
-        `✅ All ${attributes.length} attributes are already up to date for collection: ${collection.name}`
-      )
-    );
     return true;
   }
-
-  MessageFormatter.info(
-    chalk.blue(
-      `Creating ${attributesToProcess.length} attributes sequentially with status monitoring...`
-    )
-  );
 
   let remainingAttributes = [...attributesToProcess];
   let overallRetryCount = 0;
@@ -1350,21 +1342,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     const attributesToProcessThisRound = [...remainingAttributes];
     remainingAttributes = []; // Reset for next iteration
 
-    MessageFormatter.info(
-      chalk.blue(
-        `\n=== Attempt ${
-          overallRetryCount + 1
-        }/${maxOverallRetries} - Processing ${
-          attributesToProcessThisRound.length
-        } attributes ===`
-      )
-    );
-
     for (const attribute of attributesToProcessThisRound) {
-      MessageFormatter.info(
-        chalk.blue(`\n--- Processing attribute: ${attribute.key} ---`)
-      );
-
       const success = await createOrUpdateAttributeWithStatusCheck(
         db,
         dbId,
@@ -1373,10 +1351,6 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
       );
 
       if (success) {
-        MessageFormatter.info(
-          chalk.green(`✅ Successfully created attribute: ${attribute.key}`)
-        );
-
         // Mark this specific attribute as processed
         markAttributeProcessed(currentCollection.$id, attribute.key);
 
@@ -1394,21 +1368,12 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         // Add delay between successful attributes
         await delay(1000);
       } else {
-        MessageFormatter.info(
-          chalk.red(
-            `❌ Failed to create attribute: ${attribute.key}, will retry in next round`
-          )
-        );
+        MessageFormatter.info(chalk.red(`❌ ${attribute.key}`));
         remainingAttributes.push(attribute); // Add back to retry list
       }
     }
 
     if (remainingAttributes.length === 0) {
-      MessageFormatter.info(
-        chalk.green(
-          `\n✅ Successfully created all ${attributesToProcess.length} attributes for collection: ${collection.name}`
-        )
-      );
       return true;
     }
 
@@ -1416,9 +1381,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
     if (overallRetryCount < maxOverallRetries) {
       MessageFormatter.info(
-        chalk.yellow(
-          `\n⏳ Waiting 5 seconds before retrying ${attributesToProcess.length} failed attributes...`
-        )
+        chalk.yellow(`⏳ Retrying ${remainingAttributes.length} failed attributes...`)
       );
       await delay(5000);
 
@@ -1427,13 +1390,8 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         currentCollection = isDatabaseAdapter(db)
       ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data as Models.Collection
       : await db.getCollection(dbId, collection.$id);
-        MessageFormatter.info(`Refreshed collection data for retry`);
       } catch (error) {
-        MessageFormatter.info(
-          chalk.yellow(
-            `Warning: Could not refresh collection data for retry: ${error}`
-          )
-        );
+        // Silently continue if refresh fails
       }
     }
   }

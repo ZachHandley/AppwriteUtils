@@ -1,6 +1,9 @@
 import yaml from "js-yaml";
 import type { Collection, CollectionCreate } from "appwrite-utils";
 
+// Threshold for treating min/max values as undefined (1 trillion)
+const MIN_MAX_THRESHOLD = 1_000_000_000_000;
+
 export interface YamlCollectionData {
   name: string;
   id?: string;
@@ -16,6 +19,7 @@ export interface YamlCollectionData {
     size?: number;
     required?: boolean;
     array?: boolean;
+    encrypt?: boolean;
     default?: any;
     min?: number;
     max?: number;
@@ -34,6 +38,7 @@ export interface YamlCollectionData {
     size?: number;
     required?: boolean;
     array?: boolean;
+    encrypt?: boolean;
     default?: any;
     min?: number;
     max?: number;
@@ -105,9 +110,30 @@ export function collectionToYaml(
       if ('size' in attr && attr.size !== undefined) yamlAttr.size = attr.size;
       if (attr.required !== undefined) yamlAttr.required = attr.required;
       if (attr.array !== undefined) yamlAttr.array = attr.array;
+
+      // Always include encrypt field for string attributes (default to false)
+      if (attr.type === 'string') {
+        yamlAttr.encrypt = ('encrypted' in attr && attr.encrypted === true) ? true : false;
+      }
+
       if ('xdefault' in attr && attr.xdefault !== undefined) yamlAttr.default = attr.xdefault;
-      if ('min' in attr && attr.min !== undefined) yamlAttr.min = attr.min;
-      if ('max' in attr && attr.max !== undefined) yamlAttr.max = attr.max;
+
+      // Normalize min/max values - filter out extreme database values
+      if ('min' in attr && attr.min !== undefined) {
+        const minValue = Number(attr.min);
+        // Only include min if it's within reasonable range (< 1 trillion)
+        if (Math.abs(minValue) < MIN_MAX_THRESHOLD) {
+          yamlAttr.min = attr.min;
+        }
+      }
+
+      if ('max' in attr && attr.max !== undefined) {
+        const maxValue = Number(attr.max);
+        // Only include max if it's within reasonable range (< 1 trillion)
+        if (Math.abs(maxValue) < MIN_MAX_THRESHOLD) {
+          yamlAttr.max = attr.max;
+        }
+      }
       if ('elements' in attr && attr.elements !== undefined) yamlAttr.elements = attr.elements;
       if ('relatedCollection' in attr && attr.relatedCollection !== undefined) yamlAttr.relatedCollection = attr.relatedCollection;
       if ('relationType' in attr && attr.relationType !== undefined) yamlAttr.relationType = attr.relationType;

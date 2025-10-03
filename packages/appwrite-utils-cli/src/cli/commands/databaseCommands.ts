@@ -23,30 +23,44 @@ export const databaseCommands = {
       return;
     }
 
-    const collections = await (cli as any).selectCollectionsAndTables(
-      databases[0],
-      (cli as any).controller!.database!,
-      chalk.blue("Select local collections/tables to push:"),
-      true,
-      true, // prefer local
-      true  // filter by selected database
-    );
-
-    const { syncFunctions } = await inquirer.prompt([
-      {
-        type: "confirm",
-        name: "syncFunctions",
-        message: "Do you want to push local functions to remote?",
-        default: false,
-      },
-    ]);
-
     try {
-      // First sync databases and collections
-      await (cli as any).controller!.syncDb(databases, collections);
-      MessageFormatter.success("Database and collections pushed successfully", { prefix: "Database" });
+      // Loop through each database and prompt for collections specific to that database
+      for (const database of databases) {
+        MessageFormatter.info(`\n📦 Configuring push for database: ${database.name}`, { prefix: "Database" });
+
+        const collections = await (cli as any).selectCollectionsAndTables(
+          database,
+          (cli as any).controller!.database!,
+          chalk.blue(`Select collections/tables to push to "${database.name}":`),
+          true,  // multiSelect
+          true   // prefer local
+        );
+
+        if (collections.length === 0) {
+          MessageFormatter.warning(`No collections selected for database "${database.name}". Skipping.`, { prefix: "Database" });
+          continue;
+        }
+
+        // Push selected collections to this specific database
+        await (cli as any).controller!.syncDb([database], collections);
+        MessageFormatter.success(
+          `Pushed ${collections.length} collection(s) to database "${database.name}"`,
+          { prefix: "Database" }
+        );
+      }
+
+      MessageFormatter.success("\n✅ All database configurations pushed successfully!", { prefix: "Database" });
 
       // Then handle functions if requested
+      const { syncFunctions } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "syncFunctions",
+          message: "Do you want to push local functions to remote?",
+          default: false,
+        },
+      ]);
+
       if (syncFunctions && (cli as any).controller!.config?.functions?.length) {
         const functions = await (cli as any).selectFunctions(
           chalk.blue("Select local functions to push:"),

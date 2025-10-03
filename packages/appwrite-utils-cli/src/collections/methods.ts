@@ -518,6 +518,52 @@ export const createOrUpdateCollectionsViaAdapter = async (
       }
     }
 
+    // Wait for all attributes to become available before creating indexes
+    const allAttrKeys = [
+      ...nonRel.map((a: any) => a.key),
+      ...rels.filter((a: any) => a.relatedCollection).map((a: any) => a.key)
+    ];
+
+    if (allAttrKeys.length > 0) {
+      for (const attrKey of allAttrKeys) {
+        const maxWait = 60000; // 60 seconds
+        const startTime = Date.now();
+        let lastStatus = '';
+
+        while (Date.now() - startTime < maxWait) {
+          try {
+            const tableData = await adapter.getTable({ databaseId, tableId });
+            const attrs = (tableData as any).attributes || [];
+            const attr = attrs.find((a: any) => a.key === attrKey);
+
+            if (attr) {
+              if (attr.status === 'available') {
+                break; // Attribute is ready
+              }
+              if (attr.status === 'failed' || attr.status === 'stuck') {
+                throw new Error(`Attribute ${attrKey} failed to create: ${attr.error || 'unknown error'}`);
+              }
+              // Still processing, continue waiting
+              lastStatus = attr.status;
+            }
+
+            await delay(2000); // Check every 2 seconds
+          } catch (e) {
+            // If we can't check status, assume it's processing and continue
+            await delay(2000);
+          }
+        }
+
+        // Timeout check
+        if (Date.now() - startTime >= maxWait) {
+          MessageFormatter.warning(
+            `Attribute ${attrKey} did not become available within ${maxWait / 1000}s (last status: ${lastStatus}). Proceeding anyway.`,
+            { prefix: 'Attributes' }
+          );
+        }
+      }
+    }
+
     // Indexes
     const idxs = (indexes || []) as any[];
     for (const idx of idxs) {
