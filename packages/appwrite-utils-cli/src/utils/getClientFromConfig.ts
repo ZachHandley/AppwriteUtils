@@ -4,6 +4,7 @@ import { AdapterFactory, type AdapterFactoryResult } from "../adapters/AdapterFa
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { findSessionByEndpointAndProject, hasSessionAuth, isValidSessionCookie } from "./sessionAuth.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { logger } from "../shared/logging.js";
 
 /**
  * Enhanced client creation from config with session authentication support
@@ -43,7 +44,7 @@ export const getClientWithAuth = (
   if (sessionCookie) {
     if (isValidSessionCookie(sessionCookie)) {
       client.setSession(sessionCookie);
-      MessageFormatter.info(`Using explicit session authentication for project ${project}`, { prefix: "Auth" });
+      logger.debug("Using explicit session authentication", { prefix: "Auth", project });
       return client;
     } else {
       authAttempts.push("explicit session cookie (invalid format)");
@@ -56,7 +57,7 @@ export const getClientWithAuth = (
   if (sessionAuth) {
     if (isValidSessionCookie(sessionAuth.sessionCookie)) {
       client.setSession(sessionAuth.sessionCookie);
-      MessageFormatter.info(`Using session authentication for project ${project} (${sessionAuth.email || 'unknown user'})`, { prefix: "Auth" });
+      logger.debug("Using session authentication", { prefix: "Auth", project, email: sessionAuth.email || 'unknown user' });
       return client;
     } else {
       authAttempts.push("session from CLI prefs (invalid/expired)");
@@ -70,7 +71,7 @@ export const getClientWithAuth = (
       authAttempts.push("API key (empty)");
     } else {
       client.setKey(key);
-      MessageFormatter.info(`Using API key authentication for project ${project}`, { prefix: "Auth" });
+      logger.debug("Using API key authentication", { prefix: "Auth", project });
       return client;
     }
   }

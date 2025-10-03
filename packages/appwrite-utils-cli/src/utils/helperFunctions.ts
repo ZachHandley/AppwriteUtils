@@ -135,6 +135,7 @@ export let numTimesFailedTotal = 0;
 
 /**
  * Tries to execute the given createFunction and retries up to 5 times if it fails.
+ * Only retries on transient errors (network failures, 5xx errors). Does NOT retry validation errors (4xx).
  *
  * @param {() => Promise<any>} createFunction - The function to be executed.
  * @param {number} [attemptNum=0] - The number of attempts made so far (default: 0).
@@ -148,13 +149,30 @@ export const tryAwaitWithRetry = async <T>(
   try {
     return await createFunction();
   } catch (error) {
-    if (
-      (error instanceof AppwriteException &&
-      (error.message.toLowerCase().includes("fetch failed") ||
-        error.message.toLowerCase().includes("server error"))) ||
-      ((error as any).code === 522 || (error as any).code === "522")
-    ) {
-      if ((error as any).code === 522) {
+    const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    const errorCode = (error as any).code;
+
+    // Check if this is a validation error that should NOT be retried
+    const isValidationError =
+      errorCode === 400 || errorCode === 409 || errorCode === 422 ||
+      errorMessage.includes("already exists") ||
+      errorMessage.includes("attribute with the same key") ||
+      errorMessage.includes("invalid") && !errorMessage.includes("fetch failed") ||
+      errorMessage.includes("conflict") ||
+      errorMessage.includes("bad request");
+
+    // Check if this is a transient error that SHOULD be retried
+    const isTransientError =
+      errorCode === 522 || errorCode === "522" ||  // Cloudflare error
+      errorCode >= 500 && errorCode < 600 ||        // 5xx server errors
+      errorMessage.includes("fetch failed") ||      // Network failures
+      errorMessage.includes("timeout") ||
+      errorMessage.includes("econnrefused") ||
+      errorMessage.includes("network error");
+
+    // Only retry if it's a transient error AND not a validation error
+    if (isTransientError && !isValidationError) {
+      if (errorCode === 522 || errorCode === "522") {
         console.log("Cloudflare error. Retrying...");
       } else {
         console.log(`Fetch failed on attempt ${attemptNum}. Retrying...`);
@@ -166,6 +184,8 @@ export const tryAwaitWithRetry = async <T>(
       await delay(2500);
       return tryAwaitWithRetry(createFunction, attemptNum + 1);
     }
+
+    // For validation errors or non-transient errors, throw immediately
     if (throwError) {
       throw error;
     }

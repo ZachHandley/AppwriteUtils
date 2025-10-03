@@ -424,8 +424,8 @@ async function main() {
       }
     }
 
-    // Create controller with session authentication support
-    const controller = new UtilsController(process.cwd(), finalDirectConfig);
+    // Create controller with session authentication support using singleton
+    const controller = UtilsController.getInstance(process.cwd(), finalDirectConfig);
 
     // Pass session authentication options to the controller
     const initOptions: any = {};

@@ -196,11 +196,11 @@ export class InteractiveCLI {
     appwriteKey: string;
   }): Promise<void> {
     if (!this.controller) {
-      this.controller = new UtilsController(this.currentDir, directConfig);
+      this.controller = UtilsController.getInstance(this.currentDir, directConfig);
       await this.controller.init();
     } else {
       // Extract session info from existing controller before reinitializing
-      const sessionInfo = this.controller.getSessionInfo();
+      const sessionInfo = await this.controller.getSessionInfo();
       if (sessionInfo.hasSession && directConfig) {
         // Create enhanced directConfig with session preservation
         const enhancedDirectConfig = {
@@ -210,11 +210,13 @@ export class InteractiveCLI {
         };
 
         // Reinitialize with session preservation
-        this.controller = new UtilsController(this.currentDir, enhancedDirectConfig);
+        UtilsController.clearInstance();
+        this.controller = UtilsController.getInstance(this.currentDir, enhancedDirectConfig);
         await this.controller.init();
       } else if (directConfig) {
         // Standard reinitialize without session
-        this.controller = new UtilsController(this.currentDir, directConfig);
+        UtilsController.clearInstance();
+        this.controller = UtilsController.getInstance(this.currentDir, directConfig);
         await this.controller.init();
       }
       // If no directConfig provided, keep existing controller
@@ -985,18 +987,18 @@ export class InteractiveCLI {
   /**
    * Extract session information from current controller for preservation
    */
-  private extractSessionFromController(): {
+  private async extractSessionFromController(): Promise<{
     appwriteEndpoint: string;
     appwriteProject: string;
     appwriteKey?: string;
     sessionCookie?: string;
     sessionMetadata?: any;
-  } | undefined {
+  } | undefined> {
     if (!this.controller?.config) {
       return undefined;
     }
 
-    const sessionInfo = this.controller.getSessionInfo();
+    const sessionInfo = await this.controller.getSessionInfo();
     const config = this.controller.config;
 
     if (!config.appwriteEndpoint || !config.appwriteProject) {

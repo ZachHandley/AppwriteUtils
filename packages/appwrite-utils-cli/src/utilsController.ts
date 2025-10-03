@@ -60,7 +60,6 @@ import { getClient, getClientWithAuth } from "./utils/getClientFromConfig.js";
 import { getAdapterFromConfig } from "./utils/getClientFromConfig.js";
 import type { DatabaseAdapter } from './adapters/DatabaseAdapter.js';
 import { hasSessionAuth, findSessionByEndpointAndProject, isValidSessionCookie, type SessionAuthInfo } from "./utils/sessionAuth.js";
-import { createSessionPreservation, type SessionPreservationOptions } from "./utils/loadConfigs.js";
 import { fetchAllDatabases } from "./databases/methods.js";
 import {
   listFunctions,
@@ -69,7 +68,7 @@ import {
 import chalk from "chalk";
 import { deployLocalFunction } from "./functions/deployments.js";
 import fs from "node:fs";
-import { configureLogging, updateLogger } from "./shared/logging.js";
+import { configureLogging, updateLogger, logger } from "./shared/logging.js";
 import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
 import { SchemaGenerator } from "./shared/schemaGenerator.js";
 import { findYamlConfig } from "./config/yamlConfig.js";
@@ -79,6 +78,8 @@ import {
   validateWithStrictMode,
   type ValidationResult
 } from "./config/configValidation.js";
+import { ConfigManager } from "./config/ConfigManager.js";
+import { ClientFactory } from "./utils/ClientFactory.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -96,8 +97,42 @@ export interface SetupOptions {
 }
 
 export class UtilsController {
+  // ──────────────────────────────────────────────────
+  // SINGLETON PATTERN
+  // ──────────────────────────────────────────────────
+  private static instance: UtilsController | null = null;
+  private isInitialized: boolean = false;
+
+  /**
+   * Get the UtilsController singleton instance
+   */
+  public static getInstance(
+    currentUserDir: string,
+    directConfig?: {
+      appwriteEndpoint?: string;
+      appwriteProject?: string;
+      appwriteKey?: string;
+    }
+  ): UtilsController {
+    if (!UtilsController.instance) {
+      UtilsController.instance = new UtilsController(currentUserDir, directConfig);
+    }
+    return UtilsController.instance;
+  }
+
+  /**
+   * Clear the singleton instance (useful for testing)
+   */
+  public static clearInstance(): void {
+    UtilsController.instance = null;
+  }
+
+  // ──────────────────────────────────────────────────
+  // INSTANCE FIELDS
+  // ──────────────────────────────────────────────────
   private appwriteFolderPath?: string;
   private appwriteConfigPath?: string;
+  private currentUserDir: string;
   public config?: AppwriteConfig;
   public appwriteServer?: Client;
   public database?: Databases;
@@ -107,14 +142,6 @@ export class UtilsController {
   public validityRuleDefinitions: ValidationRules = validationRules;
   public afterImportActionsDefinitions: AfterImportActions = afterImportActions;
 
-  // Session preservation fields
-  private sessionCookie?: string;
-  private authMethod?: "session" | "apikey" | "auto";
-  private sessionMetadata?: {
-    email?: string;
-    expiresAt?: string;
-  };
-
   constructor(
     currentUserDir: string,
     directConfig?: {
@@ -123,6 +150,7 @@ export class UtilsController {
       appwriteKey?: string;
     }
   ) {
+    this.currentUserDir = currentUserDir;
     const basePath = currentUserDir;
 
     if (directConfig) {
@@ -194,136 +222,69 @@ export class UtilsController {
   }
 
   async init(options: { validate?: boolean; strictMode?: boolean; useSession?: boolean; sessionCookie?: string } = {}) {
-    const { validate = false, strictMode = false, useSession = false, sessionCookie } = options;
+    const { validate = false, strictMode = false } = options;
+    const configManager = ConfigManager.getInstance();
 
-    if (!this.config) {
-      if (this.appwriteFolderPath && this.appwriteConfigPath) {
-        MessageFormatter.progress("Loading config from file...", { prefix: "Config" });
-        try {
-          const { config, actualConfigPath, validation } = await loadConfigWithPath(
-            this.appwriteFolderPath,
-            { validate, strictMode, reportValidation: false }
-          );
-          this.config = config;
-          MessageFormatter.info(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
-
-          // Report validation results if validation was requested
-          if (validation && validate) {
-            reportValidationResults(validation, { verbose: false });
-
-            // In strict mode, throw if validation fails
-            if (strictMode && !validation.isValid) {
-              throw new Error(`Configuration validation failed in strict mode. Found ${validation.errors.length} validation errors.`);
-            }
-          }
-        } catch (error) {
-          MessageFormatter.error("Failed to load config from file", error instanceof Error ? error : undefined, { prefix: "Config" });
-          return;
-        }
-      } else {
-        MessageFormatter.error("No configuration available", undefined, { prefix: "Config" });
-        return;
-      }
+    // Load config if not already loaded
+    if (!configManager.hasConfig()) {
+      await configManager.loadConfig({
+        configDir: this.currentUserDir,
+        validate,
+        strictMode,
+      });
     }
 
+    const config = configManager.getConfig();
+
     // Configure logging based on config
-    if (this.config.logging) {
-      configureLogging(this.config.logging);
+    if (config.logging) {
+      configureLogging(config.logging);
       updateLogger();
     }
 
-    // Use enhanced client with session authentication support
-    // Pass session cookie from options if provided
-    const clientSessionCookie = sessionCookie || this.sessionCookie;
-    this.appwriteServer = getClientWithAuth(
-      this.config.appwriteEndpoint,
-      this.config.appwriteProject,
-      this.config.appwriteKey || undefined,
-      clientSessionCookie
-    );
+    // Create client and adapter (session already in config from ConfigManager)
+    const { client, adapter } = await ClientFactory.createFromConfig(config);
 
+    this.appwriteServer = client;
+    this.adapter = adapter;
+    this.config = config;
     this.database = new Databases(this.appwriteServer);
     this.storage = new Storage(this.appwriteServer);
     this.config.appwriteClient = this.appwriteServer;
 
-    // Initialize adapter with version detection
-    try {
-      const { adapter, apiMode } = await getAdapterFromConfig(
-        this.config,
-        false,
-        clientSessionCookie
-      );
-      this.adapter = adapter;
-
-      MessageFormatter.info(`Database adapter initialized (apiMode: ${apiMode})`, {
-        prefix: "Adapter"
-      });
-    } catch (error) {
-      MessageFormatter.warning(
-        'Database adapter initialization failed - some features may not work',
-        { prefix: "Adapter" }
-      );
+    // Log only on FIRST initialization to avoid spam
+    if (!this.isInitialized) {
+      const apiMode = adapter.getApiMode();
+      MessageFormatter.info(`Database adapter initialized (apiMode: ${apiMode})`, { prefix: "Adapter" });
+      this.isInitialized = true;
+    } else {
+      logger.debug("Adapter reused from cache", { prefix: "UtilsController" });
     }
-
-    // Extract and store session information after successful authentication
-    this.extractSessionInfo();
   }
 
   async reloadConfig() {
-    if (!this.appwriteFolderPath) {
-      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
-      return;
-    }
+    const configManager = ConfigManager.getInstance();
 
-    // Preserve session authentication during config reload
-    const preserveAuth = this.createSessionPreservationOptions();
-
-    this.config = await loadConfig(this.appwriteFolderPath, {
-      preserveAuth
-    });
-    if (!this.config) {
-      MessageFormatter.error("Failed to load config", undefined, { prefix: "Controller" });
-      return;
-    }
+    // Session preservation is automatic in ConfigManager
+    const config = await configManager.reloadConfig();
 
     // Configure logging based on updated config
-    if (this.config.logging) {
-      configureLogging(this.config.logging);
+    if (config.logging) {
+      configureLogging(config.logging);
       updateLogger();
     }
 
-    // Use enhanced client with session authentication support, passing preserved session
-    this.appwriteServer = getClientWithAuth(
-      this.config.appwriteEndpoint,
-      this.config.appwriteProject,
-      this.config.appwriteKey || undefined,
-      this.sessionCookie
-    );
+    // Recreate client and adapter
+    const { client, adapter } = await ClientFactory.createFromConfig(config);
+
+    this.appwriteServer = client;
+    this.adapter = adapter;
+    this.config = config;
     this.database = new Databases(this.appwriteServer);
     this.storage = new Storage(this.appwriteServer);
     this.config.appwriteClient = this.appwriteServer;
 
-    // Re-initialize adapter with version detection after config reload
-    try {
-      const { adapter, apiMode } = await getAdapterFromConfig(
-        this.config,
-        false,
-        this.sessionCookie
-      );
-      this.adapter = adapter;
-
-      MessageFormatter.info(`Database adapter re-initialized (apiMode: ${apiMode})`, {
-        prefix: "Adapter"
-      });
-    } catch (error) {
-      MessageFormatter.warning(
-        'Database adapter re-initialization failed - some features may not work',
-        { prefix: "Adapter" }
-      );
-    }
-
-    // Re-extract session information after reload
-    this.extractSessionInfo();
+    logger.debug("Config reloaded, adapter refreshed", { prefix: "UtilsController" });
   }
 
 
@@ -510,7 +471,8 @@ export class UtilsController {
     await this.init();
     if (!this.database || !this.config) throw new Error("Database not initialized");
     try {
-      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false, this.sessionCookie);
+      // Session is already in config from ConfigManager
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false);
       if (apiMode === 'tablesdb') {
         await wipeAllTables(adapter, database.$id);
       } else {
@@ -557,7 +519,8 @@ export class UtilsController {
     await this.init();
     if (!this.database || !this.config) throw new Error("Database not initialized");
     try {
-      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false, this.sessionCookie);
+      // Session is already in config from ConfigManager
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false);
       if (apiMode === 'tablesdb') {
         await wipeTableRows(adapter, database.$id, collection.$id);
       } else {
@@ -916,81 +879,30 @@ export class UtilsController {
   }
 
   /**
-   * Extract session information from the current authenticated client
-   * This preserves session context for use across config reloads and adapter operations
-   */
-  private extractSessionInfo(): void {
-    if (!this.config) {
-      return;
-    }
-
-    // Try to extract session from current config first
-    if (this.config.sessionCookie && isValidSessionCookie(this.config.sessionCookie)) {
-      this.sessionCookie = this.config.sessionCookie;
-      this.authMethod = "session";
-      this.sessionMetadata = this.config.sessionMetadata;
-      MessageFormatter.debug("Extracted session from config", { prefix: "Session" });
-      return;
-    }
-
-    // Fall back to finding session from Appwrite CLI preferences
-    const sessionAuth = findSessionByEndpointAndProject(
-      this.config.appwriteEndpoint,
-      this.config.appwriteProject
-    );
-
-    if (sessionAuth && isValidSessionCookie(sessionAuth.sessionCookie)) {
-      this.sessionCookie = sessionAuth.sessionCookie;
-      this.authMethod = "session";
-      this.sessionMetadata = {
-        email: sessionAuth.email
-      };
-      MessageFormatter.debug(
-        `Extracted session from CLI preferences for ${sessionAuth.email || 'unknown user'}`,
-        { prefix: "Session" }
-      );
-      return;
-    }
-
-    // No session found, using API key authentication
-    if (this.config.appwriteKey) {
-      this.authMethod = "apikey";
-      this.sessionCookie = undefined;
-      this.sessionMetadata = undefined;
-      MessageFormatter.debug("Using API key authentication", { prefix: "Session" });
-    }
-  }
-
-  /**
-   * Create session preservation options for passing to loadConfig
-   * Returns current session state to maintain authentication across config reloads
-   */
-  private createSessionPreservationOptions(): SessionPreservationOptions | undefined {
-    if (!this.sessionCookie || !isValidSessionCookie(this.sessionCookie)) {
-      return undefined;
-    }
-
-    return createSessionPreservation(
-      this.sessionCookie,
-      this.sessionMetadata?.email,
-      this.sessionMetadata?.expiresAt
-    );
-  }
-
-  /**
    * Get current session information for debugging/logging purposes
+   * Delegates to ConfigManager for session info
    */
-  public getSessionInfo(): {
+  public async getSessionInfo(): Promise<{
     hasSession: boolean;
     authMethod?: string;
     email?: string;
     expiresAt?: string;
-  } {
-    return {
-      hasSession: !!this.sessionCookie && isValidSessionCookie(this.sessionCookie),
-      authMethod: this.authMethod,
-      email: this.sessionMetadata?.email,
-      expiresAt: this.sessionMetadata?.expiresAt
-    };
+  }> {
+    const configManager = ConfigManager.getInstance();
+
+    try {
+      const authStatus = await configManager.getAuthStatus();
+      return {
+        hasSession: authStatus.hasValidSession,
+        authMethod: authStatus.authMethod,
+        email: authStatus.sessionInfo?.email,
+        expiresAt: authStatus.sessionInfo?.expiresAt
+      };
+    } catch (error) {
+      // If config not loaded, return empty status
+      return {
+        hasSession: false
+      };
+    }
   }
 }

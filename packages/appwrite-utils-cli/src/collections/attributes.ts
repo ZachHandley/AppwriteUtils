@@ -142,12 +142,22 @@ const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: numb
  * This is used when comparing database attributes with config attributes
  */
 const normalizeAttributeForComparison = (attribute: Attribute): Attribute => {
-  if (!hasMinMaxProperties(attribute)) {
-    return attribute;
+  const normalized: any = { ...attribute };
+
+  // Normalize min/max for numeric types
+  if (hasMinMaxProperties(attribute)) {
+    const { min, max } = normalizeMinMaxValues(attribute);
+    normalized.min = min;
+    normalized.max = max;
   }
 
-  const { min, max } = normalizeMinMaxValues(attribute);
-  return { ...(attribute as any), min, max };
+  // Remove xdefault if null/undefined to ensure consistent comparison
+  // Appwrite sets xdefault: null for required attributes, but config files omit it
+  if ('xdefault' in normalized && (normalized.xdefault === null || normalized.xdefault === undefined)) {
+    delete normalized.xdefault;
+  }
+
+  return normalized;
 };
 
 /**
@@ -764,6 +774,45 @@ const deleteAndRecreateCollection = async (
   }
 };
 
+/**
+ * Get the fields that should be compared for a specific attribute type
+ * Only returns fields that are valid for the given type to avoid false positives
+ */
+const getComparableFields = (type: string): string[] => {
+  const baseFields = ["key", "type", "array", "required", "xdefault"];
+
+  switch (type) {
+    case "string":
+      return [...baseFields, "size", "encrypted"];
+
+    case "integer":
+    case "double":
+    case "float":
+      return [...baseFields, "min", "max"];
+
+    case "enum":
+      return [...baseFields, "elements"];
+
+    case "relationship":
+      return [...baseFields, "relationType", "twoWay", "twoWayKey", "onDelete", "relatedCollection"];
+
+    case "boolean":
+    case "datetime":
+    case "email":
+    case "ip":
+    case "url":
+      return baseFields;
+
+    default:
+      // Fallback to all fields for unknown types
+      return [
+        "key", "type", "array", "encrypted", "required", "size",
+        "min", "max", "xdefault", "elements", "relationType",
+        "twoWay", "twoWayKey", "onDelete", "relatedCollection"
+      ];
+  }
+};
+
 const attributesSame = (
   databaseAttribute: Attribute,
   configAttribute: Attribute
@@ -772,25 +821,12 @@ const attributesSame = (
   const normalizedDbAttr = normalizeAttributeForComparison(databaseAttribute);
   const normalizedConfigAttr = normalizeAttributeForComparison(configAttribute);
 
-  const attributesToCheck = [
-    "key",
-    "type",
-    "array",
-    "encrypted",
-    "required",
-    "size",
-    "min",
-    "max",
-    "xdefault",
-    "elements",
-    "relationType",
-    "twoWay",
-    "twoWayKey",
-    "onDelete",
-    "relatedCollection",
-  ];
+  // Use type-specific field list to avoid false positives from irrelevant fields
+  const attributesToCheck = getComparableFields(normalizedConfigAttr.type);
 
-  return attributesToCheck.every((attr) => {
+  const differences: string[] = [];
+
+  const result = attributesToCheck.every((attr) => {
     // Check if both objects have the attribute
     const dbHasAttr = attr in normalizedDbAttr;
     const configHasAttr = attr in normalizedConfigAttr;
@@ -810,16 +846,40 @@ const attributesSame = (
 
       // Normalize booleans: treat undefined and false as equivalent
       if (typeof dbValue === "boolean" || typeof configValue === "boolean") {
-        return Boolean(dbValue) === Boolean(configValue);
+        const boolMatch = Boolean(dbValue) === Boolean(configValue);
+        if (!boolMatch) {
+          differences.push(`${attr}: db=${dbValue} config=${configValue}`);
+        }
+        return boolMatch;
       }
       // For numeric comparisons, compare numbers if both are numeric-like
       if (
         (typeof dbValue === "number" || (typeof dbValue === "string" && dbValue !== "" && !isNaN(Number(dbValue)))) &&
         (typeof configValue === "number" || (typeof configValue === "string" && configValue !== "" && !isNaN(Number(configValue))))
       ) {
-        return Number(dbValue) === Number(configValue);
+        const numMatch = Number(dbValue) === Number(configValue);
+        if (!numMatch) {
+          differences.push(`${attr}: db=${dbValue} config=${configValue}`);
+        }
+        return numMatch;
       }
-      return dbValue === configValue;
+
+      // For array comparisons (e.g., enum elements), use order-independent equality
+      if (Array.isArray(dbValue) && Array.isArray(configValue)) {
+        const arrayMatch =
+          dbValue.length === configValue.length &&
+          dbValue.every((val) => configValue.includes(val));
+        if (!arrayMatch) {
+          differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(configValue)}`);
+        }
+        return arrayMatch;
+      }
+
+      const match = dbValue === configValue;
+      if (!match) {
+        differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(configValue)}`);
+      }
+      return match;
     }
 
     // If neither has the attribute, consider it the same
@@ -832,23 +892,50 @@ const attributesSame = (
       const dbValue = normalizedDbAttr[attr as keyof typeof normalizedDbAttr];
       // Consider default-false booleans as equal to missing in config
       if (typeof dbValue === "boolean") {
-        return dbValue === false; // missing in config equals false in db
+        const match = dbValue === false; // missing in config equals false in db
+        if (!match) {
+          differences.push(`${attr}: db=${dbValue} config=<missing>`);
+        }
+        return match;
       }
-      return dbValue === undefined || dbValue === null;
+      const match = dbValue === undefined || dbValue === null;
+      if (!match) {
+        differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=<missing>`);
+      }
+      return match;
     }
 
     if (!dbHasAttr && configHasAttr) {
       const configValue = normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
       // Consider default-false booleans as equal to missing in db
       if (typeof configValue === "boolean") {
-        return configValue === false; // missing in db equals false in config
+        const match = configValue === false; // missing in db equals false in config
+        if (!match) {
+          differences.push(`${attr}: db=<missing> config=${configValue}`);
+        }
+        return match;
       }
-      return configValue === undefined || configValue === null;
+      const match = configValue === undefined || configValue === null;
+      if (!match) {
+        differences.push(`${attr}: db=<missing> config=${JSON.stringify(configValue)}`);
+      }
+      return match;
     }
 
     // If we reach here, the attributes are different
+    differences.push(`${attr}: unexpected comparison state`);
     return false;
   });
+
+  // Log differences if any were found
+  if (differences.length > 0) {
+    logger.debug(`Attribute '${normalizedDbAttr.key}' comparison found differences:`, {
+      differences,
+      operation: 'attributesSame'
+    });
+  }
+
+  return result;
 };
 
 /**
@@ -1318,7 +1405,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
       return true;
     }
 
-    const needsUpdate = !attributesSame(existing, attribute);
+    const needsUpdate = !attributesSame(existing, parseAttribute(attribute));
     if (needsUpdate) {
       MessageFormatter.info(`🔄 ${attribute.key}`);
     } else {

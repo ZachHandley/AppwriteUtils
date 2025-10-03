@@ -76,7 +76,7 @@ export const clearProcessingState = () => {
   processedAttributes.clear();
   nameToIdMapping.clear();
 
-  MessageFormatter.success("Cleared processing state caches");
+  logger.debug("Cleared processing state caches", { operation: "clearProcessingState", sizeBefore });
   logger.info('Processing state cleared', {
     sizeBefore,
     operation: 'clearProcessingState'

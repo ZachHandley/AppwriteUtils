@@ -14,6 +14,8 @@ import {
 import { createEmptyCollection } from "../../utils/setupFiles.js";
 import chalk from "chalk";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
+import { ConfigManager } from "../../config/ConfigManager.js";
+import { UtilsController } from "../../utilsController.js";
 
 export const configCommands = {
   async migrateTypeScriptConfig(cli: InteractiveCLI): Promise<void> {
@@ -22,6 +24,10 @@ export const configCommands = {
 
       // Perform the migration
       await migrateConfig((cli as any).currentDir);
+
+      // Clear instances after migration to reload new config
+      UtilsController.clearInstance();
+      ConfigManager.resetInstance();
 
       // Reset the detection flag
       (cli as any).isUsingTypeScriptConfig = false;
@@ -173,7 +179,8 @@ export const configCommands = {
           }
 
           // Reinitialize controller with session preservation
-          (cli as any).controller = new UtilsController((cli as any).currentDir, directConfig);
+          UtilsController.clearInstance();
+          (cli as any).controller = UtilsController.getInstance((cli as any).currentDir, directConfig);
           await (cli as any).controller.init();
 
           MessageFormatter.success("Configuration reloaded with session preserved", { prefix: "Config" });
