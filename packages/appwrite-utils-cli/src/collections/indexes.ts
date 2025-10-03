@@ -293,13 +293,19 @@ export const createOrUpdateIndex = async (
   }
   
   if (createIndex) {
+    // Ensure orders array exists and matches attributes length
+    // Default to "asc" for each attribute if not specified
+    const orders = index.orders && index.orders.length === index.attributes.length
+      ? index.orders
+      : index.attributes.map(() => "asc");
+
     newIndex = await db.createIndex(
       dbId,
       collectionId,
       index.key,
       index.type as IndexType,
       index.attributes,
-      index.orders
+      orders
     );
   }
   

@@ -122,7 +122,8 @@ export const checkForCollection = async (
     const items = isLegacyDatabases(db) ? response.collections : ((response as any).tables || response.collections);
     if (items && items.length > 0) {
       MessageFormatter.info(`Collection found: ${items[0].$id}`, { prefix: "Collections" });
-      return { ...collection, ...items[0] } as Models.Collection;
+      // Return remote collection for update operations (don't merge local config over it)
+      return items[0] as Models.Collection;
     } else {
       MessageFormatter.info(`No collection found with name: ${collection.name}`, { prefix: "Collections" });
       return null;
@@ -338,11 +339,8 @@ export const createOrUpdateCollections = async (
     // Add delay after creating attributes
     await delay(250);
 
-    const indexesToUse =
-      indexes && indexes.length > 0
-        ? indexes
-        : config.collections?.find((c) => c.$id === collectionToUse!.$id)
-            ?.indexes ?? [];
+    // For PUSH operations, only use indexes from local config (not remote)
+    const indexesToUse = indexes || [];
 
     MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
     await createOrUpdateIndexesWithStatusCheck(

@@ -850,31 +850,21 @@ async function main() {
       }
     }
 
-    if (parsedArgv.push || parsedArgv.sync) {
+    if (parsedArgv.push) {
+      // PUSH: Use LOCAL config collections only (pass empty array to use config.collections)
       const databases =
         options.databases || (await fetchAllDatabases(controller.database!));
-      let collections: Models.Collection[] = [];
 
-      if (options.collections) {
-        for (const db of databases) {
-          const dbCollections = await fetchAllCollections(
-            db.$id,
-            controller.database!
-          );
-          collections = collections.concat(
-            dbCollections.filter((c) => options.collections!.includes(c.$id))
-          );
-        }
-      }
-
-      if (parsedArgv.push) {
-        await controller.syncDb(databases, collections);
-        operationStats.pushedDatabases = databases.length;
-        operationStats.pushedCollections = collections.length;
-      } else if (parsedArgv.sync) {
-        await controller.synchronizeConfigurations(databases);
-        operationStats.syncedDatabases = databases.length;
-      }
+      // Pass empty array - syncDb will use config.collections (local schema)
+      await controller.syncDb(databases, []);
+      operationStats.pushedDatabases = databases.length;
+      operationStats.pushedCollections = controller.config?.collections?.length || 0;
+    } else if (parsedArgv.sync) {
+      // SYNC: Pull from remote
+      const databases =
+        options.databases || (await fetchAllDatabases(controller.database!));
+      await controller.synchronizeConfigurations(databases);
+      operationStats.syncedDatabases = databases.length;
     }
 
     if (options.generateSchemas) {
