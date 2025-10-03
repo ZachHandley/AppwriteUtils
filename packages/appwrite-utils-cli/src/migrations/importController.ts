@@ -19,6 +19,7 @@ import { resolveAndUpdateRelationships } from "./relationships.js";
 import { UsersController } from "../users/methods.js";
 import { logger } from "../shared/logging.js";
 import { updateOperation } from "../shared/migrationHelpers.js";
+import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
 import {
   BatchSchema,
   OperationCreateSchema,
@@ -84,10 +85,6 @@ export class ImportController {
     let databaseRan: Models.Database | undefined;
 
     for (let db of databasesToProcess) {
-      if (!this.config.useMigrations && db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
-        continue;
-      }
-
       MessageFormatter.banner(`Starting import data for database: ${db.name}`, "Database Import");
 
       if (!databaseRan) {
@@ -112,9 +109,9 @@ export class ImportController {
         await this.updateOthersToFinalData(databaseRan, db);
       }
 
-      console.log(`---------------------------------`);
-      console.log(`Finished import data for database: ${db.name}`);
-      console.log(`---------------------------------`);
+      MessageFormatter.divider();
+      MessageFormatter.success(`Finished import data for database: ${db.name}`, { prefix: "Import" });
+      MessageFormatter.divider();
     }
   }
 
@@ -274,10 +271,10 @@ export class ImportController {
                   );
                 }
               }
-              console.log("Finished importing users batch");
+              MessageFormatter.success("Finished importing users batch", { prefix: "Import" });
             }
             this.hasImportedUsers = true;
-            console.log("Finished importing users");
+            MessageFormatter.success("Finished importing users", { prefix: "Import" });
           }
         }
 
@@ -287,23 +284,22 @@ export class ImportController {
         }
 
         let importOperation: any = null;
-        if (this.config.useMigrations) {
-          importOperation = await this.database.getDocument(
-            "migrations",
-            "currentOperations",
-            importOperationId
-          );
-          await updateOperation(this.database, importOperation.$id, {
-            status: "in_progress",
-          }, this.config.useMigrations);
-        }
+        importOperation = await this.database.getDocument(
+          "migrations",
+          "currentOperations",
+          importOperationId
+        );
+        const adapter = new LegacyAdapter(this.database);
+        await updateOperation(adapter, db.$id, importOperation.$id, {
+          status: "in_progress",
+        });
         
         const collectionData = dataLoader.importMap.get(
           dataLoader.getCollectionKey(collection.name)
         );
-        console.log(`Processing collection: ${collection.name}...`);
+        MessageFormatter.processing(`Processing collection: ${collection.name}...`, { prefix: "Import" });
         if (!collectionData) {
-          console.log("No collection data for ", collection.name);
+          MessageFormatter.warning(`No collection data for ${collection.name}`, { prefix: "Import" });
           continue;
         }
 
@@ -311,7 +307,7 @@ export class ImportController {
         let processedItems = 0;
         for (let i = 0; i < dataSplit.length; i++) {
           const batches = dataSplit[i];
-          console.log(`Processing batch ${i + 1} of ${dataSplit.length}`);
+          MessageFormatter.progress(`Processing batch ${i + 1} of ${dataSplit.length}`, { prefix: "Import" });
 
           const batchPromises = batches.map((item, index) => {
             try {
@@ -340,25 +336,31 @@ export class ImportController {
                   )
               );
             } catch (error) {
-              console.error(error);
+              MessageFormatter.error(
+                "Error creating document",
+                error instanceof Error ? error : new Error(String(error)),
+                { prefix: "Import" }
+              );
               return Promise.resolve();
             }
           });
 
           // Wait for all promises in the current batch to resolve
           await Promise.all(batchPromises);
-          console.log(`Completed batch ${i + 1} of ${dataSplit.length}`);
-          if (this.config.useMigrations && importOperation) {
-            await updateOperation(this.database, importOperation.$id, {
+          MessageFormatter.success(`Completed batch ${i + 1} of ${dataSplit.length}`, { prefix: "Import" });
+          if (importOperation) {
+            const adapter = new LegacyAdapter(this.database);
+            await updateOperation(adapter, db.$id, importOperation.$id, {
               progress: processedItems,
-            }, this.config.useMigrations);
+            });
           }
         }
         // After all batches are processed, update the operation status to completed
-        if (this.config.useMigrations && importOperation) {
-          await updateOperation(this.database, importOperation.$id, {
+        if (importOperation) {
+          const adapter = new LegacyAdapter(this.database);
+          await updateOperation(adapter, db.$id, importOperation.$id, {
             status: "completed",
-          }, this.config.useMigrations);
+          });
         }
       }
     }
@@ -369,14 +371,14 @@ export class ImportController {
     dataLoader: DataLoader,
     specificCollections?: string[]
   ) {
-    console.log("Executing post-import actions...");
+    MessageFormatter.info("Executing post-import actions...", { prefix: "Import" });
     const collectionsToProcess =
       specificCollections && specificCollections.length > 0
         ? specificCollections
         : this.config.collections
         ? this.config.collections.map((c) => c.name)
         : Array.from(dataLoader.importMap.keys());
-    console.log("Collections to process:", collectionsToProcess);
+    MessageFormatter.info(`Collections to process: ${collectionsToProcess.join(", ")}`, { prefix: "Import" });
     // Iterate over each collection in the importMap
     for (const [
       collectionKey,
@@ -386,8 +388,9 @@ export class ImportController {
         dataLoader.getCollectionKey(c)
       );
       if (allCollectionKeys.includes(collectionKey)) {
-        console.log(
-          `Processing post-import actions for collection: ${collectionKey}`
+        MessageFormatter.processing(
+          `Processing post-import actions for collection: ${collectionKey}`,
+          { prefix: "Import" }
         );
 
         // Iterate over each item in the collectionData.data
@@ -406,16 +409,18 @@ export class ImportController {
                 context
               );
             } catch (error) {
-              console.error(
-                `Failed to execute post-import actions for item in collection ${collectionKey}:`,
-                error
+              MessageFormatter.error(
+                `Failed to execute post-import actions for item in collection ${collectionKey}`,
+                error instanceof Error ? error : new Error(String(error)),
+                { prefix: "Import" }
               );
             }
           }
         }
       } else {
-        console.log(
-          `Skipping collection: ${collectionKey} because it's not valid for post-import actions`
+        MessageFormatter.info(
+          `Skipping collection: ${collectionKey} because it's not valid for post-import actions`,
+          { prefix: "Import" }
         );
       }
     }

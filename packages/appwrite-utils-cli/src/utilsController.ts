@@ -22,7 +22,6 @@ import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
 import { ImportDataActions } from "./migrations/importDataActions.js";
 import {
-  setupMigrationDatabase,
   ensureDatabasesExist,
   wipeOtherDatabases,
   ensureCollectionsExist,
@@ -38,7 +37,6 @@ import { wipeAllTables, wipeTableRows } from "./collections/methods.js";
 import {
   backupDatabase,
   ensureDatabaseConfigBucketsExist,
-  initOrGetBackupStorage,
   wipeDocumentStorage,
 } from "./storage/methods.js";
 import path from "path";
@@ -58,8 +56,11 @@ import {
   transferUsersLocalToRemote,
   type TransferOptions,
 } from "./migrations/transfer.js";
-import { getClient } from "./utils/getClientFromConfig.js";
+import { getClient, getClientWithAuth } from "./utils/getClientFromConfig.js";
 import { getAdapterFromConfig } from "./utils/getClientFromConfig.js";
+import type { DatabaseAdapter } from './adapters/DatabaseAdapter.js';
+import { hasSessionAuth, findSessionByEndpointAndProject, isValidSessionCookie, type SessionAuthInfo } from "./utils/sessionAuth.js";
+import { createSessionPreservation, type SessionPreservationOptions } from "./utils/loadConfigs.js";
 import { fetchAllDatabases } from "./databases/methods.js";
 import {
   listFunctions,
@@ -72,6 +73,12 @@ import { configureLogging, updateLogger } from "./shared/logging.js";
 import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
 import { SchemaGenerator } from "./shared/schemaGenerator.js";
 import { findYamlConfig } from "./config/yamlConfig.js";
+import {
+  validateCollectionsTablesConfig,
+  reportValidationResults,
+  validateWithStrictMode,
+  type ValidationResult
+} from "./config/configValidation.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -95,9 +102,18 @@ export class UtilsController {
   public appwriteServer?: Client;
   public database?: Databases;
   public storage?: Storage;
+  public adapter?: DatabaseAdapter;
   public converterDefinitions: ConverterFunctions = converterFunctions;
   public validityRuleDefinitions: ValidationRules = validationRules;
   public afterImportActionsDefinitions: AfterImportActions = afterImportActions;
+
+  // Session preservation fields
+  private sessionCookie?: string;
+  private authMethod?: "session" | "apikey" | "auto";
+  private sessionMetadata?: {
+    email?: string;
+    expiresAt?: string;
+  };
 
   constructor(
     currentUserDir: string,
@@ -119,9 +135,21 @@ export class UtilsController {
         MessageFormatter.error("Appwrite project is required", undefined, { prefix: "Config" });
         hasErrors = true;
       }
-      if (!directConfig.appwriteKey) {
-        MessageFormatter.error("Appwrite key is required", undefined, { prefix: "Config" });
+      // Check authentication: either API key or session auth is required
+      const hasValidSession = directConfig.appwriteEndpoint && directConfig.appwriteProject &&
+        hasSessionAuth(directConfig.appwriteEndpoint, directConfig.appwriteProject);
+
+      if (!directConfig.appwriteKey && !hasValidSession) {
+        MessageFormatter.error(
+          "Authentication required: provide an API key or login with 'appwrite login'",
+          undefined,
+          { prefix: "Config" }
+        );
         hasErrors = true;
+      } else if (!directConfig.appwriteKey && hasValidSession) {
+        MessageFormatter.info("Using session authentication (no API key required)", { prefix: "Auth" });
+      } else if (directConfig.appwriteKey && hasValidSession) {
+        MessageFormatter.info("API key provided, session authentication also available", { prefix: "Auth" });
       }
       if (!hasErrors) {
         // Only set config if we have all required fields
@@ -129,9 +157,10 @@ export class UtilsController {
         this.config = {
           appwriteEndpoint: directConfig.appwriteEndpoint!,
           appwriteProject: directConfig.appwriteProject!,
-          appwriteKey: directConfig.appwriteKey!,
+          appwriteKey: directConfig.appwriteKey || "",
           appwriteClient: null,
           apiMode: "auto", // Default to auto-detect for dual API support
+          authMethod: "auto", // Default to auto-detect authentication method
           enableBackups: false,
           backupInterval: 0,
           backupRetention: 0,
@@ -139,7 +168,6 @@ export class UtilsController {
           enableMockData: false,
           documentBucketId: "",
           usersCollectionName: "",
-          useMigrations: true,
           databases: [],
           buckets: [],
           functions: [],
@@ -165,16 +193,31 @@ export class UtilsController {
     }
   }
 
-  async init() {
+  async init(options: { validate?: boolean; strictMode?: boolean; useSession?: boolean; sessionCookie?: string } = {}) {
+    const { validate = false, strictMode = false, useSession = false, sessionCookie } = options;
+
     if (!this.config) {
       if (this.appwriteFolderPath && this.appwriteConfigPath) {
         MessageFormatter.progress("Loading config from file...", { prefix: "Config" });
         try {
-          const { config, actualConfigPath } = await loadConfigWithPath(this.appwriteFolderPath);
+          const { config, actualConfigPath, validation } = await loadConfigWithPath(
+            this.appwriteFolderPath,
+            { validate, strictMode, reportValidation: false }
+          );
           this.config = config;
           MessageFormatter.info(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
+
+          // Report validation results if validation was requested
+          if (validation && validate) {
+            reportValidationResults(validation, { verbose: false });
+
+            // In strict mode, throw if validation fails
+            if (strictMode && !validation.isValid) {
+              throw new Error(`Configuration validation failed in strict mode. Found ${validation.errors.length} validation errors.`);
+            }
+          }
         } catch (error) {
-          MessageFormatter.error("Failed to load config from file", undefined, { prefix: "Config" });
+          MessageFormatter.error("Failed to load config from file", error instanceof Error ? error : undefined, { prefix: "Config" });
           return;
         }
       } else {
@@ -189,15 +232,41 @@ export class UtilsController {
       updateLogger();
     }
 
-    this.appwriteServer = new Client();
-    this.appwriteServer
-      .setEndpoint(this.config.appwriteEndpoint)
-      .setProject(this.config.appwriteProject)
-      .setKey(this.config.appwriteKey);
+    // Use enhanced client with session authentication support
+    // Pass session cookie from options if provided
+    const clientSessionCookie = sessionCookie || this.sessionCookie;
+    this.appwriteServer = getClientWithAuth(
+      this.config.appwriteEndpoint,
+      this.config.appwriteProject,
+      this.config.appwriteKey || undefined,
+      clientSessionCookie
+    );
 
     this.database = new Databases(this.appwriteServer);
     this.storage = new Storage(this.appwriteServer);
     this.config.appwriteClient = this.appwriteServer;
+
+    // Initialize adapter with version detection
+    try {
+      const { adapter, apiMode } = await getAdapterFromConfig(
+        this.config,
+        false,
+        clientSessionCookie
+      );
+      this.adapter = adapter;
+
+      MessageFormatter.info(`Database adapter initialized (apiMode: ${apiMode})`, {
+        prefix: "Adapter"
+      });
+    } catch (error) {
+      MessageFormatter.warning(
+        'Database adapter initialization failed - some features may not work',
+        { prefix: "Adapter" }
+      );
+    }
+
+    // Extract and store session information after successful authentication
+    this.extractSessionInfo();
   }
 
   async reloadConfig() {
@@ -205,9 +274,15 @@ export class UtilsController {
       MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
-    this.config = await loadConfig(this.appwriteFolderPath);
+
+    // Preserve session authentication during config reload
+    const preserveAuth = this.createSessionPreservationOptions();
+
+    this.config = await loadConfig(this.appwriteFolderPath, {
+      preserveAuth
+    });
     if (!this.config) {
-      console.log(chalk.red("Failed to load config"));
+      MessageFormatter.error("Failed to load config", undefined, { prefix: "Controller" });
       return;
     }
 
@@ -217,24 +292,40 @@ export class UtilsController {
       updateLogger();
     }
 
-    this.appwriteServer = new Client();
-    this.appwriteServer
-      .setEndpoint(this.config.appwriteEndpoint)
-      .setProject(this.config.appwriteProject)
-      .setKey(this.config.appwriteKey);
+    // Use enhanced client with session authentication support, passing preserved session
+    this.appwriteServer = getClientWithAuth(
+      this.config.appwriteEndpoint,
+      this.config.appwriteProject,
+      this.config.appwriteKey || undefined,
+      this.sessionCookie
+    );
     this.database = new Databases(this.appwriteServer);
     this.storage = new Storage(this.appwriteServer);
     this.config.appwriteClient = this.appwriteServer;
+
+    // Re-initialize adapter with version detection after config reload
+    try {
+      const { adapter, apiMode } = await getAdapterFromConfig(
+        this.config,
+        false,
+        this.sessionCookie
+      );
+      this.adapter = adapter;
+
+      MessageFormatter.info(`Database adapter re-initialized (apiMode: ${apiMode})`, {
+        prefix: "Adapter"
+      });
+    } catch (error) {
+      MessageFormatter.warning(
+        'Database adapter re-initialization failed - some features may not work',
+        { prefix: "Adapter" }
+      );
+    }
+
+    // Re-extract session information after reload
+    this.extractSessionInfo();
   }
 
-  async setupMigrationDatabase() {
-    await this.init();
-    if (!this.config) {
-      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
-      return;
-    }
-    await setupMigrationDatabase(this.config);
-  }
 
   async ensureDatabaseConfigBucketsExist(databases: Models.Database[] = []) {
     await this.init();
@@ -259,7 +350,6 @@ export class UtilsController {
       MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
       return;
     }
-    await this.setupMigrationDatabase();
     await this.ensureDatabaseConfigBucketsExist(databases);
     await ensureDatabasesExist(this.config, databases);
   }
@@ -296,37 +386,38 @@ export class UtilsController {
       MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
       return;
     }
-    await wipeOtherDatabases(this.database, databasesToKeep, this.config?.useMigrations ?? true);
+    await wipeOtherDatabases(this.database, databasesToKeep);
   }
 
   async wipeUsers() {
     await this.init();
     if (!this.config || !this.database) {
-      console.log(chalk.red("Config or database not initialized"));
+      MessageFormatter.error("Config or database not initialized", undefined, { prefix: "Controller" });
       return;
     }
     const usersController = new UsersController(this.config, this.database);
     await usersController.wipeUsers();
   }
 
-  async backupDatabase(database: Models.Database) {
+  async backupDatabase(database: Models.Database, format: 'json' | 'zip' = 'json') {
     await this.init();
     if (!this.database || !this.storage || !this.config) {
-      console.log(chalk.red("Database, storage, or config not initialized"));
+      MessageFormatter.error("Database, storage, or config not initialized", undefined, { prefix: "Controller" });
       return;
     }
     await backupDatabase(
       this.config,
       this.database,
       database.$id,
-      this.storage
+      this.storage,
+      format
     );
   }
 
   async listAllFunctions() {
     await this.init();
     if (!this.appwriteServer) {
-      console.log(chalk.red("Appwrite server not initialized"));
+      MessageFormatter.error("Appwrite server not initialized", undefined, { prefix: "Controller" });
       return [];
     }
     const { functions } = await listFunctions(this.appwriteServer, [
@@ -342,7 +433,7 @@ export class UtilsController {
     }
     const functionsDir = findFunctionsDir(this.appwriteFolderPath);
     if (!functionsDir) {
-      console.log(chalk.red("Failed to find functions directory"));
+      MessageFormatter.error("Failed to find functions directory", undefined, { prefix: "Controller" });
       return new Map();
     }
 
@@ -373,7 +464,7 @@ export class UtilsController {
   ) {
     await this.init();
     if (!this.appwriteServer) {
-      console.log(chalk.red("Appwrite server not initialized"));
+      MessageFormatter.error("Appwrite server not initialized", undefined, { prefix: "Controller" });
       return;
     }
 
@@ -383,7 +474,7 @@ export class UtilsController {
       );
     }
     if (!functionConfig) {
-      console.log(chalk.red(`Function ${functionName} not found in config`));
+      MessageFormatter.error(`Function ${functionName} not found in config`, undefined, { prefix: "Controller" });
       return;
     }
 
@@ -398,7 +489,7 @@ export class UtilsController {
   async syncFunctions() {
     await this.init();
     if (!this.appwriteServer) {
-      console.log(chalk.red("Appwrite server not initialized"));
+      MessageFormatter.error("Appwrite server not initialized", undefined, { prefix: "Controller" });
       return;
     }
 
@@ -419,7 +510,7 @@ export class UtilsController {
     await this.init();
     if (!this.database || !this.config) throw new Error("Database not initialized");
     try {
-      const { adapter, apiMode } = await getAdapterFromConfig(this.config);
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false, this.sessionCookie);
       if (apiMode === 'tablesdb') {
         await wipeAllTables(adapter, database.$id);
       } else {
@@ -466,7 +557,7 @@ export class UtilsController {
     await this.init();
     if (!this.database || !this.config) throw new Error("Database not initialized");
     try {
-      const { adapter, apiMode } = await getAdapterFromConfig(this.config);
+      const { adapter, apiMode } = await getAdapterFromConfig(this.config, false, this.sessionCookie);
       if (apiMode === 'tablesdb') {
         await wipeTableRows(adapter, database.$id, collection.$id);
       } else {
@@ -491,7 +582,6 @@ export class UtilsController {
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
     for (const database of databases) {
-      if (!this.config.useMigrations && database.$id === "migrations") continue;
       await this.createOrUpdateCollections(database, undefined, collections);
     }
   }
@@ -514,10 +604,25 @@ export class UtilsController {
   }
 
   async generateSchemas() {
-    await this.init();
+    // Schema generation doesn't need Appwrite connection, just config
     if (!this.config) {
-      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
-      return;
+      if (this.appwriteFolderPath && this.appwriteConfigPath) {
+        MessageFormatter.progress("Loading config from file...", { prefix: "Config" });
+        try {
+          const { config, actualConfigPath } = await loadConfigWithPath(
+            this.appwriteFolderPath,
+            { validate: false, strictMode: false, reportValidation: false }
+          );
+          this.config = config;
+          MessageFormatter.info(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
+        } catch (error) {
+          MessageFormatter.error("Failed to load config from file", error instanceof Error ? error : undefined, { prefix: "Config" });
+          return;
+        }
+      } else {
+        MessageFormatter.error("No configuration available", undefined, { prefix: "Controller" });
+        return;
+      }
     }
     if (!this.appwriteFolderPath) {
       MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
@@ -614,8 +719,10 @@ export class UtilsController {
       const allDatabases = await fetchAllDatabases(this.database);
       databases = allDatabases;
     }
+    // Ensure DBs exist
     await this.ensureDatabasesExist(databases);
     await this.ensureDatabaseConfigBucketsExist(databases);
+
     await this.createOrUpdateCollectionsForDatabases(databases, collections);
   }
 
@@ -630,7 +737,7 @@ export class UtilsController {
     let targetDatabases: Models.Database[] = [];
 
     if (!sourceClient) {
-      console.log(chalk.red("Source database not initialized"));
+      MessageFormatter.error("Source database not initialized", undefined, { prefix: "Controller" });
       return;
     }
 
@@ -640,7 +747,7 @@ export class UtilsController {
         !options.transferProject ||
         !options.transferKey
       ) {
-        console.log(chalk.red("Remote transfer options are missing"));
+        MessageFormatter.error("Remote transfer options are missing", undefined, { prefix: "Controller" });
         return;
       }
 
@@ -668,7 +775,7 @@ export class UtilsController {
       );
 
       if (!fromDb || !targetDb) {
-        console.log(chalk.red("Source or target database not found"));
+        MessageFormatter.error("Source or target database not found", undefined, { prefix: "Controller" });
         return;
       }
 
@@ -692,13 +799,12 @@ export class UtilsController {
 
     if (options.transferUsers) {
       if (!options.isRemote) {
-        console.log(
-          chalk.yellow(
-            "User transfer is only supported for remote transfers. Skipping..."
-          )
+        MessageFormatter.warning(
+          "User transfer is only supported for remote transfers. Skipping...",
+          { prefix: "Controller" }
         );
       } else if (!this.appwriteServer) {
-        console.log(chalk.red("Appwrite server not initialized"));
+        MessageFormatter.error("Appwrite server not initialized", undefined, { prefix: "Controller" });
         return;
       } else {
         MessageFormatter.progress("Starting user transfer...", { prefix: "Transfer" });
@@ -781,5 +887,110 @@ export class UtilsController {
       `Successfully updated function specifications for ${functionId} to ${specification}`,
       { prefix: "Functions" }
     );
+  }
+
+  /**
+   * Validates the current configuration for collections/tables conflicts
+   */
+  async validateConfiguration(strictMode: boolean = false): Promise<ValidationResult> {
+    await this.init();
+    if (!this.config) {
+      throw new Error("Configuration not loaded");
+    }
+
+    MessageFormatter.progress("Validating configuration...", { prefix: "Validation" });
+
+    const validation = strictMode
+      ? validateWithStrictMode(this.config, strictMode)
+      : validateCollectionsTablesConfig(this.config);
+
+    reportValidationResults(validation, { verbose: true });
+
+    if (validation.isValid) {
+      MessageFormatter.success("Configuration validation passed", { prefix: "Validation" });
+    } else {
+      MessageFormatter.error(`Configuration validation failed with ${validation.errors.length} errors`, undefined, { prefix: "Validation" });
+    }
+
+    return validation;
+  }
+
+  /**
+   * Extract session information from the current authenticated client
+   * This preserves session context for use across config reloads and adapter operations
+   */
+  private extractSessionInfo(): void {
+    if (!this.config) {
+      return;
+    }
+
+    // Try to extract session from current config first
+    if (this.config.sessionCookie && isValidSessionCookie(this.config.sessionCookie)) {
+      this.sessionCookie = this.config.sessionCookie;
+      this.authMethod = "session";
+      this.sessionMetadata = this.config.sessionMetadata;
+      MessageFormatter.debug("Extracted session from config", { prefix: "Session" });
+      return;
+    }
+
+    // Fall back to finding session from Appwrite CLI preferences
+    const sessionAuth = findSessionByEndpointAndProject(
+      this.config.appwriteEndpoint,
+      this.config.appwriteProject
+    );
+
+    if (sessionAuth && isValidSessionCookie(sessionAuth.sessionCookie)) {
+      this.sessionCookie = sessionAuth.sessionCookie;
+      this.authMethod = "session";
+      this.sessionMetadata = {
+        email: sessionAuth.email
+      };
+      MessageFormatter.debug(
+        `Extracted session from CLI preferences for ${sessionAuth.email || 'unknown user'}`,
+        { prefix: "Session" }
+      );
+      return;
+    }
+
+    // No session found, using API key authentication
+    if (this.config.appwriteKey) {
+      this.authMethod = "apikey";
+      this.sessionCookie = undefined;
+      this.sessionMetadata = undefined;
+      MessageFormatter.debug("Using API key authentication", { prefix: "Session" });
+    }
+  }
+
+  /**
+   * Create session preservation options for passing to loadConfig
+   * Returns current session state to maintain authentication across config reloads
+   */
+  private createSessionPreservationOptions(): SessionPreservationOptions | undefined {
+    if (!this.sessionCookie || !isValidSessionCookie(this.sessionCookie)) {
+      return undefined;
+    }
+
+    return createSessionPreservation(
+      this.sessionCookie,
+      this.sessionMetadata?.email,
+      this.sessionMetadata?.expiresAt
+    );
+  }
+
+  /**
+   * Get current session information for debugging/logging purposes
+   */
+  public getSessionInfo(): {
+    hasSession: boolean;
+    authMethod?: string;
+    email?: string;
+    expiresAt?: string;
+  } {
+    return {
+      hasSession: !!this.sessionCookie && isValidSessionCookie(this.sessionCookie),
+      authMethod: this.authMethod,
+      email: this.sessionMetadata?.email,
+      expiresAt: this.sessionMetadata?.expiresAt
+    };
   }
 }

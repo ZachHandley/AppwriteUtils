@@ -2,7 +2,9 @@
 
 ## Overview
 
-`appwrite-utils` is a comprehensive TypeScript library designed to streamline the development process for Appwrite projects. Version 1.0.0 aligns with the YAML-first architecture of `appwrite-utils-cli`, providing enhanced integration capabilities and robust utilities for modern Appwrite development. This library provides a suite of utilities and helper functions that facilitate data manipulation, schema management, YAML configuration validation, and seamless integration with Appwrite services. Whether you're managing data migrations, schema updates, or building custom tools on top of the CLI architecture, `appwrite-utils` provides the foundation for professional Appwrite development.
+`appwrite-utils` is a comprehensive TypeScript library designed to streamline the development process for Appwrite projects. This library provides a suite of utilities and helper functions that facilitate data manipulation, schema management, YAML configuration validation, and seamless integration with Appwrite services. Whether you're managing data migrations, schema updates, or building custom tools on top of the CLI architecture, `appwrite-utils` provides the foundation for professional Appwrite development.
+
+**Version 1.6.1**: Internal improvements for better code organization and maintainability.
 
 ## Features
 
@@ -11,6 +13,13 @@
 - **Converter Functions**: Advanced data transformation utilities supporting the CLI's import system
 - **Type Definitions**: Complete TypeScript definitions for Appwrite collections, attributes, and configurations
 - **Schema Management**: Robust schema definitions supporting both TypeScript and YAML configurations
+
+### Dual API Support (Collections & TablesDB)
+- **Collections API**: Traditional Appwrite collections with document-based terminology
+- **TablesDB API**: New table-based API with column terminology for enhanced performance
+- **Dual Terminology**: Seamless support for both `collections/documents/attributes` and `tables/rows/columns`
+- **Automatic Adaptation**: Smart API detection and adapter selection based on configuration
+- **Migration Support**: Type-safe migration paths between Collections and TablesDB APIs
 
 ### CLI Integration
 - **YAML Configuration Support**: Type-safe definitions for YAML-first architecture
@@ -31,6 +40,143 @@ To integrate `appwrite-utils` into your project, ensure you have npm installed a
 ```bash
 npm install appwrite-utils
 ```
+
+## TablesDB & Collections Support
+
+`appwrite-utils` provides seamless support for both traditional Appwrite Collections API and the new TablesDB API, allowing you to work with either terminology based on your project needs.
+
+### API Modes
+
+#### Collections API (Traditional)
+- **Container**: `collections`
+- **Items**: `documents`
+- **Fields**: `attributes`
+- **Service**: `Databases`
+
+#### TablesDB API (New)
+- **Container**: `tables`
+- **Items**: `rows`
+- **Fields**: `columns`
+- **Service**: `TablesDB`
+
+### Schema Definitions
+
+Both APIs share the same underlying schema structure with dual terminology support:
+
+```typescript
+import {
+  CollectionCreateSchema,
+  TableCreateSchema,
+  CollectionSchema,
+  TableSchema
+} from "appwrite-utils";
+
+// Collections API - Document-based terminology
+const collection = CollectionCreateSchema.parse({
+  name: "Users",
+  attributes: [
+    { key: "email", type: "string", required: true },
+    { key: "name", type: "string", required: true }
+  ],
+  indexes: [
+    { key: "email_idx", type: "unique", attributes: ["email"] }
+  ]
+});
+
+// TablesDB API - Table-based terminology
+const table = TableCreateSchema.parse({
+  name: "Users",
+  attributes: [ // Note: Still uses 'attributes' internally for compatibility
+    { key: "email", type: "string", required: true },
+    { key: "name", type: "string", required: true }
+  ],
+  indexes: [
+    { key: "email_idx", type: "unique", attributes: ["email"] }
+  ]
+});
+```
+
+### Type Safety
+
+```typescript
+import type {
+  Collection,
+  Table,
+  CollectionCreate,
+  TableCreate
+} from "appwrite-utils";
+
+// Both types are structurally identical but semantically different
+const handleCollection = (collection: Collection) => {
+  // Work with traditional collections
+  console.log(`Collection: ${collection.name}`);
+  console.log(`Attributes: ${collection.attributes.length}`);
+};
+
+const handleTable = (table: Table) => {
+  // Work with TablesDB tables
+  console.log(`Table: ${table.name}`);
+  console.log(`Columns: ${table.attributes.length}`); // Note: Still 'attributes' for compatibility
+};
+```
+
+### Configuration Examples
+
+#### YAML Configuration - Collections Mode
+```yaml
+# .appwrite/config.yaml
+databases:
+  - name: "main"
+    id: "main"
+    collections:  # Collections terminology
+      - name: "Users"
+        id: "users"
+        attributes:
+          - key: "email"
+            type: "string"
+            required: true
+```
+
+#### YAML Configuration - TablesDB Mode
+```yaml
+# .appwrite/config.yaml
+databases:
+  - name: "main"
+    id: "main"
+    tables:  # TablesDB terminology
+      - name: "Users"
+        id: "users"
+        attributes:  # Internally consistent with Collections
+          - key: "email"
+            type: "string"
+            required: true
+```
+
+### Migration Between APIs
+
+```typescript
+import { CollectionCreateSchema, TableCreateSchema } from "appwrite-utils";
+
+// Convert Collection definition to Table
+const collectionConfig = {
+  name: "Users",
+  attributes: [{ key: "email", type: "string" }]
+};
+
+// Both schemas are compatible
+const asCollection = CollectionCreateSchema.parse(collectionConfig);
+const asTable = TableCreateSchema.parse(collectionConfig);
+
+// Seamless interoperability
+console.log(asCollection.name === asTable.name); // true
+```
+
+### Best Practices
+
+1. **Choose One Terminology**: Stick to either Collections or TablesDB terminology throughout your project
+2. **Configuration Consistency**: Use consistent terminology in YAML configurations
+3. **Type Safety**: Leverage TypeScript types for your chosen API mode
+4. **Migration Planning**: Plan migrations carefully when switching between APIs
 
 ## Utilities
 
@@ -231,6 +377,51 @@ const documents = await listDocumentsBatched(
 ```
 
 ## Changelog
+
+### 1.6.0 - TablesDB Support & Dual API Terminology
+
+**🚀 Major Release - Full TablesDB Integration & Dual Terminology Support**
+
+#### New Features
+- **TablesDB Schema Support**: Complete type definitions for the new Appwrite TablesDB API
+  - `TableSchema`, `TableCreateSchema`, and `TablesSchema` exports
+  - Full compatibility with Collections API schemas
+  - Seamless interoperability between Collections and TablesDB configurations
+
+- **Dual Terminology Support**: Native support for both API terminologies
+  - Collections API: `collections`, `documents`, `attributes`
+  - TablesDB API: `tables`, `rows`, `columns` (Note: internally uses `attributes` for compatibility)
+  - Type-safe schemas for both modes with identical underlying structure
+
+- **Enhanced Type Definitions**: New TypeScript types for TablesDB integration
+  - `Table`, `Tables`, `TableCreate` types exported alongside existing Collection types
+  - Structural compatibility ensures seamless migration between APIs
+  - Full IntelliSense support for both terminology sets
+
+#### Developer Experience
+- **Configuration Flexibility**: YAML configurations support both `collections` and `tables` arrays
+- **Migration Ready**: Zero-breaking-change migration between Collections and TablesDB
+- **Type Safety**: Complete TypeScript support maintains type safety across both APIs
+- **Documentation**: Comprehensive examples and best practices for dual API usage
+
+#### Technical Implementation
+- **Schema Validation**: Zod schemas validate both terminology formats with shared validation logic
+- **Export Consistency**: All existing exports maintained while adding TablesDB counterparts
+- **Compatibility Layer**: Internal attribute handling ensures consistency across both APIs
+
+#### Usage Examples
+```typescript
+// Collections Mode
+import { CollectionCreateSchema } from "appwrite-utils";
+
+// TablesDB Mode
+import { TableCreateSchema } from "appwrite-utils";
+
+// Both schemas accept identical configuration objects
+const config = { name: "Users", attributes: [...] };
+```
+
+**Migration Note**: This release is fully backward compatible. Existing Collections API usage continues to work unchanged while TablesDB support is available for new projects or gradual migration.
 
 ### 1.5.0 - Relationship Schema Relaxation (Two-Way Optional Keys)
 

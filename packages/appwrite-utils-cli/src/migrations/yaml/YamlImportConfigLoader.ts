@@ -215,12 +215,19 @@ export class YamlImportConfigLoader {
   /**
    * Generates a template YAML import configuration.
    * Useful for getting started with YAML-based imports.
-   * 
+   * Supports both collection and table terminology.
+   *
    * @param collectionName - Name of the collection
    * @param sourceFile - Source data file name
+   * @param useTableTerminology - Whether to use table terminology
    * @returns YAML configuration template
    */
-  generateTemplate(collectionName: string, sourceFile: string): string {
+  generateTemplate(
+    collectionName: string,
+    sourceFile: string,
+    useTableTerminology = false
+  ): string {
+    const entityType = useTableTerminology ? 'table' : 'collection';
     const template = {
       source: {
         file: `importData/${sourceFile}`,
@@ -228,7 +235,7 @@ export class YamlImportConfigLoader {
         type: "json"
       },
       target: {
-        collection: collectionName,
+        [entityType]: collectionName,
         type: "create",
         primaryKey: "id",
         createUsers: false
@@ -270,7 +277,7 @@ export class YamlImportConfigLoader {
           {
             sourceField: "user_id",
             targetField: "userId",
-            targetCollection: "Users"
+            [useTableTerminology ? 'targetTable' : 'targetCollection']: "Users"
           }
         ]
       },

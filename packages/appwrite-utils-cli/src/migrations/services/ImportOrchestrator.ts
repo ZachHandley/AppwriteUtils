@@ -28,6 +28,7 @@ import { MessageFormatter } from "../../shared/messageFormatter.js";
 import { ProgressManager } from "../../shared/progressManager.js";
 import { tryAwaitWithRetry } from "../../utils/index.js";
 import { updateOperation, findOrCreateOperation } from "../../shared/migrationHelpers.js";
+import { LegacyAdapter } from "../../adapters/LegacyAdapter.js";
 import { resolveAndUpdateRelationships } from "../relationships.js";
 
 // Enhanced rate limiting configuration - now managed by RateLimitManager
@@ -104,10 +105,6 @@ export class ImportOrchestrator {
     let processedDatabase: Models.Database | undefined;
 
     for (const db of databasesToProcess) {
-      if (!this.config.useMigrations && db.name.toLowerCase().trim().replace(" ", "") === "migrations") {
-        continue;
-      }
-
       MessageFormatter.banner(`Starting import data for database: ${db.name}`, "Database Import");
 
       if (!processedDatabase) {
@@ -206,17 +203,17 @@ export class ImportOrchestrator {
         this.config.collections[index] = collectionConfig;
 
         // Find or create an import operation for the collection
-        if (this.config.useMigrations) {
-          const collectionImportOperation = await findOrCreateOperation(
-            this.database,
-            collection.$id!,
-            "importData"
-          );
-          this.collectionImportOperations.set(
-            this.getCollectionKey(collection.name),
-            collectionImportOperation.$id
-          );
-        }
+        const adapter = new LegacyAdapter(this.database);
+        const collectionImportOperation = await findOrCreateOperation(
+          adapter,
+          dbId,
+          "importData",
+          collection.$id!
+        );
+        this.collectionImportOperations.set(
+          this.getCollectionKey(collection.name),
+          collectionImportOperation.$id
+        );
 
         // Initialize the collection in the import map
         this.importMap.set(this.getCollectionKey(collection.name), {
@@ -315,7 +312,7 @@ export class ImportOrchestrator {
     const rawData = this.loadDataFromFile(importDef);
     if (rawData.length === 0) return;
 
-    await this.updateOperationStatus(collection, "ready", rawData.length);
+    await this.updateOperationStatus(db, collection, "ready", rawData.length);
 
     const collectionData = this.importMap.get(this.getCollectionKey(collection.name));
     if (!collectionData) {
@@ -395,7 +392,7 @@ export class ImportOrchestrator {
     const rawData = this.loadDataFromFile(importDef);
     if (rawData.length === 0) return;
 
-    await this.updateOperationStatus(collection, "ready", rawData.length);
+    await this.updateOperationStatus(db, collection, "ready", rawData.length);
 
     const collectionData = this.importMap.get(this.getCollectionKey(collection.name));
     if (!collectionData) return;
@@ -504,8 +501,9 @@ export class ImportOrchestrator {
     logger.info(`Importing collection: ${collection.name} (${collectionData.data.length} items)`);
 
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
-    if (operationId && this.config.useMigrations) {
-      await updateOperation(this.database, operationId, { status: "in_progress" }, this.config.useMigrations);
+    const adapter = new LegacyAdapter(this.database);
+    if (operationId) {
+      await updateOperation(adapter, db.$id, operationId, { status: "in_progress" });
     }
 
     // Create batches for processing
@@ -530,14 +528,14 @@ export class ImportOrchestrator {
       logger.info(`Batch ${i + 1} completed: ${successCount}/${batch.length} items imported`);
 
       // Update operation progress
-      if (operationId && this.config.useMigrations) {
-        await updateOperation(this.database, operationId, { progress: processedItems }, this.config.useMigrations);
+      if (operationId) {
+        await updateOperation(adapter, db.$id, operationId, { progress: processedItems });
       }
     }
 
     // Mark operation as completed
-    if (operationId && this.config.useMigrations) {
-      await updateOperation(this.database, operationId, { status: "completed" }, this.config.useMigrations);
+    if (operationId) {
+      await updateOperation(adapter, db.$id, operationId, { status: "completed" });
     }
 
     logger.info(`Completed importing collection: ${collection.name} (${processedItems} items)`);
@@ -636,13 +634,12 @@ export class ImportOrchestrator {
     }
   }
 
-  private async updateOperationStatus(collection: CollectionCreate, status: string, total?: number): Promise<void> {
-    if (!this.config.useMigrations) return;
-    
+  private async updateOperationStatus(db: ConfigDatabase, collection: CollectionCreate, status: string, total?: number): Promise<void> {
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
     if (operationId) {
       const updateData = total ? { status, total } : { status };
-      await updateOperation(this.database, operationId, updateData, this.config.useMigrations);
+      const adapter = new LegacyAdapter(this.database);
+      await updateOperation(adapter, db.$id, operationId, updateData);
     }
   }
 

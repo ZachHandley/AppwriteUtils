@@ -27,18 +27,18 @@ export class ConfirmationDialogs {
       return true;
     }
 
-    MessageFormatter.warning(`You are about to perform a destructive operation:`);
-    console.log(chalk.red.bold(`  Operation: ${options.operation}`));
-    console.log(chalk.yellow(`  Targets: ${options.targets.join(", ")}`));
-    
+    MessageFormatter.warning(`You are about to perform a destructive operation:`, { skipLogging: true });
+    MessageFormatter.error(`Operation: ${options.operation}`, undefined, { skipLogging: true });
+    MessageFormatter.warning(`Targets: ${options.targets.join(", ")}`, { skipLogging: true });
+
     if (options.consequences && options.consequences.length > 0) {
-      console.log(chalk.red("\n  This will:"));
+      MessageFormatter.error("This will:", undefined, { skipLogging: true });
       options.consequences.forEach(consequence => {
-        console.log(chalk.red(`    • ${consequence}`));
+        MessageFormatter.error(`  • ${consequence}`, undefined, { skipLogging: true });
       });
     }
 
-    console.log(chalk.red("\n  ⚠️  THIS ACTION CANNOT BE UNDONE!"));
+    MessageFormatter.error("⚠️  THIS ACTION CANNOT BE UNDONE!", undefined, { skipLogging: true });
 
     if (options.requireExplicitConfirmation && options.confirmationText) {
       const { confirmation } = await inquirer.prompt([{
@@ -68,12 +68,12 @@ export class ConfirmationDialogs {
    * Prompts user about creating a backup before a destructive operation
    */
   static async promptForBackup(options: BackupPromptOptions): Promise<'yes' | 'no' | 'skip'> {
-    const message = options.backupMessage || 
+    const message = options.backupMessage ||
       `Create a backup before performing ${options.operation} on: ${options.targets.join(", ")}?`;
 
-    console.log(chalk.blue("\n🛡️  Backup Recommendation"));
+    MessageFormatter.info("🛡️  Backup Recommendation", { skipLogging: true });
     if (options.recommendBackup !== false) {
-      console.log(chalk.yellow("  It's strongly recommended to create a backup before proceeding."));
+      MessageFormatter.warning("It's strongly recommended to create a backup before proceeding.", { skipLogging: true });
     }
     
     const { choice } = await inquirer.prompt([{
@@ -95,12 +95,12 @@ export class ConfirmationDialogs {
    * Shows a final confirmation before proceeding with an operation
    */
   static async finalConfirmation(operation: string, details?: string[]): Promise<boolean> {
-    console.log(chalk.green(`\n✅ Ready to perform: ${chalk.bold(operation)}`));
-    
+    MessageFormatter.success(`Ready to perform: ${operation}`, { skipLogging: true });
+
     if (details && details.length > 0) {
-      console.log(chalk.gray("   Details:"));
+      MessageFormatter.debug("Details:", undefined, { skipLogging: true });
       details.forEach(detail => {
-        console.log(chalk.gray(`     • ${detail}`));
+        MessageFormatter.debug(`  • ${detail}`, undefined, { skipLogging: true });
       });
     }
 
@@ -215,19 +215,19 @@ export class ConfirmationDialogs {
     
     Object.entries(summary).forEach(([key, value]) => {
       const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-      
+
       if (Array.isArray(value)) {
-        console.log(`${chalk.gray("●")} ${formattedKey}:`);
+        MessageFormatter.info(`● ${formattedKey}:`, { skipLogging: true });
         value.forEach(item => {
-          console.log(`  ${chalk.gray("•")} ${item}`);
+          MessageFormatter.debug(`  • ${item}`, undefined, { skipLogging: true });
         });
       } else {
-        console.log(`${chalk.gray("●")} ${formattedKey}: ${chalk.cyan(String(value))}`);
+        MessageFormatter.info(`● ${formattedKey}: ${String(value)}`, { skipLogging: true });
       }
     });
 
     if (options.warningMessage) {
-      console.log(chalk.yellow(`\n⚠️  ${options.warningMessage}`));
+      MessageFormatter.warning(`⚠️  ${options.warningMessage}`, { skipLogging: true });
     }
 
     if (options.confirmationRequired !== false) {

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import chalk from "chalk";
 import pLimit from "p-limit";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import { MessageFormatter } from "./messageFormatter.js";
 
 /**
  * Validates and filters events array for Appwrite functions
@@ -64,7 +65,7 @@ export class FunctionManager {
     } = options;
 
     if (verbose) {
-      console.log(chalk.blue(`🔍 Searching for function: ${functionName}`));
+      MessageFormatter.info(`Searching for function: ${functionName}`, { prefix: "Functions" });
     }
 
     // Normalize function name for comparison
@@ -76,7 +77,7 @@ export class FunctionManager {
     for (const path of standardPaths) {
       if (await this.isValidFunctionDirectory(path)) {
         if (verbose) {
-          console.log(chalk.green(`✓ Found function at standard location: ${path}`));
+          MessageFormatter.success(`Found function at standard location: ${path}`, { prefix: "Functions" });
         }
         return path;
       }
@@ -92,7 +93,7 @@ export class FunctionManager {
         );
         if (foundPath) {
           if (verbose) {
-            console.log(chalk.green(`✓ Found function via fuzzy search: ${foundPath}`));
+            MessageFormatter.success(`Found function via fuzzy search: ${foundPath}`, { prefix: "Functions" });
           }
           return foundPath;
         }
@@ -100,7 +101,7 @@ export class FunctionManager {
     }
 
     if (verbose) {
-      console.log(chalk.yellow(`⚠ Function directory not found: ${functionName}`));
+      MessageFormatter.warning(`Function directory not found: ${functionName}`, { prefix: "Functions" });
     }
     return null;
   }
@@ -175,7 +176,7 @@ export class FunctionManager {
       }
     } catch (error) {
       if (verbose) {
-        console.log(chalk.gray(`Skipping inaccessible directory: ${searchPath}`));
+        MessageFormatter.debug(`Skipping inaccessible directory: ${searchPath}`, undefined, { prefix: "Functions" });
       }
     }
 
@@ -248,9 +249,9 @@ export class FunctionManager {
 
     return await functionLimit(async () => {
       if (verbose) {
-        console.log(chalk.blue(`🚀 Deploying function: ${functionConfig.name}`));
-        console.log(chalk.gray(`   Path: ${functionPath}`));
-        console.log(chalk.gray(`   Entrypoint: ${entrypoint}`));
+        MessageFormatter.processing(`Deploying function: ${functionConfig.name}`, { prefix: "Functions" });
+        MessageFormatter.debug(`Path: ${functionPath}`, undefined, { prefix: "Functions" });
+        MessageFormatter.debug(`Entrypoint: ${entrypoint}`, undefined, { prefix: "Functions" });
       }
 
       // Validate function directory
@@ -265,7 +266,7 @@ export class FunctionManager {
         functionExists = true;
       } catch (error) {
         if (verbose) {
-          console.log(chalk.yellow(`Function ${functionConfig.$id} does not exist, creating...`));
+          MessageFormatter.info(`Function ${functionConfig.$id} does not exist, creating...`, { prefix: "Functions" });
         }
       }
 
@@ -289,7 +290,7 @@ export class FunctionManager {
       );
 
       if (verbose) {
-        console.log(chalk.green(`✅ Function ${functionConfig.name} deployed successfully`));
+        MessageFormatter.success(`Function ${functionConfig.name} deployed successfully`, { prefix: "Functions" });
       }
 
       return deployment;
@@ -303,7 +304,7 @@ export class FunctionManager {
     const { verbose = false } = options;
 
     if (verbose) {
-      console.log(chalk.blue(`Creating function: ${functionConfig.name}`));
+      MessageFormatter.processing(`Creating function: ${functionConfig.name}`, { prefix: "Functions" });
     }
 
     return await tryAwaitWithRetry(async () => {
@@ -336,7 +337,7 @@ export class FunctionManager {
     const { verbose = false } = options;
 
     if (verbose) {
-      console.log(chalk.blue(`Updating function: ${functionConfig.name}`));
+      MessageFormatter.processing(`Updating function: ${functionConfig.name}`, { prefix: "Functions" });
     }
 
     return await tryAwaitWithRetry(async () => {
@@ -373,14 +374,14 @@ export class FunctionManager {
     const { platform } = await import("node:os");
 
     if (verbose) {
-      console.log(chalk.blue("Executing pre-deploy commands..."));
+      MessageFormatter.processing("Executing pre-deploy commands...", { prefix: "Functions" });
     }
 
     const isWindows = platform() === "win32";
 
     for (const command of commands) {
       if (verbose) {
-        console.log(chalk.gray(`  $ ${command}`));
+        MessageFormatter.debug(`$ ${command}`, undefined, { prefix: "Functions" });
       }
 
       try {
@@ -391,13 +392,13 @@ export class FunctionManager {
           windowsHide: true,
         });
       } catch (error) {
-        console.error(chalk.red(`Failed to execute command: ${command}`));
+        MessageFormatter.error(`Failed to execute command: ${command}`, error as Error, { prefix: "Functions" });
         throw error;
       }
     }
 
     if (verbose) {
-      console.log(chalk.green("✓ Pre-deploy commands completed"));
+      MessageFormatter.success("Pre-deploy commands completed", { prefix: "Functions" });
     }
   }
 
@@ -415,7 +416,7 @@ export class FunctionManager {
 
     try {
       if (verbose) {
-        console.log(chalk.blue("Creating deployment archive..."));
+        MessageFormatter.processing("Creating deployment archive...", { prefix: "Functions" });
       }
 
       // Create tarball
@@ -431,9 +432,9 @@ export class FunctionManager {
               relativePath.includes(`/${pattern.toLowerCase()}`) ||
               relativePath.includes(`\\${pattern.toLowerCase()}`)
             );
-            
+
             if (shouldIgnore && verbose) {
-              console.log(chalk.gray(`  Ignoring: ${path}`));
+              MessageFormatter.debug(`Ignoring: ${path}`, undefined, { prefix: "Functions" });
             }
             
             return !shouldIgnore;
@@ -450,7 +451,7 @@ export class FunctionManager {
       );
 
       if (verbose) {
-        console.log(chalk.blue("Uploading deployment..."));
+        MessageFormatter.processing("Uploading deployment...", { prefix: "Functions" });
       }
 
       const deployment = await tryAwaitWithRetry(async () => {

@@ -1,123 +1,94 @@
 import path from "path";
 import fs from "fs";
-import { type AppwriteConfig, type Collection, type CollectionCreate } from "appwrite-utils";
+import { type AppwriteConfig, type Collection, type CollectionCreate, type Table, type TableCreate } from "appwrite-utils";
 import { register } from "tsx/esm/api"; // Import the register function
 import { pathToFileURL } from "node:url";
 import chalk from "chalk";
-import { findYamlConfig, loadYamlConfig } from "../config/yamlConfig.js";
+import { findYamlConfig, loadYamlConfig, loadYamlConfigWithSession, extractSessionOptionsFromConfig, type YamlSessionOptions } from "../config/yamlConfig.js";
 import { detectAppwriteVersionCached, fetchServerVersion, isVersionAtLeast } from "./versionDetection.js";
-import yaml from "js-yaml";
-import { z } from "zod";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { validateCollectionsTablesConfig, reportValidationResults, type ValidationResult } from "../config/configValidation.js";
+import { resolveCollectionsDir, resolveTablesDir } from "./pathResolvers.js";
+import {
+  findAppwriteConfig,
+  findAppwriteConfigTS,
+  findFunctionsDir,
+  discoverCollections,
+  discoverTables,
+  discoverLegacyDirectory
+} from "./configDiscovery.js";
 
 /**
- * Recursively searches for configuration files starting from the given directory.
- * Priority: 1) YAML configs in .appwrite directories, 2) appwriteConfig.ts files in subdirectories
- * @param dir The directory to start the search from.
- * @returns The directory path where the config was found, suitable for passing to loadConfig().
+ * Session authentication preservation options for config loading
  */
-export const findAppwriteConfig = (dir: string): string | null => {
-  // First try to find YAML config (already searches recursively for .appwrite dirs)
-  const yamlConfig = findYamlConfig(dir);
-  if (yamlConfig) {
-    // Return the directory containing the config file
-    return path.dirname(yamlConfig);
-  }
+export interface SessionPreservationOptions {
+  sessionCookie?: string;
+  authMethod?: "session" | "apikey" | "auto";
+  sessionMetadata?: {
+    email?: string;
+    expiresAt?: string;
+  };
+}
 
-  // Fall back to TypeScript config search
-  const tsConfigPath = findAppwriteConfigTS(dir);
-  if (tsConfigPath) {
-    return path.dirname(tsConfigPath);
-  }
-  
-  return null;
-};
+/**
+ * Configuration loading options
+ */
+export interface ConfigLoadingOptions {
+  validate?: boolean;
+  strictMode?: boolean;
+  reportValidation?: boolean;
+  preserveAuth?: SessionPreservationOptions;
+}
 
-const shouldIgnoreDirectory = (dirName: string): boolean => {
-  const ignoredDirs = [
-    'node_modules',
-    'dist',
-    'build',
-    'coverage',
-    '.next',
-    '.nuxt',
-    '.cache',
-    '.git',
-    '.svn',
-    '.hg',
-    '__pycache__',
-    '.pytest_cache',
-    '.mypy_cache',
-    'venv',
-    '.venv',
-    'env',
-    '.env',
-    'target',
-    'out',
-    'bin',
-    'obj',
-    '.vs',
-    '.vscode',
-    '.idea',
-    'temp',
-    'tmp',
-    '.tmp',
-    'logs',
-    'log',
-    '.DS_Store',
-    'Thumbs.db'
-  ];
-  
-  return ignoredDirs.includes(dirName) || 
-         dirName.startsWith('.git') || 
-         dirName.startsWith('node_modules') ||
-         (dirName.startsWith('.') && dirName !== '.appwrite');
-};
-
-const findAppwriteConfigTS = (dir: string, depth: number = 0): string | null => {
-  // Limit search depth to prevent infinite recursion
-  if (depth > 10) {
-    return null;
-  }
-
-  if (shouldIgnoreDirectory(path.basename(dir))) {
-    return null;
-  }
-
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-    // First check current directory for appwriteConfig.ts
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name === "appwriteConfig.ts") {
-        return path.join(dir, entry.name);
-      }
+/**
+ * Helper function to create session preservation options from session data
+ * @param sessionCookie The session cookie string
+ * @param email Optional email associated with the session
+ * @param expiresAt Optional expiration timestamp
+ * @returns SessionPreservationOptions object
+ */
+export function createSessionPreservation(
+  sessionCookie: string,
+  email?: string,
+  expiresAt?: string
+): SessionPreservationOptions {
+  return {
+    sessionCookie,
+    authMethod: "session",
+    sessionMetadata: {
+      ...(email && { email }),
+      ...(expiresAt && { expiresAt })
     }
+  };
+}
 
-    // Then search subdirectories
-    for (const entry of entries) {
-      if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
-        const result = findAppwriteConfigTS(path.join(dir, entry.name), depth + 1);
-        if (result) return result;
-      }
-    }
-  } catch (error) {
-    // Ignore directory access errors
-  }
-
-  return null;
-};
+// Re-export config discovery functions for backward compatibility
+export { findAppwriteConfig, findFunctionsDir } from "./configDiscovery.js";
 
 /**
  * Loads the Appwrite configuration and returns both config and the path where it was found.
  * @param configDir The directory to search for config files.
- * @returns Object containing the config and the actual path where it was found.
+ * @param options Loading options including validation settings and session preservation.
+ * @returns Object containing the config, path, and validation results.
  */
 export const loadConfigWithPath = async (
-  configDir: string
-): Promise<{ config: AppwriteConfig; actualConfigPath: string }> => {
+  configDir: string,
+  options: ConfigLoadingOptions = {}
+): Promise<{
+  config: AppwriteConfig;
+  actualConfigPath: string;
+  validation?: ValidationResult;
+}> => {
+  const { validate = true, strictMode = false, reportValidation = true } = options;
   let config: AppwriteConfig | null = null;
   let actualConfigPath: string | null = null;
+
+  // Convert session preservation options to YAML format
+  const yamlSessionOptions: YamlSessionOptions | undefined = options.preserveAuth ? {
+    sessionCookie: options.preserveAuth.sessionCookie,
+    authMethod: options.preserveAuth.authMethod,
+    sessionMetadata: options.preserveAuth.sessionMetadata,
+  } : undefined;
 
   // Check if we're given the .appwrite directory directly
   if (configDir.endsWith('.appwrite')) {
@@ -126,7 +97,9 @@ export const loadConfigWithPath = async (
     for (const fileName of possibleYamlFiles) {
       const yamlPath = path.join(configDir, fileName);
       if (fs.existsSync(yamlPath)) {
-        config = await loadYamlConfig(yamlPath);
+        config = yamlSessionOptions
+          ? await loadYamlConfigWithSession(yamlPath, yamlSessionOptions)
+          : await loadYamlConfig(yamlPath);
         actualConfigPath = yamlPath;
         break;
       }
@@ -135,7 +108,9 @@ export const loadConfigWithPath = async (
     // Original logic: search for .appwrite directories
     const yamlConfigPath = findYamlConfig(configDir);
     if (yamlConfigPath) {
-      config = await loadYamlConfig(yamlConfigPath);
+      config = yamlSessionOptions
+        ? await loadYamlConfigWithSession(yamlConfigPath, yamlSessionOptions)
+        : await loadYamlConfig(yamlConfigPath);
       actualConfigPath = yamlConfigPath;
     }
   }
@@ -166,90 +141,158 @@ export const loadConfigWithPath = async (
     throw new Error("No valid configuration found");
   }
 
-  // Determine directory (collections or tables) based on server version / API mode
-  let dirName = "collections";
-  try {
-    const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
-    if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
-      dirName = 'tables';
-    } else {
-      // Try health version if not provided
-      const ver = await fetchServerVersion(config.appwriteEndpoint);
-      if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName = 'tables';
-    }
-  } catch {}
+  // Preserve session authentication if provided
+  // This allows maintaining session context when config is reloaded during CLI operations
+  if (options.preserveAuth) {
+    const { sessionCookie, authMethod, sessionMetadata } = options.preserveAuth;
 
-  // Determine collections directory based on actual config file location and dirName
-  let collectionsDir: string;
+    // Inject session cookie into the loaded config
+    if (sessionCookie) {
+      config.sessionCookie = sessionCookie;
+    }
+
+    // Set or override authentication method preference
+    if (authMethod) {
+      config.authMethod = authMethod;
+    }
+
+    // Merge session metadata (email, expiration, etc.) with existing metadata
+    if (sessionMetadata) {
+      config.sessionMetadata = {
+        ...config.sessionMetadata,
+        ...sessionMetadata
+      };
+    }
+
+    // Auto-detect authentication method if not explicitly provided
+    // If we have a session cookie but no auth method specified, prefer session auth
+    if (!authMethod && sessionCookie) {
+      config.authMethod = "session";
+    }
+  }
+
+  // Enhanced dual folder support: Load from BOTH collections/ AND tables/ directories
   const configFileDir = path.dirname(actualConfigPath);
-  collectionsDir = path.join(configFileDir, dirName);
-  // Fallback if not found
-  if (!fs.existsSync(collectionsDir)) {
-    const fallback = path.join(configFileDir, dirName === 'tables' ? 'collections' : 'tables');
-    if (fs.existsSync(fallback)) collectionsDir = fallback;
+  // Look for collections/tables directories in the same directory as the config file
+  const collectionsDir = resolveCollectionsDir(configFileDir);
+  const tablesDir = resolveTablesDir(configFileDir);
+
+  // Initialize collections array
+  config.collections = [];
+
+  // Load from collections/ directory first (higher priority)
+  const collectionsResult = await discoverCollections(collectionsDir);
+  config.collections.push(...collectionsResult.collections);
+
+  // Load from tables/ directory second (lower priority, check for conflicts)
+  const tablesResult = await discoverTables(tablesDir, collectionsResult.loadedNames);
+  config.collections.push(...tablesResult.tables);
+
+  // Combine conflicts from both discovery operations
+  const allConflicts = [...collectionsResult.conflicts, ...tablesResult.conflicts];
+
+  // Report conflicts if any
+  if (allConflicts.length > 0) {
+    MessageFormatter.warning(`Found ${allConflicts.length} naming conflicts between collections/ and tables/`, { prefix: "Config" });
+    allConflicts.forEach(conflict => {
+      MessageFormatter.info(`  - '${conflict.name}': ${conflict.source1} (used) vs ${conflict.source2} (skipped)`, { prefix: "Config" });
+    });
   }
 
-  // Load collections if they exist
-  if (fs.existsSync(collectionsDir)) {
-    const unregister = register(); // Register tsx for collections
-
+  // Fallback: If neither directory exists, try legacy single-directory detection
+  if (!fs.existsSync(collectionsDir) && !fs.existsSync(tablesDir)) {
+    // Determine directory (collections or tables) based on server version / API mode
+    let dirName: 'collections' | 'tables' = "collections";
     try {
-      const collectionFiles = fs.readdirSync(collectionsDir);
-      config.collections = [];
-
-      for (const file of collectionFiles) {
-        if (file === "index.ts") {
-          continue;
-        }
-        const filePath = path.join(collectionsDir, file);
-        
-        // Handle YAML collections
-        if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-          const collection = loadYamlCollection(filePath);
-          if (collection) {
-            config.collections.push(collection);
-          }
-          continue;
-        }
-        
-        // Handle TypeScript collections
-        if (file.endsWith('.ts')) {
-          const fileUrl = pathToFileURL(filePath).href;
-          const collectionModule = (await import(fileUrl));
-          const collection: Collection | undefined = collectionModule.default?.default || collectionModule.default || collectionModule;
-          if (collection) {
-            // Ensure importDefs are properly loaded
-            if (collectionModule.importDefs || collection.importDefs) {
-              collection.importDefs = collectionModule.importDefs || collection.importDefs;
-            }
-            config.collections.push(collection as CollectionCreate);
-          }
-        }
+      const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
+      if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
+        dirName = 'tables';
+      } else {
+        // Try health version if not provided
+        const ver = await fetchServerVersion(config.appwriteEndpoint);
+        if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName = 'tables';
       }
-    } finally {
-      unregister(); // Unregister tsx when done
+    } catch {}
+
+    const legacyItems = await discoverLegacyDirectory(configFileDir, dirName);
+    config.collections.push(...legacyItems);
+  }
+
+  // Ensure array exists even if empty
+  config.collections = config.collections || [];
+
+  // Log the final result
+  const allCollections = config.collections || [];
+  const fromCollectionsDir = allCollections.filter((c: any) => !c._isFromTablesDir).length;
+  const fromTablesDir = allCollections.filter((c: any) => c._isFromTablesDir).length;
+  const totalLoaded = allCollections.length;
+
+  if (totalLoaded > 0) {
+    if (fromTablesDir > 0) {
+      MessageFormatter.success(`Successfully loaded ${totalLoaded} items total: ${fromCollectionsDir} from collections/ and ${fromTablesDir} from tables/`, { prefix: "Config" });
+    } else {
+      MessageFormatter.success(`Successfully loaded ${totalLoaded} collections from collections/`, { prefix: "Config" });
     }
   }
 
-  return { config, actualConfigPath };
+  // Validate configuration if requested
+  let validation: ValidationResult | undefined;
+  if (validate) {
+    validation = validateCollectionsTablesConfig(config);
+
+    // In strict mode, treat warnings as errors
+    if (strictMode && validation.warnings.length > 0) {
+      const strictValidation = {
+        ...validation,
+        isValid: false,
+        errors: [...validation.errors, ...validation.warnings.map(w => ({ ...w, severity: "error" as const }))],
+        warnings: []
+      };
+      validation = strictValidation;
+    }
+
+    // Report validation results if requested
+    if (reportValidation) {
+      reportValidationResults(validation, { verbose: true });
+    }
+
+    // Throw error if validation fails in strict mode
+    if (strictMode && !validation.isValid) {
+      throw new Error(`Configuration validation failed in strict mode. Found ${validation.errors.length} validation errors.`);
+    }
+  }
+
+  return { config, actualConfigPath, validation };
 };
 
 /**
  * Loads the Appwrite configuration and all collection configurations from a specified directory.
  * Supports both YAML and TypeScript config formats with backward compatibility.
  * @param configDir The directory containing the config file and collections folder.
+ * @param options Loading options including validation settings and session preservation.
  * @returns The loaded Appwrite configuration including collections.
  */
 export const loadConfig = async (
-  configDir: string
+  configDir: string,
+  options: ConfigLoadingOptions = {}
 ): Promise<AppwriteConfig> => {
+  const { validate = false, strictMode = false, reportValidation = false } = options;
   let config: AppwriteConfig | null = null;
   let actualConfigPath: string | null = null;
+
+  // Convert session preservation options to YAML format
+  const yamlSessionOptions: YamlSessionOptions | undefined = options.preserveAuth ? {
+    sessionCookie: options.preserveAuth.sessionCookie,
+    authMethod: options.preserveAuth.authMethod,
+    sessionMetadata: options.preserveAuth.sessionMetadata,
+  } : undefined;
 
   // First try to find and load YAML config
   const yamlConfigPath = findYamlConfig(configDir);
   if (yamlConfigPath) {
-    config = await loadYamlConfig(yamlConfigPath);
+    config = yamlSessionOptions
+      ? await loadYamlConfigWithSession(yamlConfigPath, yamlSessionOptions)
+      : await loadYamlConfig(yamlConfigPath);
     actualConfigPath = yamlConfigPath;
   }
 
@@ -279,72 +322,97 @@ export const loadConfig = async (
     throw new Error("No valid configuration found");
   }
 
-  // Determine directory (collections or tables) based on server version / API mode
-  let dirName2 = "collections";
-  try {
-    const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
-    if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
-      dirName2 = 'tables';
-    } else {
-      const ver = await fetchServerVersion(config.appwriteEndpoint);
-      if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName2 = 'tables';
+  // Preserve session authentication if provided
+  // This allows maintaining session context when config is reloaded during CLI operations
+  if (options.preserveAuth) {
+    const { sessionCookie, authMethod, sessionMetadata } = options.preserveAuth;
+
+    // Inject session cookie into the loaded config
+    if (sessionCookie) {
+      config.sessionCookie = sessionCookie;
     }
-  } catch {}
 
-  let collectionsDir: string;
-  if (actualConfigPath) {
-    const configFileDir = path.dirname(actualConfigPath);
-    collectionsDir = path.join(configFileDir, dirName2);
-  } else {
-    collectionsDir = path.join(configDir, dirName2);
+    // Set or override authentication method preference
+    if (authMethod) {
+      config.authMethod = authMethod;
+    }
+
+    // Merge session metadata (email, expiration, etc.) with existing metadata
+    if (sessionMetadata) {
+      config.sessionMetadata = {
+        ...config.sessionMetadata,
+        ...sessionMetadata
+      };
+    }
+
+    // Auto-detect authentication method if not explicitly provided
+    // If we have a session cookie but no auth method specified, prefer session auth
+    if (!authMethod && sessionCookie) {
+      config.authMethod = "session";
+    }
   }
-  if (!fs.existsSync(collectionsDir)) {
-    const fallback = path.join(path.dirname(actualConfigPath || configDir), dirName2 === 'tables' ? 'collections' : 'tables');
-    if (fs.existsSync(fallback)) collectionsDir = fallback;
+
+  // Enhanced dual folder support: Load from BOTH collections/ AND tables/ directories
+  const configFileDir = actualConfigPath ? path.dirname(actualConfigPath) : configDir;
+  // Look for collections/tables directories in the same directory as the config file
+  const collectionsDir = resolveCollectionsDir(configFileDir);
+  const tablesDir = resolveTablesDir(configFileDir);
+
+  // Initialize collections array
+  config.collections = [];
+
+  // Load from collections/ directory first (higher priority)
+  const collectionsResult = await discoverCollections(collectionsDir);
+  config.collections.push(...collectionsResult.collections);
+
+  // Load from tables/ directory second (lower priority, check for conflicts)
+  const tablesResult = await discoverTables(tablesDir, collectionsResult.loadedNames);
+  config.collections.push(...tablesResult.tables);
+
+  // Combine conflicts from both discovery operations
+  const allConflicts = [...collectionsResult.conflicts, ...tablesResult.conflicts];
+
+  // Report conflicts if any
+  if (allConflicts.length > 0) {
+    MessageFormatter.warning(`Found ${allConflicts.length} naming conflicts between collections/ and tables/`, { prefix: "Config" });
+    allConflicts.forEach(conflict => {
+      MessageFormatter.info(`  - '${conflict.name}': ${conflict.source1} (used) vs ${conflict.source2} (skipped)`, { prefix: "Config" });
+    });
   }
 
-  // Load collections if they exist
-  if (fs.existsSync(collectionsDir)) {
-    const unregister = register(); // Register tsx for collections
-
+  // Fallback: If neither directory exists, try legacy single-directory detection
+  if (!fs.existsSync(collectionsDir) && !fs.existsSync(tablesDir)) {
+    // Determine directory (collections or tables) based on server version / API mode
+    let dirName: 'collections' | 'tables' = "collections";
     try {
-      const collectionFiles = fs.readdirSync(collectionsDir);
-      config.collections = [];
-
-      for (const file of collectionFiles) {
-        if (file === "index.ts") {
-          continue;
-        }
-        const filePath = path.join(collectionsDir, file);
-        
-        // Handle YAML collections
-        if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-          const collection = loadYamlCollection(filePath);
-          if (collection) {
-            config.collections.push(collection);
-          }
-          continue;
-        }
-        
-        // Handle TypeScript collections
-        if (file.endsWith('.ts')) {
-          const fileUrl = pathToFileURL(filePath).href;
-          const collectionModule = (await import(fileUrl));
-          const collection: Collection | undefined = collectionModule.default?.default || collectionModule.default || collectionModule;
-          if (collection) {
-            // Ensure importDefs are properly loaded
-            if (collectionModule.importDefs || collection.importDefs) {
-              collection.importDefs = collectionModule.importDefs || collection.importDefs;
-            }
-            config.collections.push(collection);
-          }
-        }
+      const det = await detectAppwriteVersionCached(config.appwriteEndpoint, config.appwriteProject, config.appwriteKey);
+      if (det.apiMode === 'tablesdb' || isVersionAtLeast(det.serverVersion, '1.8.0')) {
+        dirName = 'tables';
+      } else {
+        const ver = await fetchServerVersion(config.appwriteEndpoint);
+        if (isVersionAtLeast(ver || undefined, '1.8.0')) dirName = 'tables';
       }
-    } finally {
-      unregister(); // Unregister tsx when done
+    } catch {}
+
+    const legacyItems = await discoverLegacyDirectory(configFileDir, dirName);
+    config.collections.push(...legacyItems);
+  }
+
+  // Ensure array exists even if empty
+  config.collections = config.collections || [];
+
+  // Log the final result
+  const allCollections = config.collections || [];
+  const fromCollectionsDir = allCollections.filter((c: any) => !c._isFromTablesDir).length;
+  const fromTablesDir = allCollections.filter((c: any) => c._isFromTablesDir).length;
+  const totalLoaded = allCollections.length;
+
+  if (totalLoaded > 0) {
+    if (fromTablesDir > 0) {
+      MessageFormatter.success(`Successfully loaded ${totalLoaded} items total: ${fromCollectionsDir} from collections/ and ${fromTablesDir} from tables/`, { prefix: "Config" });
+    } else {
+      MessageFormatter.success(`Successfully loaded ${totalLoaded} collections from collections/`, { prefix: "Config" });
     }
-  } else {
-    config.collections = config.collections || [];
   }
 
   // Log successful config loading
@@ -352,130 +420,30 @@ export const loadConfig = async (
     MessageFormatter.success(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
   }
 
-  return config;
-};
+  // Validate configuration if requested
+  if (validate) {
+    let validation = validateCollectionsTablesConfig(config);
 
-export const findFunctionsDir = (dir: string, depth: number = 0): string | null => {
-  // Limit search depth to prevent infinite recursion
-  if (depth > 5) {
-    return null;
-  }
-
-  if (shouldIgnoreDirectory(path.basename(dir))) {
-    return null;
-  }
-  
-  try {
-    const files = fs.readdirSync(dir, { withFileTypes: true });
-
-    for (const entry of files) {
-      if (!entry.isDirectory() || shouldIgnoreDirectory(entry.name)) {
-        continue;
-      }
-
-      if (entry.name === "functions") {
-        return path.join(dir, entry.name);
-      }
-
-      const result = findFunctionsDir(path.join(dir, entry.name), depth + 1);
-      if (result) return result;
+    // In strict mode, treat warnings as errors
+    if (strictMode && validation.warnings.length > 0) {
+      validation = {
+        ...validation,
+        isValid: false,
+        errors: [...validation.errors, ...validation.warnings.map(w => ({ ...w, severity: "error" as const }))],
+        warnings: []
+      };
     }
-  } catch (error) {
-    // Ignore directory access errors
+
+    // Report validation results if requested
+    if (reportValidation) {
+      reportValidationResults(validation, { verbose: true });
+    }
+
+    // Throw error if validation fails in strict mode
+    if (strictMode && !validation.isValid) {
+      throw new Error(`Configuration validation failed in strict mode. Found ${validation.errors.length} validation errors.`);
+    }
   }
 
-  return null;
-};
-
-// YAML Collection Schema
-const YamlCollectionSchema = z.object({
-  name: z.string(),
-  id: z.string().optional(),
-  documentSecurity: z.boolean().default(false),
-  enabled: z.boolean().default(true),
-  permissions: z.array(
-    z.object({
-      permission: z.string(),
-      target: z.string()
-    })
-  ).optional().default([]),
-  attributes: z.array(
-    z.object({
-      key: z.string(),
-      type: z.string(),
-      size: z.number().optional(),
-      required: z.boolean().default(false),
-      array: z.boolean().optional(),
-      default: z.any().optional(),
-      min: z.number().optional(),
-      max: z.number().optional(),
-      elements: z.array(z.string()).optional(),
-      relatedCollection: z.string().optional(),
-      relationType: z.string().optional(),
-      twoWay: z.boolean().optional(),
-      twoWayKey: z.string().optional(),
-      onDelete: z.string().optional(),
-      side: z.string().optional()
-    })
-  ).optional().default([]),
-  indexes: z.array(
-    z.object({
-      key: z.string(),
-      type: z.string(),
-      attributes: z.array(z.string()),
-      orders: z.array(z.string()).optional()
-    })
-  ).optional().default([]),
-  importDefs: z.array(z.any()).optional().default([])
-});
-
-type YamlCollection = z.infer<typeof YamlCollectionSchema>;
-
-const loadYamlCollection = (filePath: string): CollectionCreate | null => {
-  try {
-    const fileContent = fs.readFileSync(filePath, "utf8");
-    const yamlData = yaml.load(fileContent) as unknown;
-    const parsedCollection = YamlCollectionSchema.parse(yamlData);
-    
-    // Convert YAML collection to CollectionCreate format
-    const collection: CollectionCreate = {
-      name: parsedCollection.name,
-      $id: parsedCollection.id || parsedCollection.name.toLowerCase().replace(/\s+/g, '_'),
-      documentSecurity: parsedCollection.documentSecurity,
-      enabled: parsedCollection.enabled,
-      $permissions: parsedCollection.permissions.map(p => ({
-        permission: p.permission as any,
-        target: p.target
-      })),
-      attributes: parsedCollection.attributes.map(attr => ({
-        key: attr.key,
-        type: attr.type as any,
-        size: attr.size,
-        required: attr.required,
-        array: attr.array,
-        xdefault: attr.default,
-        min: attr.min,
-        max: attr.max,
-        elements: attr.elements,
-        relatedCollection: attr.relatedCollection,
-        relationType: attr.relationType as any,
-        twoWay: attr.twoWay,
-        twoWayKey: attr.twoWayKey,
-        onDelete: attr.onDelete as any,
-        side: attr.side as any
-      })),
-      indexes: parsedCollection.indexes.map(idx => ({
-        key: idx.key,
-        type: idx.type as any,
-        attributes: idx.attributes,
-        orders: idx.orders as any
-      })),
-      importDefs: parsedCollection.importDefs
-    };
-    
-    return collection;
-  } catch (error) {
-    console.error(`Error loading YAML collection from ${filePath}:`, error);
-    return null;
-  }
+  return config;
 };

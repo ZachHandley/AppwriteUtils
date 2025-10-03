@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../.yaml_schemas/collection.schema.json
+# Collection Designed to Test Bulk Deletion Optimization
+name: BulkDeleteTestCollection
+id: bulk_delete_test_collection
+documentSecurity: false
+enabled: true
+permissions:
+  - permission: read
+    target: any
+  - permission: create
+    target: users
+  - permission: update
+    target: users
+  - permission: delete
+    target: users
+attributes:
+  - key: batchId
+    type: string
+    size: 50
+    required: true
+    description: "Batch identifier for bulk operations"
+  - key: recordNumber
+    type: integer
+    required: true
+    description: "Sequential record number"
+  - key: testData
+    type: string
+    size: 500
+    required: false
+    description: "Test data payload"
+  - key: createdBatch
+    type: datetime
+    required: true
+    description: "When this batch was created"
+indexes:
+  - key: batch_index
+    type: key
+    attributes:
+      - batchId
+  - key: record_index
+    type: key
+    attributes:
+      - recordNumber

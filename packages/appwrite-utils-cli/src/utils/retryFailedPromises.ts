@@ -1,4 +1,6 @@
 import type { Models } from "node-appwrite";
+import { MessageFormatter } from "../shared/messageFormatter.js";
+import { logger } from "../shared/logging.js";
 
 export const retryFailedPromises = async (
   batch: Promise<Models.Document>[],
@@ -9,7 +11,7 @@ export const retryFailedPromises = async (
 
   results.forEach((result, index) => {
     if (result.status === "rejected") {
-      console.error("Promise rejected with reason:", result.reason);
+      logger.error("Promise rejected with reason:", { reason: result.reason });
       if (maxRetries > 0) {
         toRetry.push(batch[index]);
       }
@@ -17,7 +19,7 @@ export const retryFailedPromises = async (
   });
 
   if (toRetry.length > 0) {
-    console.log(`Retrying ${toRetry.length} promises`);
+    MessageFormatter.info(`Retrying ${toRetry.length} promises`, { prefix: "Retry" });
     return retryFailedPromises(toRetry, maxRetries - 1);
   } else {
     return results

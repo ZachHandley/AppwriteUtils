@@ -56,8 +56,13 @@ export {
   AppwriteConfigSchema,
   type ConfigCollection,
   type ConfigCollections,
+  type ConfigTable,
+  type ConfigTables,
   type ConfigDatabase,
   type ConfigDatabases,
+  getVersionAwareDirectory,
+  resolveDirectoryForApiMode,
+  getDualDirectoryPaths,
 } from "./schemas/appwriteConfig.js";
 export {
   type CollectionCreate,
@@ -66,6 +71,18 @@ export {
   type Collection,
   type Collections,
 } from "./schemas/collection.js";
+export {
+  type TableCreate,
+  TableCreateSchema,
+  TableSchema,
+  type Table,
+  type Tables,
+  type TableInput,
+  type TableCreateInput,
+  type TableWithAttributes,
+  type TableWithColumns,
+  type TableDefinition,
+} from "./schemas/table.js";
 export {
   type Attribute,
   attributeSchema,

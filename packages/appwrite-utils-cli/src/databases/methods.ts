@@ -1,6 +1,7 @@
 import { Databases, Query, type Models } from "node-appwrite";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import { fetchAllCollections } from "../collections/methods.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export const fetchAllDatabases = async (
   database: Databases
@@ -30,13 +31,13 @@ export const wipeDatabase = async (
   database: Databases,
   databaseId: string
 ): Promise<{ collectionId: string; collectionName: string }[]> => {
-  console.log(`Wiping database: ${databaseId}`);
+  MessageFormatter.info(`Wiping database: ${databaseId}`, { prefix: "Database" });
   const existingCollections = await fetchAllCollections(databaseId, database);
   let collectionsDeleted: { collectionId: string; collectionName: string }[] =
     [];
 
   for (const { $id: collectionId, name } of existingCollections) {
-    console.log(`Deleting collection: ${collectionId}`);
+    MessageFormatter.info(`Deleting collection: ${collectionId}`, { prefix: "Database" });
     collectionsDeleted.push({ collectionId, collectionName: name });
     await tryAwaitWithRetry(
       async () => await database.deleteCollection(databaseId, collectionId)

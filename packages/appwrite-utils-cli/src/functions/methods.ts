@@ -16,6 +16,7 @@ import {
 } from "appwrite-utils";
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 /**
  * Validates and filters events array for Appwrite functions
@@ -157,13 +158,13 @@ export const updateFunctionSpecifications = async (
       error instanceof AppwriteException &&
       error.message.includes("Invalid `specification`")
     ) {
-      console.error(
-        chalk.red(
-          "Error updating function specifications, please try setting the env variable `_FUNCTIONS_CPUS` and `_FUNCTIONS_RAM` to non-zero values"
-        )
+      MessageFormatter.error(
+        "Error updating function specifications, please try setting the env variable `_FUNCTIONS_CPUS` and `_FUNCTIONS_RAM` to non-zero values",
+        undefined,
+        { prefix: "Functions" }
       );
     } else {
-      console.error(chalk.red("Error updating function specifications."));
+      MessageFormatter.error("Error updating function specifications", error instanceof Error ? error : undefined, { prefix: "Functions" });
       throw error;
     }
   }
@@ -214,7 +215,7 @@ export const updateFunction = async (
 };
 
 export const createFunctionTemplate = async (
-  templateType: "typescript-node" | "uv" | "count-docs-in-collection",
+  templateType: "typescript-node" | "uv" | "count-docs-in-collection" | "hono-typescript",
   functionName: string,
   basePath: string = "./functions"
 ) => {
@@ -255,13 +256,12 @@ export const createFunctionTemplate = async (
 
   try {
     await copyTemplateFiles(templatesPath, functionPath);
-    console.log(
-      chalk.green(
-        `✨ Created ${templateType} function template at ${functionPath}`
-      )
+    MessageFormatter.success(
+      `Created ${templateType} function template at ${functionPath}`,
+      { prefix: "Functions" }
     );
   } catch (error) {
-    console.error(chalk.red(`Failed to create function template: ${error}`));
+    MessageFormatter.error("Failed to create function template", error instanceof Error ? error : undefined, { prefix: "Functions" });
     throw error;
   }
 

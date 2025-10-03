@@ -4,6 +4,13 @@ import { AttributeMappingsSchema } from "appwrite-utils";
 import { z } from "zod";
 import { logger } from "./logging.js";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import {
+  findOrCreateOperation as findOrCreateOp,
+  updateOperation as updateOp,
+  getOperation as getOp
+} from "./operationsTable.js";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { MessageFormatter } from "./messageFormatter.js";
 
 /**
  * Object that contains the context for an action that needs to be executed after import
@@ -29,15 +36,9 @@ export type ContextObject = z.infer<typeof ContextObject>;
 export const createOrFindAfterImportOperation = async (
   database: Databases,
   collectionId: string,
-  context: ContextObject,
-  useMigrations: boolean = true
+  context: ContextObject
 ) => {
-  if (!useMigrations) {
-    logger.info("Migrations disabled, skipping after import operation tracking");
-    return;
-  }
-
-  let operation = await findOrCreateOperation(
+  let operation = await findOrCreateOperationLegacy(
     database,
     collectionId,
     "afterImportAction"
@@ -75,14 +76,8 @@ export const addBatch = async (database: Databases, data: string) => {
 
 export const getAfterImportOperations = async (
   database: Databases,
-  collectionId: string,
-  useMigrations: boolean = true
+  collectionId: string
 ) => {
-  if (!useMigrations) {
-    logger.info("Migrations disabled, returning empty operations list");
-    return [];
-  }
-
   let lastDocumentId: string | undefined;
   const allOperations = [];
   let total = 0;
@@ -116,7 +111,8 @@ export const getAfterImportOperations = async (
   return allOps;
 };
 
-export const findOrCreateOperation = async (
+// Legacy function for backward compatibility with old migrations database
+const findOrCreateOperationLegacy = async (
   database: Databases,
   collectionId: string,
   operationType: string,
@@ -133,9 +129,8 @@ export const findOrCreateOperation = async (
   );
 
   if (operations.documents.length > 0) {
-    return OperationSchema.parse(operations.documents[0]); // Assuming the first document is the operation we want
+    return OperationSchema.parse(operations.documents[0]);
   } else {
-    // Create a new operation document
     const op = await tryAwaitWithRetry(
       async () =>
         await database.createDocument(
@@ -158,26 +153,37 @@ export const findOrCreateOperation = async (
   }
 };
 
-export const updateOperation = async (
-  database: Databases,
-  operationId: string,
-  updateFields: any,
-  useMigrations: boolean = true
-) => {
-  if (!useMigrations) {
-    logger.info("Migrations disabled, skipping operation update");
-    return;
-  }
+export const findOrCreateOperation = async (
+  db: DatabaseAdapter,
+  databaseId: string,
+  operationType: string,
+  collectionId?: string,
+  data?: any
+): Promise<any> => {
+  // Use new operations table system
+  return await findOrCreateOp(db, databaseId, operationType, {
+    targetCollection: collectionId,
+    data: data
+  });
+};
 
-  await tryAwaitWithRetry(
-    async () =>
-      await database.updateDocument(
-        "migrations",
-        "currentOperations",
-        operationId,
-        updateFields
-      )
-  );
+export const updateOperation = async (
+  db: DatabaseAdapter,
+  databaseId: string,
+  operationId: string,
+  updates: any
+): Promise<any> => {
+  // Use new operations table system
+  return await updateOp(db, databaseId, operationId, updates);
+};
+
+export const getOperation = async (
+  db: DatabaseAdapter,
+  databaseId: string,
+  operationId: string
+): Promise<any> => {
+  // Use new operations table system
+  return await getOp(db, databaseId, operationId);
 };
 
 // Actual max 1073741824
@@ -193,10 +199,11 @@ export const splitIntoBatches = (data: any[]): any[][] => {
   data.forEach((item, index) => {
     const itemLength = JSON.stringify(item).length;
     if (itemLength > maxDataLength) {
-      console.log(
-        item,
-        `Large item found at index ${index} with length ${itemLength}:`
+      MessageFormatter.warning(
+        `Large item found at index ${index} with length ${itemLength}`,
+        { prefix: "Batch Splitter" }
       );
+      logger.debug("Large item data:", item);
     }
     // Check if adding the current item would exceed the max length or max items per batch
     if (

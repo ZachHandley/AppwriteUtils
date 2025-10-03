@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../.yaml_schemas/collection.schema.json
+# Large Collection for Testing Optimized Wiping
+name: LargeTestCollection
+id: large_test_collection_performance
+documentSecurity: false
+enabled: true
+permissions:
+  - permission: read
+    target: any
+  - permission: create
+    target: users
+  - permission: update
+    target: users
+  - permission: delete
+    target: users
+attributes:
+  - key: title
+    type: string
+    size: 255
+    required: true
+    description: "Document title"
+  - key: content
+    type: string
+    size: 10000
+    required: false
+    description: "Large content field"
+  - key: category
+    type: string
+    size: 100
+    required: true
+    description: "Category for indexing"
+  - key: tags
+    type: string
+    size: 1000
+    required: false
+    description: "Comma-separated tags"
+  - key: isPublished
+    type: boolean
+    required: false
+    default: false
+  - key: publishedAt
+    type: datetime
+    required: false
+  - key: viewCount
+    type: integer
+    required: false
+    default: 0
+  - key: rating
+    type: double
+    required: false
+indexes:
+  - key: category_index
+    type: key
+    attributes:
+      - category
+  - key: published_index
+    type: key
+    attributes:
+      - isPublished
+      - publishedAt
+  - key: title_search
+    type: fulltext
+    attributes:
+      - title
+      - content

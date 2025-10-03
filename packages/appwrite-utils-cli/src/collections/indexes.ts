@@ -1,8 +1,9 @@
 import { indexSchema, type Index } from "appwrite-utils";
 import { Databases, IndexType, Query, type Models } from "node-appwrite";
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
-import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
-import chalk from "chalk";
+import { delay, tryAwaitWithRetry, calculateExponentialBackoff } from "../utils/helperFunctions.js";
+import { isLegacyDatabases } from "../utils/typeGuards.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 // Interface for index with status
 interface IndexWithStatus {
@@ -33,76 +34,76 @@ const waitForIndexAvailable = async (
   
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
   if (retryCount > 0) {
-    const exponentialDelay = Math.min(2000 * Math.pow(2, retryCount), 30000);
-    console.log(chalk.blue(`Waiting for index '${indexKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`));
+    const exponentialDelay = calculateExponentialBackoff(retryCount);
+    MessageFormatter.info(`Waiting for index '${indexKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`);
     await delay(exponentialDelay);
   } else {
-    console.log(chalk.blue(`Waiting for index '${indexKey}' to become available...`));
+    MessageFormatter.info(`Waiting for index '${indexKey}' to become available...`);
   }
   
   while (Date.now() - startTime < maxWaitTime) {
     try {
-      const indexList = await (db instanceof Databases
+      const indexList = await (isLegacyDatabases(db)
         ? db.listIndexes(dbId, collectionId)
         : (db as DatabaseAdapter).listIndexes({ databaseId: dbId, tableId: collectionId }));
-      const indexes: any[] = (db instanceof Databases)
+      const indexes: any[] = isLegacyDatabases(db)
         ? (indexList as any).indexes
         : ((indexList as any).data || (indexList as any).indexes || []);
       const index = indexes.find((idx: any) => idx.key === indexKey) as IndexWithStatus | undefined;
-      
+
       if (!index) {
-        console.log(chalk.red(`Index '${indexKey}' not found`));
+        MessageFormatter.error(`Index '${indexKey}' not found in database '${dbId}' collection '${collectionId}'`);
         return false;
       }
-      
-      if (db instanceof Databases) {
-        console.log(chalk.gray(`Index '${indexKey}' status: ${(index as any).status}`));
+
+      if (isLegacyDatabases(db)) {
+        MessageFormatter.debug(`Index '${indexKey}' status: ${(index as any).status}`);
       } else {
-        console.log(chalk.gray(`Index '${indexKey}' detected (TablesDB)`));
+        MessageFormatter.debug(`Index '${indexKey}' detected (TablesDB)`);
       }
       
       switch (index.status) {
         case 'available':
-          console.log(chalk.green(`✅ Index '${indexKey}' is now available`));
+          MessageFormatter.success(`Index '${indexKey}' is now available (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
           return true;
-          
+
         case 'failed':
-          console.log(chalk.red(`❌ Index '${indexKey}' failed: ${index.error}`));
+          MessageFormatter.error(`Index '${indexKey}' failed: ${index.error} (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
           return false;
-          
+
         case 'stuck':
-          console.log(chalk.yellow(`⚠️ Index '${indexKey}' is stuck, will retry...`));
+          MessageFormatter.warning(`Index '${indexKey}' is stuck, will retry... (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
           return false;
-          
+
         case 'processing':
           // Continue waiting
           break;
-          
+
         case 'deleting':
-          console.log(chalk.yellow(`Index '${indexKey}' is being deleted`));
+          MessageFormatter.warning(`Index '${indexKey}' is being deleted`);
           break;
-          
+
         default:
-          console.log(chalk.yellow(`Unknown status '${index.status}' for index '${indexKey}'`));
+          MessageFormatter.warning(`Unknown status '${index.status}' for index '${indexKey}'`);
           break;
       }
       
       await delay(checkInterval);
     } catch (error) {
-      console.log(chalk.red(`Error checking index status: ${error}`));
+      MessageFormatter.error(`Error checking index '${indexKey}' status in database '${dbId}' collection '${collectionId}': ${error}`);
       return false;
     }
   }
-  
+
   // Timeout reached
-  console.log(chalk.yellow(`⏰ Timeout waiting for index '${indexKey}' (${maxWaitTime}ms)`));
-  
+  MessageFormatter.warning(`Timeout waiting for index '${indexKey}' (${maxWaitTime}ms)`);
+
   // If we have retries left and this isn't the last retry, try recreating
   if (retryCount < maxRetries) {
-    console.log(chalk.yellow(`🔄 Retrying index creation (attempt ${retryCount + 1}/${maxRetries})`));
+    MessageFormatter.info(`Retrying index '${indexKey}' creation (attempt ${retryCount + 1}/${maxRetries})`);
     return false; // Signal that we need to retry
   }
-  
+
   return false;
 };
 
@@ -119,7 +120,7 @@ export const createOrUpdateIndexWithStatusCheck = async (
   retryCount: number = 0,
   maxRetries: number = 3,
 ): Promise<boolean> => {
-  console.log(chalk.blue(`Creating/updating index '${index.key}' (attempt ${retryCount + 1}/${maxRetries + 1})`));
+  MessageFormatter.info(`Creating/updating index '${index.key}' (attempt ${retryCount + 1}/${maxRetries + 1}) - type: ${index.type}, attributes: [${index.attributes.join(', ')}]`);
   
   try {
     // First, validate that all required attributes exist
@@ -127,10 +128,10 @@ export const createOrUpdateIndexWithStatusCheck = async (
     const existingAttributeKeys = freshCollection.attributes.map((attr: any) => attr.key);
     
     const missingAttributes = index.attributes.filter(attr => !existingAttributeKeys.includes(attr));
-    
+
     if (missingAttributes.length > 0) {
-      console.log(chalk.red(`❌ Index '${index.key}' cannot be created: missing attributes [${missingAttributes.join(', ')}]`));
-      console.log(chalk.red(`Available attributes: [${existingAttributeKeys.join(', ')}]`));
+      MessageFormatter.error(`Index '${index.key}' cannot be created: missing attributes [${missingAttributes.join(', ')}] (type: ${index.type})`);
+      MessageFormatter.error(`Available attributes: [${existingAttributeKeys.join(', ')}]`);
       return false; // Don't retry if attributes are missing
     }
     
@@ -154,56 +155,56 @@ export const createOrUpdateIndexWithStatusCheck = async (
     
     // If not successful and we have retries left, just retry the index creation
     if (retryCount < maxRetries) {
-      console.log(chalk.yellow(`Index '${index.key}' failed/stuck, retrying (${retryCount + 1}/${maxRetries})...`));
-      
+      MessageFormatter.warning(`Index '${index.key}' failed/stuck, retrying (${retryCount + 1}/${maxRetries}) - type: ${index.type}, attributes: [${index.attributes.join(', ')}]`);
+
       // Wait a bit before retry
       await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
-      
+
       // Retry the index creation
       return await createOrUpdateIndexWithStatusCheck(
-        dbId, 
-        db, 
-        collectionId, 
-        collection, 
-        index, 
-        retryCount + 1, 
+        dbId,
+        db,
+        collectionId,
+        collection,
+        index,
+        retryCount + 1,
         maxRetries
       );
     }
-    
-    console.log(chalk.red(`❌ Failed to create index '${index.key}' after ${maxRetries + 1} attempts`));
+
+    MessageFormatter.error(`Failed to create index '${index.key}' after ${maxRetries + 1} attempts (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
     return false;
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(chalk.red(`Error creating index '${index.key}': ${errorMessage}`));
-    
+    MessageFormatter.error(`Error creating index '${index.key}': ${errorMessage} (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
+
     // Check if this is a permanent error that shouldn't be retried
-    if (errorMessage.toLowerCase().includes('not found') || 
-        errorMessage.toLowerCase().includes('missing') || 
+    if (errorMessage.toLowerCase().includes('not found') ||
+        errorMessage.toLowerCase().includes('missing') ||
         errorMessage.toLowerCase().includes('does not exist') ||
         errorMessage.toLowerCase().includes('attribute') && errorMessage.toLowerCase().includes('not found')) {
-      console.log(chalk.red(`❌ Index '${index.key}' has permanent error - not retrying`));
+      MessageFormatter.error(`Index '${index.key}' has permanent error - not retrying (type: ${index.type})`);
       return false;
     }
-    
+
     if (retryCount < maxRetries) {
-      console.log(chalk.yellow(`Retrying index '${index.key}' due to error...`));
-      
+      MessageFormatter.warning(`Retrying index '${index.key}' due to error... (type: ${index.type}, attributes: [${index.attributes.join(', ')}])`);
+
       // Wait a bit before retry
       await delay(2000);
-      
+
       return await createOrUpdateIndexWithStatusCheck(
-        dbId, 
-        db, 
-        collectionId, 
-        collection, 
-        index, 
-        retryCount + 1, 
+        dbId,
+        db,
+        collectionId,
+        collection,
+        index,
+        retryCount + 1,
         maxRetries
       );
     }
-    
+
     return false;
   }
 };
@@ -218,61 +219,62 @@ export const createOrUpdateIndexesWithStatusCheck = async (
   collection: Models.Collection,
   indexes: Index[]
 ): Promise<boolean> => {
-  console.log(chalk.blue(`Creating/updating ${indexes.length} indexes with status monitoring...`));
-  
+  MessageFormatter.info(`Creating/updating ${indexes.length} indexes with status monitoring for collection '${collectionId}'`);
+
   let indexesToProcess = [...indexes];
   let overallRetryCount = 0;
   const maxOverallRetries = 3;
-  
+
   while (indexesToProcess.length > 0 && overallRetryCount < maxOverallRetries) {
     const remainingIndexes = [...indexesToProcess];
     indexesToProcess = []; // Reset for next iteration
-    
-    console.log(chalk.blue(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${remainingIndexes.length} indexes ===`));
+
+    MessageFormatter.info(`\n=== Attempt ${overallRetryCount + 1}/${maxOverallRetries} - Processing ${remainingIndexes.length} indexes ===`);
     
     for (const index of remainingIndexes) {
-      console.log(chalk.blue(`\n--- Processing index: ${index.key} ---`));
-      
+      MessageFormatter.info(`\n--- Processing index: ${index.key} (type: ${index.type}, attributes: [${index.attributes.join(', ')}]) ---`);
+
       const success = await createOrUpdateIndexWithStatusCheck(
-        dbId, 
-        db, 
-        collectionId, 
-        collection, 
+        dbId,
+        db,
+        collectionId,
+        collection,
         index
       );
-      
+
       if (success) {
-        console.log(chalk.green(`✅ Successfully created index: ${index.key}`));
-        
+        MessageFormatter.success(`Successfully created index: ${index.key} (type: ${index.type})`);
+
         // Add delay between successful indexes
         await delay(1000);
       } else {
-        console.log(chalk.red(`❌ Failed to create index: ${index.key}, will retry in next round`));
+        MessageFormatter.error(`Failed to create index: ${index.key} (type: ${index.type}), will retry in next round`);
         indexesToProcess.push(index); // Add back to retry list
       }
     }
-    
+
     if (indexesToProcess.length === 0) {
-      console.log(chalk.green(`\n✅ Successfully created all ${indexes.length} indexes`));
+      MessageFormatter.success(`\nSuccessfully created all ${indexes.length} indexes for collection '${collectionId}'`);
       return true;
     }
-    
+
     overallRetryCount++;
-    
+
     if (overallRetryCount < maxOverallRetries) {
-      console.log(chalk.yellow(`\n⏳ Waiting 5 seconds before retrying ${indexesToProcess.length} failed indexes...`));
+      MessageFormatter.warning(`\nWaiting 5 seconds before retrying ${indexesToProcess.length} failed indexes...`);
       await delay(5000);
     }
   }
-  
+
   // If we get here, some indexes still failed after all retries
   if (indexesToProcess.length > 0) {
-    console.log(chalk.red(`\n❌ Failed to create ${indexesToProcess.length} indexes after ${maxOverallRetries} attempts: ${indexesToProcess.map(i => i.key).join(', ')}`));
-    console.log(chalk.red(`This may indicate a fundamental issue with the index definitions or Appwrite instance`));
+    const failedIndexKeys = indexesToProcess.map(i => `${i.key} (${i.type})`).join(', ');
+    MessageFormatter.error(`\nFailed to create ${indexesToProcess.length} indexes after ${maxOverallRetries} attempts: ${failedIndexKeys}`);
+    MessageFormatter.error(`This may indicate a fundamental issue with the index definitions or Appwrite instance`);
     return false;
   }
-  
-  console.log(chalk.green(`\n✅ Successfully created all ${indexes.length} indexes`));
+
+  MessageFormatter.success(`\nSuccessfully created all ${indexes.length} indexes for collection '${collectionId}'`);
   return true;
 };
 

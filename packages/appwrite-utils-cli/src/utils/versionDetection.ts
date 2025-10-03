@@ -1,14 +1,17 @@
 /**
  * Version Detection Utility for Appwrite API Compatibility
- * 
+ *
  * This module provides functions to detect whether an Appwrite instance
  * supports the new TablesDB API or uses the legacy Databases API.
- * 
+ *
  * Detection Strategy:
  * 1. Primary: Test TablesDB-specific endpoint availability
- * 2. Secondary: Health endpoint version check  
+ * 2. Secondary: Health endpoint version check
  * 3. Fallback: Default to legacy mode for safety
  */
+
+import { logger } from '../shared/logging.js';
+import { MessageFormatter } from '../shared/messageFormatter.js';
 
 export type ApiMode = 'legacy' | 'tablesdb';
 
@@ -32,35 +35,114 @@ export async function detectAppwriteVersion(
   project: string,
   apiKey: string
 ): Promise<VersionDetectionResult> {
+  const startTime = Date.now();
   // Clean endpoint URL
   const cleanEndpoint = endpoint.replace(/\/$/, '');
-  
+
+  logger.info('Starting Appwrite version detection', {
+    endpoint: cleanEndpoint,
+    project,
+    operation: 'detectAppwriteVersion'
+  });
+
+  // STEP 1: Check server version FIRST
+  const serverVersion = await fetchServerVersion(cleanEndpoint);
+
+  if (serverVersion && !isVersionAtLeast(serverVersion, '1.8.0')) {
+    // Server < 1.8.0 doesn't support TablesDB
+    logger.info('Server version below 1.8.0 - using legacy adapter', {
+      serverVersion,
+      operation: 'detectAppwriteVersion'
+    });
+    return {
+      apiMode: 'legacy',
+      detectionMethod: 'health_check',
+      serverVersion,
+      confidence: 'high'
+    };
+  }
+
+  // STEP 2: Only proceed with endpoint probe if version >= 1.8.0 or version unknown
   // Try primary detection method: TablesDB endpoint probe
   try {
+    logger.debug('Attempting TablesDB endpoint probe', {
+      endpoint: cleanEndpoint,
+      serverVersion: serverVersion || 'unknown',
+      operation: 'detectAppwriteVersion'
+    });
+
+    const probeStartTime = Date.now();
     const tablesDbResult = await probeTablesDbEndpoint(cleanEndpoint, project, apiKey);
+    const probeDuration = Date.now() - probeStartTime;
+
     if (tablesDbResult.apiMode === 'tablesdb') {
+      logger.info('TablesDB detected via endpoint probe', {
+        endpoint: cleanEndpoint,
+        detectionMethod: tablesDbResult.detectionMethod,
+        confidence: tablesDbResult.confidence,
+        probeDuration,
+        totalDuration: Date.now() - startTime,
+        operation: 'detectAppwriteVersion'
+      });
       return tablesDbResult;
     }
   } catch (error) {
-    console.warn('TablesDB endpoint probe failed:', error instanceof Error ? error.message : 'Unknown error');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    MessageFormatter.warning(`TablesDB endpoint probe failed: ${errorMessage}`, { prefix: "Version Detection" });
+    logger.warn('TablesDB endpoint probe failed', {
+      endpoint: cleanEndpoint,
+      error: errorMessage,
+      operation: 'detectAppwriteVersion'
+    });
   }
   
   // Try secondary detection method: SDK feature detection
   try {
+    logger.debug('Attempting SDK capability probe', {
+      endpoint: cleanEndpoint,
+      operation: 'detectAppwriteVersion'
+    });
+
+    const sdkProbeStartTime = Date.now();
     const sdkResult = await probeSdkCapabilities();
+    const sdkProbeDuration = Date.now() - sdkProbeStartTime;
+
     if (sdkResult.apiMode === 'tablesdb') {
+      logger.info('TablesDB detected via SDK capability probe', {
+        endpoint: cleanEndpoint,
+        detectionMethod: sdkResult.detectionMethod,
+        confidence: sdkResult.confidence,
+        sdkProbeDuration,
+        totalDuration: Date.now() - startTime,
+        operation: 'detectAppwriteVersion'
+      });
       return sdkResult;
     }
   } catch (error) {
-    console.warn('SDK capability probe failed:', error instanceof Error ? error.message : 'Unknown error');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    MessageFormatter.warning(`SDK capability probe failed: ${errorMessage}`, { prefix: "Version Detection" });
+    logger.warn('SDK capability probe failed', {
+      endpoint: cleanEndpoint,
+      error: errorMessage,
+      operation: 'detectAppwriteVersion'
+    });
   }
-  
+
   // Fallback to legacy mode
-  return {
-    apiMode: 'legacy',
-    detectionMethod: 'fallback',
-    confidence: 'low'
+  const fallbackResult = {
+    apiMode: 'legacy' as ApiMode,
+    detectionMethod: 'fallback' as const,
+    confidence: 'low' as const
   };
+
+  logger.info('Falling back to legacy mode', {
+    endpoint: cleanEndpoint,
+    totalDuration: Date.now() - startTime,
+    result: fallbackResult,
+    operation: 'detectAppwriteVersion'
+  });
+
+  return fallbackResult;
 }
 
 /**
@@ -71,7 +153,16 @@ async function probeTablesDbEndpoint(
   project: string,
   apiKey: string
 ): Promise<VersionDetectionResult> {
-  const response = await fetch(`${endpoint}/tablesdb/`, {
+  const startTime = Date.now();
+  const url = `${endpoint}/tablesdb/`;
+
+  logger.debug('Probing TablesDB endpoint', {
+    url,
+    project,
+    operation: 'probeTablesDbEndpoint'
+  });
+
+  const response = await fetch(url, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
@@ -81,19 +172,47 @@ async function probeTablesDbEndpoint(
     // Short timeout for faster detection
     signal: AbortSignal.timeout(5000)
   });
-  
-  if (response.ok || response.status === 404) {
-    // 200 = TablesDB available, 404 = endpoint exists but no tables
-    // Both indicate TablesDB support
-    return {
-      apiMode: 'tablesdb',
-      detectionMethod: 'endpoint_probe',
-      confidence: 'high'
+
+  const duration = Date.now() - startTime;
+
+  logger.debug('TablesDB endpoint response received', {
+    url,
+    status: response.status,
+    statusText: response.statusText,
+    duration,
+    operation: 'probeTablesDbEndpoint'
+  });
+
+  if (response.ok) {
+    // ONLY 200 OK means TablesDB available
+    // 404 means endpoint doesn't exist (server < 1.8.0)
+    const result = {
+      apiMode: 'tablesdb' as ApiMode,
+      detectionMethod: 'endpoint_probe' as const,
+      confidence: 'high' as const
     };
+
+    logger.info('TablesDB endpoint probe successful', {
+      url,
+      status: response.status,
+      result,
+      duration,
+      operation: 'probeTablesDbEndpoint'
+    });
+
+    return result;
   }
-  
+
   // 501 Not Implemented or other errors = no TablesDB support
-  throw new Error(`TablesDB endpoint returned ${response.status}: ${response.statusText}`);
+  const error = new Error(`TablesDB endpoint returned ${response.status}: ${response.statusText}`);
+  logger.debug('TablesDB endpoint probe failed', {
+    url,
+    status: response.status,
+    statusText: response.statusText,
+    duration,
+    operation: 'probeTablesDbEndpoint'
+  });
+  throw error;
 }
 
 /**
@@ -196,20 +315,55 @@ export async function detectAppwriteVersionCached(
   apiKey: string,
   forceRefresh: boolean = false
 ): Promise<VersionDetectionResult> {
+  const startTime = Date.now();
+
+  logger.debug('Version detection with cache requested', {
+    endpoint,
+    project,
+    forceRefresh,
+    operation: 'detectAppwriteVersionCached'
+  });
+
   // Check cache first (unless force refresh)
   if (!forceRefresh) {
     const cached = detectionCache.get(endpoint, project);
     if (cached) {
+      logger.info('Using cached version detection result', {
+        endpoint,
+        project,
+        cachedResult: cached,
+        operation: 'detectAppwriteVersionCached'
+      });
       return cached;
     }
+    logger.debug('No cached result found, performing fresh detection', {
+      endpoint,
+      project,
+      operation: 'detectAppwriteVersionCached'
+    });
+  } else {
+    logger.debug('Force refresh requested, bypassing cache', {
+      endpoint,
+      project,
+      operation: 'detectAppwriteVersionCached'
+    });
   }
-  
+
   // Perform fresh detection
   const result = await detectAppwriteVersion(endpoint, project, apiKey);
-  
+  const totalDuration = Date.now() - startTime;
+
   // Cache the result
   detectionCache.set(endpoint, project, result);
-  
+
+  logger.info('Version detection completed and cached', {
+    endpoint,
+    project,
+    result,
+    totalDuration,
+    operation: 'detectAppwriteVersionCached'
+  });
+
   return result;
 }
 

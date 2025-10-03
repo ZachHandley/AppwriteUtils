@@ -8,6 +8,9 @@ import { findYamlConfig } from "../config/yamlConfig.js";
 import { ID } from "node-appwrite";
 import { ulid } from "ulidx";
 import { generateYamlConfigTemplate } from "../config/yamlConfig.js";
+import { loadAppwriteProjectConfig, findAppwriteProjectConfig, getProjectDirectoryName, isTablesDBProject } from "./projectConfig.js";
+import { hasSessionAuth, getSessionAuth } from "./sessionAuth.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 // Example base configuration using types from appwrite-utils
 const baseConfig: AppwriteConfig = {
@@ -16,13 +19,13 @@ const baseConfig: AppwriteConfig = {
   appwriteKey: "YOUR_API_KEY",
   appwriteClient: null,
   apiMode: "auto", // Enable dual API support - auto-detect TablesDB vs legacy
+  authMethod: "auto", // Default to auto-detect authentication method
   logging: {
     enabled: false,
     level: "info",
     console: false,
   },
   enableBackups: true,
-  useMigrations: true,
   backupInterval: 3600,
   backupRetention: 30,
   enableBackupCleanup: true,
@@ -201,7 +204,7 @@ importDefs: []
 
     const collectionFilePath = path.join(collectionsFolder, `${collectionName}.yaml`);
     writeFileSync(collectionFilePath, yamlCollection);
-    console.log(`✨ Created YAML collection: ${collectionFilePath}`);
+    MessageFormatter.success(`Created YAML collection: ${collectionFilePath}`, { prefix: "Setup" });
   } else {
     // Create TypeScript collection
     const emptyCollection = `import type { CollectionCreate } from "appwrite-utils";
@@ -229,7 +232,7 @@ export default ${collectionName};`;
 
     const collectionFilePath = path.join(collectionsFolder, `${collectionName}.ts`);
     writeFileSync(collectionFilePath, emptyCollection);
-    console.log(`✨ Created TypeScript collection: ${collectionFilePath}`);
+    MessageFormatter.success(`Created TypeScript collection: ${collectionFilePath}`, { prefix: "Setup" });
   }
 };
 
@@ -243,9 +246,9 @@ export const generateYamlConfig = (currentDir?: string, useAppwriteDir: boolean 
 
   const configPath = path.join(configDir, "config.yaml");
   generateYamlConfigTemplate(configPath);
-  
-  console.log(`✨ Generated YAML config template at: ${configPath}`);
-  console.log("📝 Please update the configuration with your Appwrite project details.");
+
+  MessageFormatter.success(`Generated YAML config template at: ${configPath}`, { prefix: "Setup" });
+  MessageFormatter.info("Please update the configuration with your Appwrite project details.", { prefix: "Setup" });
   
   return configPath;
 };
@@ -267,19 +270,51 @@ export const setupDirsFiles = async (
   const appwriteSchemaFolder = path.join(appwriteFolder, "schemas");
   const appwriteYamlSchemaFolder = path.join(appwriteFolder, ".yaml_schemas");
   const appwriteDataFolder = path.join(appwriteFolder, "importData");
-  // Decide between collections or tables folder
+  // Enhanced version detection with multiple sources
   let useTables = false;
+  let detectionSource = "default";
+
   try {
-    // Try reading YAML config if present to detect version
-    const yamlPath = findYamlConfig(basePath);
-    if (yamlPath) {
-      const cfg = await loadYamlConfig(yamlPath);
-      if (cfg) {
-        const ver = await fetchServerVersion(cfg.appwriteEndpoint);
-        if (isVersionAtLeast(ver || undefined, '1.8.0')) useTables = true;
+    // Priority 1: Check for existing appwrite.json project config
+    const projectConfigPath = findAppwriteProjectConfig(basePath);
+    if (projectConfigPath) {
+      const projectConfig = loadAppwriteProjectConfig(projectConfigPath);
+      if (projectConfig) {
+        useTables = isTablesDBProject(projectConfig);
+        detectionSource = "appwrite.json";
+        MessageFormatter.info(`Detected ${useTables ? 'TablesDB' : 'Collections'} project from ${projectConfigPath}`, { prefix: "Setup" });
       }
     }
-  } catch {}
+
+    // Priority 2: Try reading existing YAML config for version detection
+    if (!useTables && detectionSource === "default") {
+      const yamlPath = findYamlConfig(basePath);
+      if (yamlPath) {
+        const cfg = await loadYamlConfig(yamlPath);
+        if (cfg) {
+          // Try session auth first, then API key for version detection
+          let endpoint = cfg.appwriteEndpoint;
+          let projectId = cfg.appwriteProject;
+
+          if (hasSessionAuth(endpoint, projectId)) {
+            MessageFormatter.info("Using session authentication for version detection", { prefix: "Setup" });
+          }
+
+          const ver = await fetchServerVersion(endpoint);
+          if (isVersionAtLeast(ver || undefined, '1.8.0')) {
+            useTables = true;
+            detectionSource = "server-version";
+            MessageFormatter.info(`Detected TablesDB support (Appwrite ${ver})`, { prefix: "Setup" });
+          } else {
+            MessageFormatter.info(`Using Collections API (Appwrite ${ver || 'unknown'})`, { prefix: "Setup" });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    MessageFormatter.warning(`Version detection failed, defaulting to Collections API: ${error instanceof Error ? error.message : String(error)}`, { prefix: "Setup" });
+  }
+
   const targetFolderName = useTables ? "tables" : "collections";
   const collectionsFolder = path.join(appwriteFolder, targetFolderName);
 
@@ -322,13 +357,31 @@ export default appwriteConfig;
     });
   }
 
-  // Create YAML collection example if using YAML config
+  // Create YAML collection/table example if using YAML config
   if (useYaml) {
-    const yamlCollectionExample = `# yaml-language-server: $schema=../.yaml_schemas/collection.schema.json
-# Example Collection Definition
-name: ExampleCollection
-id: example_collection_${Date.now()}
-documentSecurity: false
+    const terminology = useTables
+      ? {
+          container: "table",
+          fields: "columns",
+          security: "rowSecurity",
+          schemaRef: "table.schema.json",
+          containerName: "Table",
+          fieldName: "Column"
+        }
+      : {
+          container: "collection",
+          fields: "attributes",
+          security: "documentSecurity",
+          schemaRef: "collection.schema.json",
+          containerName: "Collection",
+          fieldName: "Attribute"
+        };
+
+    const yamlExample = `# yaml-language-server: $schema=../.yaml_schemas/${terminology.schemaRef}
+# Example ${terminology.containerName} Definition
+name: Example${terminology.containerName}
+id: example_${terminology.container}_${Date.now()}
+${terminology.security}: false
 enabled: true
 permissions:
   - permission: read
@@ -339,7 +392,7 @@ permissions:
     target: users
   - permission: delete
     target: users
-attributes:
+${terminology.fields}:
   - key: title
     type: string
     size: 255
@@ -353,7 +406,13 @@ attributes:
   - key: isActive
     type: boolean
     required: false
-    default: true
+    default: true${useTables ? `
+  - key: uniqueCode
+    type: string
+    size: 50
+    required: false
+    unique: true
+    description: "Unique identifier code (TablesDB feature)"` : ''}
 indexes:
   - key: title_search
     type: fulltext
@@ -361,11 +420,212 @@ indexes:
       - title
 importDefs: []
 `;
-    const yamlCollectionPath = path.join(collectionsFolder, "ExampleCollection.yaml");
-    writeFileSync(yamlCollectionPath, yamlCollectionExample);
+    const yamlExamplePath = path.join(collectionsFolder, `Example${terminology.containerName}.yaml`);
+    writeFileSync(yamlExamplePath, yamlExample);
 
-    // Create JSON schema for collection definitions
-    const collectionJsonSchema = {
+    MessageFormatter.info(`Created example ${terminology.container} definition with ${terminology.fields} terminology`, { prefix: "Setup" });
+
+    // Create JSON schema for collection/table definitions
+    const containerJsonSchema = useTables ? {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://appwrite-utils.dev/schemas/table.schema.json",
+      "title": "Appwrite Table Definition",
+      "description": "Schema for defining Appwrite tables in YAML (TablesDB API)",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the table"
+        },
+        "id": {
+          "type": "string",
+          "description": "The ID of the table (optional, auto-generated if not provided)",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$"
+        },
+        "rowSecurity": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable row-level permissions"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the table is enabled"
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Table-level permissions",
+          "items": {
+            "type": "object",
+            "properties": {
+              "permission": {
+                "type": "string",
+                "enum": ["read", "create", "update", "delete"],
+                "description": "The permission type"
+              },
+              "target": {
+                "type": "string",
+                "description": "Permission target (e.g., 'any', 'users', 'users/verified', 'label:admin')"
+              }
+            },
+            "required": ["permission", "target"],
+            "additionalProperties": false
+          }
+        },
+        "columns": {
+          "type": "array",
+          "description": "Table columns (fields)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Column name",
+                "pattern": "^[a-zA-Z][a-zA-Z0-9]*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["string", "integer", "double", "boolean", "datetime", "email", "ip", "url", "enum", "relationship"],
+                "description": "Column data type"
+              },
+              "size": {
+                "type": "number",
+                "description": "Maximum size for string columns",
+                "minimum": 1,
+                "maximum": 1073741824
+              },
+              "required": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the column is required"
+              },
+              "array": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the column is an array"
+              },
+              "unique": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether the column values must be unique (TablesDB feature)"
+              },
+              "default": {
+                "description": "Default value for the column"
+              },
+              "description": {
+                "type": "string",
+                "description": "Column description"
+              },
+              "min": {
+                "type": "number",
+                "description": "Minimum value for numeric columns"
+              },
+              "max": {
+                "type": "number",
+                "description": "Maximum value for numeric columns"
+              },
+              "elements": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Allowed values for enum columns"
+              },
+              "relatedCollection": {
+                "type": "string",
+                "description": "Related table name for relationship columns"
+              },
+              "relationType": {
+                "type": "string",
+                "enum": ["oneToOne", "oneToMany", "manyToOne", "manyToMany"],
+                "description": "Type of relationship"
+              },
+              "twoWay": {
+                "type": "boolean",
+                "description": "Whether the relationship is bidirectional"
+              },
+              "twoWayKey": {
+                "type": "string",
+                "description": "Key name for the reverse relationship"
+              },
+              "onDelete": {
+                "type": "string",
+                "enum": ["cascade", "restrict", "setNull"],
+                "description": "Action to take when related row is deleted"
+              },
+              "side": {
+                "type": "string",
+                "enum": ["parent", "child"],
+                "description": "Side of the relationship"
+              }
+            },
+            "required": ["key", "type"],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "type": { "const": "enum" } }
+                },
+                "then": {
+                  "required": ["elements"]
+                }
+              },
+              {
+                "if": {
+                  "properties": { "type": { "const": "relationship" } }
+                },
+                "then": {
+                  "required": ["relatedCollection", "relationType"]
+                }
+              }
+            ]
+          }
+        },
+        "indexes": {
+          "type": "array",
+          "description": "Database indexes for the table",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Index name"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["key", "fulltext", "unique"],
+                "description": "Index type"
+              },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Columns to index",
+                "minItems": 1
+              },
+              "orders": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["ASC", "DESC"]
+                },
+                "description": "Sort order for each column"
+              }
+            },
+            "required": ["key", "type", "attributes"],
+            "additionalProperties": false
+          }
+        },
+        "importDefs": {
+          "type": "array",
+          "description": "Import definitions for data migration",
+          "default": []
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    } : {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://appwrite-utils.dev/schemas/collection.schema.json",
       "title": "Appwrite Collection Definition",
@@ -566,8 +826,9 @@ importDefs: []
       mkdirSync(appwriteYamlSchemaFolder, { recursive: true });
     }
     
-    const collectionSchemaPath = path.join(appwriteYamlSchemaFolder, "collection.schema.json");
-    writeFileSync(collectionSchemaPath, JSON.stringify(collectionJsonSchema, null, 2));
+    const schemaFileName = useTables ? "table.schema.json" : "collection.schema.json";
+    const containerSchemaPath = path.join(appwriteYamlSchemaFolder, schemaFileName);
+    writeFileSync(containerSchemaPath, JSON.stringify(containerJsonSchema, null, 2));
 
     // Create JSON schema for appwriteConfig.yaml
     const configJsonSchema = {
@@ -935,20 +1196,27 @@ importDefs: []
   // Remove the nested .appwrite folder creation since we're using .appwrite as the main folder
 
   const configType = useYaml ? "YAML" : "TypeScript";
-  console.log(`✨ Created ${configType} config and setup files/directories in .appwrite/ folder.`);
-  
+  const terminology = useTables ? "tables" : "collections";
+  const containerType = useTables ? "TablesDB" : "Collections";
+
+  MessageFormatter.success(`Created ${configType} config and setup files/directories in .appwrite/ folder.`, { prefix: "Setup" });
+  MessageFormatter.info(`Project configured for ${containerType} API (${detectionSource} detection)`, { prefix: "Setup" });
+
   if (useYaml) {
-    console.log("🔧 You can now configure your project in .appwrite/config.yaml");
-    console.log("📁 Collections can be defined in .appwrite/collections/ as .ts or .yaml files");
-    console.log("📊 Schemas will be generated in .appwrite/schemas/");
-    console.log("📦 Import data can be placed in .appwrite/importData/");
+    MessageFormatter.info("You can now configure your project in .appwrite/config.yaml", { prefix: "Setup" });
+    MessageFormatter.info(`${useTables ? 'Tables' : 'Collections'} can be defined in .appwrite/${terminology}/ as .ts or .yaml files`, { prefix: "Setup" });
+    MessageFormatter.info("Schemas will be generated in .appwrite/schemas/", { prefix: "Setup" });
+    MessageFormatter.info("Import data can be placed in .appwrite/importData/", { prefix: "Setup" });
+    if (useTables) {
+      MessageFormatter.info("TablesDB features: unique constraints, enhanced performance, row-level security", { prefix: "Setup" });
+    }
   } else {
-    console.log("🔧 You can now configure logging in your .appwrite/appwriteConfig.ts file:");
-    console.log("   logging: {");
-    console.log("     enabled: true,");
-    console.log("     level: 'info',");
-    console.log("     console: true,");
-    console.log("     logDirectory: './logs'  // optional custom directory");
-    console.log("   }");
+    MessageFormatter.info("You can now configure logging in your .appwrite/appwriteConfig.ts file:", { prefix: "Setup" });
+    MessageFormatter.info("   logging: {", { prefix: "Setup" });
+    MessageFormatter.info("     enabled: true,", { prefix: "Setup" });
+    MessageFormatter.info("     level: 'info',", { prefix: "Setup" });
+    MessageFormatter.info("     console: true,", { prefix: "Setup" });
+    MessageFormatter.info("     logDirectory: './logs'  // optional custom directory", { prefix: "Setup" });
+    MessageFormatter.info("   }", { prefix: "Setup" });
   }
 };

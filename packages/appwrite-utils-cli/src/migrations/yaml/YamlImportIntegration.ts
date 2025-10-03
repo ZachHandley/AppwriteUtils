@@ -2,6 +2,7 @@ import type { CollectionCreate, ImportDef } from "appwrite-utils";
 import { YamlImportConfigLoader, type YamlImportConfig } from "./YamlImportConfigLoader.js";
 import { createImportSchemas, createImportExamples } from "./generateImportSchemas.js";
 import { logger } from "../../shared/logging.js";
+import { normalizeYamlData, usesTableTerminology, convertTerminology, type YamlCollectionData } from "../../utils/yamlConverter.js";
 import path from "path";
 import fs from "fs";
 
@@ -225,12 +226,18 @@ export class YamlImportIntegration {
   /**
    * Generates a YAML import configuration from an existing ImportDef.
    * Useful for migrating TypeScript configurations to YAML.
-   * 
+   * Supports both collection and table terminology.
+   *
    * @param importDef - Existing ImportDef to convert
    * @param collectionName - Name of the collection
+   * @param useTableTerminology - Whether to use table terminology
    * @returns YAML configuration string
    */
-  convertImportDefToYaml(importDef: ImportDef, collectionName: string): string {
+  convertImportDefToYaml(
+    importDef: ImportDef,
+    collectionName: string,
+    useTableTerminology = false
+  ): string {
     const yamlConfig: YamlImportConfig = {
       source: {
         file: importDef.filePath,
@@ -284,16 +291,22 @@ export class YamlImportIntegration {
       sortKeys: false,
     });
 
-    return `# yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json\n# Import Configuration for ${collectionName}\n\n${yamlContent}`;
+    const entityType = useTableTerminology ? 'Table' : 'Collection';
+    return `# yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json\n# Import Configuration for ${entityType}: ${collectionName}\n\n${yamlContent}`;
   }
 
   /**
    * Exports existing TypeScript import configurations to YAML files.
    * Helps migrate from TypeScript to YAML-based configurations.
-   * 
+   * Supports both collection and table terminology.
+   *
    * @param collections - Collections with existing import definitions
+   * @param useTableTerminology - Whether to use table terminology
    */
-  async exportToYaml(collections: CollectionCreate[]): Promise<void> {
+  async exportToYaml(
+    collections: CollectionCreate[],
+    useTableTerminology = false
+  ): Promise<void> {
     const exportDir = path.join(this.appwriteFolderPath, "import", "exported");
     
     if (!fs.existsSync(exportDir)) {
@@ -309,16 +322,21 @@ export class YamlImportIntegration {
 
       for (let i = 0; i < collection.importDefs.length; i++) {
         const importDef = collection.importDefs[i];
-        const yamlContent = this.convertImportDefToYaml(importDef, collection.name);
-        
+        const yamlContent = this.convertImportDefToYaml(
+          importDef,
+          collection.name,
+          useTableTerminology
+        );
+
+        const entityType = useTableTerminology ? 'table' : 'collection';
         const filename = collection.importDefs.length > 1
-          ? `${collection.name}-${i + 1}.yaml`
-          : `${collection.name}.yaml`;
-        
+          ? `${collection.name}-${entityType}-${i + 1}.yaml`
+          : `${collection.name}-${entityType}.yaml`;
+
         const filePath = path.join(exportDir, filename);
         fs.writeFileSync(filePath, yamlContent);
         exportedCount++;
-        
+
         logger.info(`Exported import configuration: ${filePath}`);
       }
     }
@@ -364,28 +382,37 @@ export class YamlImportIntegration {
 
   /**
    * Creates a new YAML import configuration from a template.
-   * 
+   * Supports both collection and table terminology.
+   *
    * @param collectionName - Name of the collection
    * @param sourceFile - Source data file name
+   * @param useTableTerminology - Whether to use table terminology
    * @param outputPath - Output file path (optional)
    */
   async createFromTemplate(
     collectionName: string,
     sourceFile: string,
+    useTableTerminology = false,
     outputPath?: string
   ): Promise<string> {
-    const template = this.configLoader.generateTemplate(collectionName, sourceFile);
-    
-    const fileName = outputPath || `${collectionName.toLowerCase()}-import.yaml`;
+    const template = this.configLoader.generateTemplate(
+      collectionName,
+      sourceFile,
+      useTableTerminology
+    );
+
+    const entityType = useTableTerminology ? 'table' : 'collection';
+    const fileName = outputPath || `${collectionName.toLowerCase()}-${entityType}-import.yaml`;
     const fullPath = path.join(this.appwriteFolderPath, "import", fileName);
-    
-    // Add schema reference to template
+
+    // Add schema reference to template with entity type comment
     const schemaHeader = "# yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json\n";
-    const templateWithSchema = schemaHeader + template;
-    
+    const entityComment = `# Import Configuration for ${useTableTerminology ? 'Table' : 'Collection'}: ${collectionName}\n`;
+    const templateWithSchema = schemaHeader + entityComment + template;
+
     fs.writeFileSync(fullPath, templateWithSchema);
     logger.info(`Created YAML import configuration: ${fullPath}`);
-    
+
     return fullPath;
   }
 

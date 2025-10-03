@@ -2,7 +2,9 @@
 
 ## Overview
 
-`appwrite-utils-cli` is a powerful, YAML-first command-line interface tool designed for Appwrite developers who need to manage database migrations, schema generation, data import, and comprehensive project management. Built on a modular architecture with enhanced performance, this CLI tool facilitates complex tasks like setting up databases, running migrations, generating schemas, and managing backups efficiently. With version 1.0.0, the CLI introduces a completely refactored import system with 50%+ complexity reduction, YAML-first configuration, and sophisticated data handling capabilities.
+`appwrite-utils-cli` is a powerful, YAML-first command-line interface tool designed for Appwrite developers who need to manage database migrations, schema generation, data import, and comprehensive project management. Built on a modular architecture with enhanced performance, this CLI tool facilitates complex tasks like setting up databases, running migrations, generating schemas, and managing backups efficiently.
+
+**Version 1.6.1**: Major refactoring for improved code organization - extracted operations into focused modules, standardized logging across the codebase, and added utility libraries for better maintainability.
 
 ## Features
 
@@ -12,6 +14,13 @@
 - **Modular Import System**: Completely refactored import architecture with 50%+ complexity reduction
 - **Enhanced Performance**: Configurable rate limiting and batch processing for optimal performance
 - **Safety First**: Smart confirmation dialogs for destructive operations with explicit confirmations
+
+### Dual API Support (Collections & TablesDB)
+- **Collections API**: Traditional Appwrite database operations with document-based terminology
+- **TablesDB API**: New high-performance table API with column-based terminology
+- **Automatic Detection**: Smart API mode detection based on configuration and available packages
+- **Seamless Migration**: Zero-downtime migration between Collections and TablesDB APIs
+- **Terminology Flexibility**: Support for both `collections/documents/attributes` and `tables/rows/columns`
 
 ### Data Management
 - **Advanced Data Import**: YAML-configured imports with sophisticated file handling, URL support, and user deduplication
@@ -44,6 +53,87 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 
 **Note: Do not install this locally into your project. It is meant to be used as a command-line tool only.**
 
+## TablesDB Support
+
+`appwrite-utils-cli` provides comprehensive support for both traditional Appwrite Collections API and the new TablesDB API, enabling high-performance database operations with modern terminology.
+
+### API Mode Detection
+
+The CLI automatically detects which API to use based on:
+
+1. **Package Detection**: Checks for `node-appwrite-tablesdb` package installation
+2. **Configuration**: Detects `collections` vs `tables` in YAML configuration
+3. **Environment**: Falls back to Collections API if TablesDB is not available
+
+### Installing TablesDB Support
+
+To enable TablesDB functionality, install the TablesDB package alongside the CLI:
+
+```bash
+# For global CLI usage
+npm install -g node-appwrite-tablesdb
+
+# For project-specific usage
+npm install node-appwrite-tablesdb
+npx --package=appwrite-utils-cli@latest --package=node-appwrite-tablesdb@latest appwrite-migrate --it
+```
+
+### Configuration Comparison
+
+#### Collections API (Traditional)
+```yaml
+# .appwrite/config.yaml
+databases:
+  - name: "main"
+    id: "main"
+    collections:  # Collections terminology
+      - name: "Users"
+        id: "users"
+        attributes:
+          - key: "email"
+            type: "string"
+            required: true
+```
+
+#### TablesDB API (New)
+```yaml
+# .appwrite/config.yaml
+databases:
+  - name: "main"
+    id: "main"
+    tables:  # TablesDB terminology
+      - name: "Users"
+        id: "users"
+        attributes:  # Internally consistent
+          - key: "email"
+            type: "string"
+            required: true
+```
+
+### Performance Benefits
+
+TablesDB provides significant performance improvements:
+
+- **Bulk Operations**: Native support for bulk inserts, updates, and deletes
+- **Advanced Queries**: Enhanced query capabilities with better optimization
+- **Reduced Latency**: Direct table operations without document overhead
+- **Scalability**: Better performance with large datasets
+
+### Migration Commands
+
+The CLI provides seamless migration between APIs:
+
+```bash
+# Migrate Collections config to TablesDB format
+npx appwrite-utils-cli appwrite-migrate --migrate-to-tablesdb
+
+# Convert existing Collections to Tables (when TablesDB is available)
+npx appwrite-utils-cli appwrite-migrate --sync --use-tablesdb
+
+# Generate schemas for TablesDB
+npx appwrite-utils-cli appwrite-migrate --generate --api-mode=tablesdb
+```
+
 ## YAML-First Configuration
 
 Version 1.0.0 introduces a YAML-first approach for better cross-platform compatibility and enhanced developer experience.
@@ -55,8 +145,9 @@ The CLI automatically detects configuration files in this order:
 2. `appwrite.yaml`
 3. `appwriteConfig.ts` (legacy, still supported)
 
-### YAML Configuration Example
+### YAML Configuration Examples
 
+#### Collections API Configuration
 ```yaml
 # .appwrite/config.yaml with JSON Schema support
 # yaml-language-server: $schema=./.yaml_schemas/appwrite-config.schema.json
@@ -68,7 +159,7 @@ appwriteKey: "your-api-key"
 databases:
   - name: "main"
     id: "main"
-    collections:
+    collections:  # Collections terminology
       - name: "Users"
         id: "users"
         attributes:
@@ -76,6 +167,46 @@ databases:
             type: "string"
             required: true
             format: "email"
+          - key: "name"
+            type: "string"
+            required: true
+
+buckets:
+  - name: "documents"
+    id: "documents"
+    permissions:
+      - target: "any"
+        permission: "read"
+
+logging:
+  enabled: false  # Disabled by default
+  level: "info"
+  console: true
+```
+
+#### TablesDB API Configuration
+```yaml
+# .appwrite/config.yaml for TablesDB
+# yaml-language-server: $schema=./.yaml_schemas/appwrite-config.schema.json
+
+appwriteEndpoint: "https://cloud.appwrite.io/v1"
+appwriteProject: "your-project-id"
+appwriteKey: "your-api-key"
+
+databases:
+  - name: "main"
+    id: "main"
+    tables:  # TablesDB terminology
+      - name: "Users"
+        id: "users"
+        attributes:  # Internal compatibility
+          - key: "email"
+            type: "string"
+            required: true
+            format: "email"
+          - key: "name"
+            type: "string"
+            required: true
 
 buckets:
   - name: "documents"
@@ -120,8 +251,9 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 
 Version 1.0.0 introduces a powerful YAML-based import system with sophisticated data handling capabilities.
 
-### Import Configuration Example
+### Import Configuration Examples
 
+#### Collections API Import
 ```yaml
 # .appwrite/import/users-import.yaml
 # yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json
@@ -132,7 +264,7 @@ source:
   type: "json"
 
 target:
-  collection: "Users"
+  collection: "Users"  # Collections terminology
   type: "create"
   primaryKey: "user_id"
   createUsers: true
@@ -165,6 +297,51 @@ options:
   continueOnError: true
 ```
 
+#### TablesDB API Import
+```yaml
+# .appwrite/import/users-tablesdb-import.yaml
+# yaml-language-server: $schema=../.yaml_schemas/import-config.schema.json
+
+source:
+  file: "importData/users.json"
+  basePath: "RECORDS"
+  type: "json"
+
+target:
+  table: "Users"  # TablesDB terminology (alternatively: collection: "Users" works too)
+  type: "create"
+  primaryKey: "user_id"
+  createUsers: true
+
+mapping:
+  attributes:  # Note: Still uses 'attributes' for compatibility
+    - oldKey: "user_id"
+      targetKey: "userId"
+      converters: ["anyToString"]
+      validation:
+        - rule: "required"
+          params: ["{userId}"]
+
+    - oldKey: "profile_image_url"
+      targetKey: "avatar"
+      fileData:
+        path: "{profile_image_url}"
+        name: "{user_id}_avatar"
+      afterImport:
+        - action: "createFileAndUpdateRowField"  # TablesDB-specific action
+          params: ["{dbId}", "{tableId}", "{rowId}", "avatar", "{bucketId}", "{filePath}", "{fileName}"]
+
+  relationships:
+    - sourceField: "department_id"
+      targetField: "departmentId"
+      targetTable: "Departments"  # TablesDB terminology
+
+options:
+  batchSize: 100  # TablesDB supports larger batches
+  continueOnError: true
+  useBulkOperations: true  # Enable TablesDB bulk operations
+```
+
 ### Import System Features
 
 - **File Handling**: Complete support for URL downloads and local file search
@@ -188,11 +365,18 @@ Available options:
 
 ### Data Management
 - `--dbIds`: Comma-separated list of database IDs to operate on
-- `--collectionIds`: Comma-separated list of collection IDs to operate on
+- `--collectionIds`: Comma-separated list of collection IDs to operate on (also accepts `--tableIds`)
 - `--bucketIds`: Comma-separated list of bucket IDs to operate on
 - `--wipe`: Wipe data with smart confirmation (all: everything, docs: only documents, users: only user data)
-- `--wipeCollections`: Non-destructively wipe specified collections
+- `--wipeCollections`: Non-destructively wipe specified collections (also `--wipeTables`)
 - `--writeData`: Write converted imported data to file for validation
+
+### TablesDB-Specific Options
+- `--api-mode`: Force API mode (`collections` or `tablesdb`)
+- `--use-tablesdb`: Force TablesDB API usage when available
+- `--migrate-to-tablesdb`: Convert Collections configuration to TablesDB format
+- `--bulk-operations`: Enable bulk operations for TablesDB (default: true when available)
+- `--tableIds`: Comma-separated list of table IDs (alias for `--collectionIds`)
 
 ### Configuration & Synchronization
 - `--push`: Push local YAML/TypeScript config to Appwrite project
@@ -280,6 +464,44 @@ Transfer specific collections from one place to another, with all of their data:
 
 ```bash
 npx appwrite-utils-cli appwrite-migrate --transfer --fromDbId sourceDbId --toDbId targetDbId --fromCollectionId sourceCollectionId --toCollectionId targetCollectionId --remoteEndpoint https://appwrite.otherserver.com --remoteProjectId yourProjectId --remoteApiKey yourApiKey
+```
+
+### TablesDB Examples
+
+#### Enable TablesDB Mode
+```bash
+# Force TablesDB API usage
+npx appwrite-utils-cli appwrite-migrate --sync --use-tablesdb
+
+# Generate schemas with TablesDB terminology
+npx appwrite-utils-cli appwrite-migrate --generate --api-mode=tablesdb
+```
+
+#### Migration from Collections to TablesDB
+```bash
+# Convert Collections configuration to TablesDB format
+npx appwrite-utils-cli appwrite-migrate --migrate-to-tablesdb
+
+# Sync with TablesDB API (requires node-appwrite-tablesdb)
+npx --package=node-appwrite-tablesdb appwrite-utils-cli appwrite-migrate --sync --use-tablesdb
+```
+
+#### Bulk Operations with TablesDB
+```bash
+# Import with bulk operations enabled
+npx appwrite-utils-cli appwrite-migrate --import --bulk-operations
+
+# Transfer tables with high-performance bulk operations
+npx appwrite-utils-cli appwrite-migrate --transfer --fromDbId sourceDb --toDbId targetDb --tableIds table1,table2 --use-tablesdb
+```
+
+#### Working with Tables (TablesDB terminology)
+```bash
+# Wipe specific tables
+npx appwrite-utils-cli appwrite-migrate --wipeTables --tableIds users,posts
+
+# Generate constants with table terminology
+npx appwrite-utils-cli appwrite-migrate --generateConstants --api-mode=tablesdb
 ```
 
 ### Transfer Buckets

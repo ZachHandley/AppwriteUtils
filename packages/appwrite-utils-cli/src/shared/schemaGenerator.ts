@@ -4,6 +4,7 @@ import type {
   Attribute,
   RelationshipAttribute,
 } from "appwrite-utils";
+import { getVersionAwareDirectory, resolveDirectoryForApiMode, getDualDirectoryPaths } from "appwrite-utils";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";
@@ -12,15 +13,13 @@ import { getDatabaseFromConfig } from "../migrations/afterImportActions.js";
 import { ulid } from "ulidx";
 import { JsonSchemaGenerator } from "./jsonSchemaGenerator.js";
 import { collectionToYaml, getCollectionYamlFilename } from "../utils/yamlConverter.js";
-
-interface RelationshipDetail {
-  parentCollection: string;
-  childCollection: string;
-  parentKey: string;
-  childKey: string;
-  isArray: boolean;
-  isChild: boolean;
-}
+import {
+  extractTwoWayRelationships,
+  resolveCollectionName,
+  type RelationshipDetail
+} from "./relationshipExtractor.js";
+import { resolveSchemaDir } from "../utils/pathResolvers.js";
+import { MessageFormatter } from "./messageFormatter.js";
 
 export class SchemaGenerator {
   private relationshipMap = new Map<string, RelationshipDetail[]>();
@@ -34,32 +33,40 @@ export class SchemaGenerator {
   }
 
   private resolveCollectionName = (idOrName: string): string => {
-    const col = this.config.collections?.find(
-      (c) => c.$id === (idOrName as any) || c.name === idOrName
-    );
-    return col?.name ?? idOrName;
+    return resolveCollectionName(this.config, idOrName);
   };
 
   public updateYamlCollections(): void {
     const collections = this.config.collections;
     delete this.config.collections;
 
-    const collectionsDir = path.join(this.appwriteFolderPath, "collections");
+    // Determine output directory based on API mode/version detection
+    const outputDir = this.getVersionAwareCollectionsDirectory();
+    const collectionsDir = path.join(this.appwriteFolderPath, outputDir);
     if (!fs.existsSync(collectionsDir)) {
       fs.mkdirSync(collectionsDir, { recursive: true });
     }
 
     collections?.forEach((collection) => {
-      // Determine schema path based on config
+      // Determine schema path based on config and output directory
       const schemaDir = this.config.schemaConfig?.yamlSchemaDirectory || ".yaml_schemas";
-      const schemaPath = `../${schemaDir}/collection.schema.json`;
-      
-      const yamlContent = collectionToYaml(collection, schemaPath);
+      const isTablesMode = outputDir === "tables";
+      const schemaPath = isTablesMode
+        ? `../${schemaDir}/table.schema.json`
+        : `../${schemaDir}/collection.schema.json`;
+
+      const yamlConfig = {
+        useTableTerminology: isTablesMode,
+        entityType: isTablesMode ? 'table' as const : 'collection' as const,
+        schemaPath
+      };
+
+      const yamlContent = collectionToYaml(collection, yamlConfig);
       const filename = getCollectionYamlFilename(collection);
       const filePath = path.join(collectionsDir, filename);
-      
+
       fs.writeFileSync(filePath, yamlContent, { encoding: "utf-8" });
-      console.log(`Collection YAML written to ${filePath}`);
+      MessageFormatter.success(`${outputDir === "tables" ? "Table" : "Collection"} YAML written to ${filePath}`, { prefix: "Schema" });
     });
   }
 
@@ -120,9 +127,11 @@ export class SchemaGenerator {
   `;
     fs.writeFileSync(configPath, configContent, { encoding: "utf-8" });
 
+    // Determine output directory based on API mode/version detection
+    const outputDir = this.getVersionAwareCollectionsDirectory();
     const collectionsFolderPath = path.join(
       this.appwriteFolderPath,
-      "collections"
+      outputDir
     );
     if (!fs.existsSync(collectionsFolderPath)) {
       fs.mkdirSync(collectionsFolderPath, { recursive: true });
@@ -200,8 +209,33 @@ export class SchemaGenerator {
       fs.writeFileSync(collectionFilePath, collectionContent, {
         encoding: "utf-8",
       });
-      console.log(`Collection schema written to ${collectionFilePath}`);
+      MessageFormatter.success(`${outputDir === "tables" ? "Table" : "Collection"} schema written to ${collectionFilePath}`, { prefix: "Schema" });
     });
+  }
+
+  /**
+   * Determines the appropriate directory for collections/tables based on API mode
+   * Uses version detection or config hints to choose between 'collections' and 'tables'
+   */
+  private getVersionAwareCollectionsDirectory(): string {
+    return getVersionAwareDirectory(this.config, this.appwriteFolderPath);
+  }
+
+  /**
+   * Get directory for a specific API mode (legacy or tablesdb)
+   * @param apiMode - The API mode to get directory for
+   * @returns The directory name for the specified API mode
+   */
+  public getDirectoryForApiMode(apiMode: 'legacy' | 'tablesdb'): string {
+    return resolveDirectoryForApiMode(this.config, apiMode, this.appwriteFolderPath);
+  }
+
+  /**
+   * Get both directory paths for dual API support
+   * @returns Object with both collectionsDirectory and tablesDirectory paths
+   */
+  public getDualDirectoryConfiguration(): { collectionsDirectory: string; tablesDirectory: string } {
+    return getDualDirectoryPaths(this.config);
   }
 
   public async updateConfig(config: AppwriteConfig, isYamlConfig: boolean = false): Promise<void> {
@@ -213,7 +247,7 @@ export class SchemaGenerator {
       if (yamlConfigPath) {
         await this.updateYamlConfig(config, yamlConfigPath);
       } else {
-        console.warn("⚠️ YAML config expected but not found, falling back to TypeScript");
+        MessageFormatter.warning("YAML config expected but not found, falling back to TypeScript", { prefix: "Schema" });
         this.updateTypeScriptConfig(config);
       }
     } else {
@@ -231,10 +265,10 @@ export class SchemaGenerator {
       
       // Generate individual collection YAML files
       this.updateYamlCollections();
-      
-      console.log("✅ Updated YAML configuration and collection files");
+
+      MessageFormatter.success("Updated YAML configuration and collection files", { prefix: "Schema" });
     } catch (error) {
-      console.error("❌ Error updating YAML config:", error instanceof Error ? error.message : error);
+      MessageFormatter.error("Error updating YAML config", error as Error, { prefix: "Schema" });
       throw error;
     }
   }
@@ -287,87 +321,11 @@ const appwriteConfig: AppwriteConfig = {
 export default appwriteConfig;
 `;
     fs.writeFileSync(configPath, configContent, { encoding: "utf-8" });
-    console.log("✅ Updated TypeScript configuration file");
+    MessageFormatter.success("Updated TypeScript configuration file", { prefix: "Schema" });
   }
 
   private extractRelationships(): void {
-    if (!this.config.collections) {
-      return;
-    }
-    this.config.collections.forEach((collection) => {
-      if (!collection.attributes) {
-        return;
-      }
-      collection.attributes.forEach((attr) => {
-        if (attr.type === "relationship" && attr.twoWay && attr.twoWayKey) {
-          const relationshipAttr = attr as RelationshipAttribute;
-          let isArrayParent = false;
-          let isArrayChild = false;
-          switch (relationshipAttr.relationType) {
-            case "oneToMany":
-              isArrayParent = true;
-              isArrayChild = false;
-              break;
-            case "manyToMany":
-              isArrayParent = true;
-              isArrayChild = true;
-              break;
-            case "oneToOne":
-              isArrayParent = false;
-              isArrayChild = false;
-              break;
-            case "manyToOne":
-              isArrayParent = false;
-              isArrayChild = true;
-              break;
-            default:
-              break;
-          }
-          this.addRelationship(
-            collection.name,
-            this.resolveCollectionName(relationshipAttr.relatedCollection),
-            attr.key,
-            relationshipAttr.twoWayKey!,
-            isArrayParent,
-            isArrayChild
-          );
-          console.log(
-            `Extracted relationship: ${attr.key}\n\t${collection.name} -> ${relationshipAttr.relatedCollection}, databaseId: ${collection.databaseId}`
-          );
-        }
-      });
-    });
-  }
-
-  private addRelationship(
-    parentCollection: string,
-    childCollection: string,
-    parentKey: string,
-    childKey: string,
-    isArrayParent: boolean,
-    isArrayChild: boolean
-  ): void {
-    const relationshipsChild = this.relationshipMap.get(childCollection) || [];
-    const relationshipsParent =
-      this.relationshipMap.get(parentCollection) || [];
-    relationshipsParent.push({
-      parentCollection,
-      childCollection,
-      parentKey,
-      childKey,
-      isArray: isArrayParent,
-      isChild: false,
-    });
-    relationshipsChild.push({
-      parentCollection,
-      childCollection,
-      parentKey,
-      childKey,
-      isArray: isArrayChild,
-      isChild: true,
-    });
-    this.relationshipMap.set(childCollection, relationshipsChild);
-    this.relationshipMap.set(parentCollection, relationshipsParent);
+    this.relationshipMap = extractTwoWayRelationships(this.config);
   }
 
   public generateSchemas(options: {
@@ -382,7 +340,9 @@ export default appwriteConfig;
     
     // Create schemas directory using config setting
     const outputDir = this.config.schemaConfig?.outputDirectory || "schemas";
-    const schemasPath = path.join(this.appwriteFolderPath, outputDir);
+    const schemasPath = outputDir === "schemas"
+      ? resolveSchemaDir(this.appwriteFolderPath)
+      : path.join(this.appwriteFolderPath, outputDir);
     if (!fs.existsSync(schemasPath)) {
       fs.mkdirSync(schemasPath, { recursive: true });
     }
@@ -398,11 +358,11 @@ export default appwriteConfig;
         const schemaPath = path.join(schemasPath, `${camelCaseName}.ts`);
         fs.writeFileSync(schemaPath, schemaString, { encoding: "utf-8" });
         if (verbose) {
-          console.log(`Zod schema written to ${schemaPath}`);
+          MessageFormatter.success(`Zod schema written to ${schemaPath}`, { prefix: "Schema" });
         }
       });
     }
-    
+
     // Generate JSON schemas (all at once)
     if (format === "json" || format === "both") {
       const jsonSchemaGenerator = new JsonSchemaGenerator(this.config, this.appwriteFolderPath);
@@ -412,9 +372,9 @@ export default appwriteConfig;
         verbose: verbose
       });
     }
-    
+
     if (verbose) {
-      console.log(`✓ Schema generation completed (format: ${format})`);
+      MessageFormatter.success(`Schema generation completed (format: ${format})`, { prefix: "Schema" });
     }
   }
 

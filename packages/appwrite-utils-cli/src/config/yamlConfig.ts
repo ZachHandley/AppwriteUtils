@@ -3,12 +3,21 @@ import yaml from "js-yaml";
 import fs from "fs";
 import path from "path";
 import { AppwriteConfigSchema, type AppwriteConfig, RuntimeSchema, FunctionScopes, FunctionSpecifications, permissionsSchema, PermissionToAppwritePermission, type AppwriteFunction } from "appwrite-utils";
+import { shouldIgnoreDirectory } from "../utils/directoryUtils.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 const YamlConfigSchema = z.object({
   appwrite: z.object({
     endpoint: z.string().default("https://cloud.appwrite.io/v1"),
     project: z.string(),
     key: z.string(),
+    // Session authentication support
+    sessionCookie: z.string().optional(),
+    authMethod: z.enum(["session", "apikey", "auto"]).optional().default("auto"),
+    sessionMetadata: z.object({
+      email: z.string().optional(),
+      expiresAt: z.string().optional(),
+    }).optional(),
   }),
   logging: z
     .object({
@@ -47,12 +56,14 @@ const YamlConfigSchema = z.object({
       outputDirectory: z.string().default("schemas"),
       yamlSchemaDirectory: z.string().default(".yaml_schemas"),
       collectionsDirectory: z.string().default("collections"),
+      tablesDirectory: z.string().default("tables"),
     })
     .optional()
     .default({
       outputDirectory: "schemas",
       yamlSchemaDirectory: ".yaml_schemas",
       collectionsDirectory: "collections",
+      tablesDirectory: "tables",
     }),
   migrations: z
     .object({
@@ -150,6 +161,10 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
     appwriteEndpoint: yamlConfig.appwrite.endpoint,
     appwriteProject: yamlConfig.appwrite.project,
     appwriteKey: yamlConfig.appwrite.key,
+    // Session authentication support from YAML
+    sessionCookie: yamlConfig.appwrite.sessionCookie,
+    authMethod: yamlConfig.appwrite.authMethod || "auto",
+    sessionMetadata: yamlConfig.appwrite.sessionMetadata,
     apiMode: "auto", // Default to auto-detect for dual API support
     appwriteClient: null,
     logging: {
@@ -165,12 +180,12 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
     enableMockData: yamlConfig.data.enableMockData,
     documentBucketId: yamlConfig.data.documentBucketId,
     usersCollectionName: yamlConfig.data.usersCollectionName,
-    useMigrations: yamlConfig.migrations.enabled,
     schemaConfig: {
       outputDirectory: yamlConfig.schemas.outputDirectory,
       yamlSchemaDirectory: yamlConfig.schemas.yamlSchemaDirectory,
       importDirectory: yamlConfig.data.importDirectory,
       collectionsDirectory: yamlConfig.schemas.collectionsDirectory || "collections",
+      tablesDirectory: yamlConfig.schemas.tablesDirectory || "tables",
     },
     databases: yamlConfig.databases.map((db) => ({
       $id: db.id,
@@ -238,23 +253,78 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
   return appwriteConfig;
 };
 
+/**
+ * Enhanced config loading with session authentication support
+ * Supports session override options for preserving session state
+ */
+export interface YamlSessionOptions {
+  sessionCookie?: string;
+  authMethod?: "session" | "apikey" | "auto";
+  sessionMetadata?: { email?: string; expiresAt?: string; };
+}
+
+/**
+ * Load YAML config with optional session preservation
+ * Maintains authentication priority: explicit session > YAML file > system prefs
+ */
+export const loadYamlConfigWithSession = async (
+  configPath: string,
+  sessionOptions?: YamlSessionOptions
+): Promise<AppwriteConfig | null> => {
+  try {
+    const fileContent = fs.readFileSync(configPath, "utf8");
+    const yamlData = yaml.load(fileContent) as unknown;
+
+    const yamlConfig = YamlConfigSchema.parse(yamlData);
+    const appwriteConfig = convertYamlToAppwriteConfig(yamlConfig);
+
+    // Apply session preservation if provided (explicit overrides take priority)
+    if (sessionOptions) {
+      if (sessionOptions.sessionCookie) {
+        appwriteConfig.sessionCookie = sessionOptions.sessionCookie;
+      }
+      if (sessionOptions.authMethod) {
+        appwriteConfig.authMethod = sessionOptions.authMethod;
+      }
+      if (sessionOptions.sessionMetadata) {
+        appwriteConfig.sessionMetadata = sessionOptions.sessionMetadata;
+      }
+    }
+
+    return appwriteConfig;
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      MessageFormatter.error("YAML config validation failed", undefined, { prefix: "Config" });
+      error.issues.forEach((err) => {
+        MessageFormatter.error(`${err.path.join('.')} → ${err.message}`, undefined, { prefix: "Config" });
+      });
+    } else {
+      MessageFormatter.error("Error loading YAML config", error instanceof Error ? error : undefined, { prefix: "Config" });
+      if (error instanceof Error && error.stack) {
+        MessageFormatter.debug("Stack trace", error.stack, { prefix: "Config" });
+      }
+    }
+    return null;
+  }
+};
+
 export const loadYamlConfig = async (configPath: string): Promise<AppwriteConfig | null> => {
   try {
     const fileContent = fs.readFileSync(configPath, "utf8");
     const yamlData = yaml.load(fileContent) as unknown;
-    
+
     const yamlConfig = YamlConfigSchema.parse(yamlData);
     return convertYamlToAppwriteConfig(yamlConfig);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("❌ YAML config validation failed:");
+      MessageFormatter.error("YAML config validation failed", undefined, { prefix: "Config" });
       error.issues.forEach((err) => {
-        console.error(`  ${err.path.join('.')} → ${err.message}`);
+        MessageFormatter.error(`${err.path.join('.')} → ${err.message}`, undefined, { prefix: "Config" });
       });
     } else {
-      console.error("❌ Error loading YAML config:", error instanceof Error ? error.message : error);
+      MessageFormatter.error("Error loading YAML config", error instanceof Error ? error : undefined, { prefix: "Config" });
       if (error instanceof Error && error.stack) {
-        console.error("Stack trace:", error.stack);
+        MessageFormatter.debug("Stack trace", error.stack, { prefix: "Config" });
       }
     }
     return null;
@@ -304,47 +374,6 @@ export const findYamlConfig = (startDir: string): string | null => {
   }
 
   return null;
-};
-
-const shouldIgnoreDirectory = (dirName: string): boolean => {
-  const ignoredDirs = [
-    'node_modules',
-    'dist',
-    'build',
-    'coverage',
-    '.next',
-    '.nuxt',
-    '.cache',
-    '.git',
-    '.svn',
-    '.hg',
-    '__pycache__',
-    '.pytest_cache',
-    '.mypy_cache',
-    'venv',
-    '.venv',
-    'env',
-    '.env',
-    'target',
-    'out',
-    'bin',
-    'obj',
-    '.vs',
-    '.vscode',
-    '.idea',
-    'temp',
-    'tmp',
-    '.tmp',
-    'logs',
-    'log',
-    '.DS_Store',
-    'Thumbs.db'
-  ];
-  
-  return ignoredDirs.includes(dirName) || 
-         dirName.startsWith('.git') || 
-         dirName.startsWith('node_modules') ||
-         (dirName.startsWith('.') && dirName !== '.appwrite');
 };
 
 const findYamlConfigRecursive = (dir: string, depth: number = 0): string | null => {
@@ -398,6 +427,9 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
       endpoint: "https://cloud.appwrite.io/v1",
       project: "YOUR_PROJECT_ID",
       key: "YOUR_API_KEY",
+      authMethod: "auto" as const,
+      // Optional session authentication (leave empty to use API key)
+      // sessionCookie: "session_cookie_from_appwrite_cli",
     },
     logging: {
       enabled: false,
@@ -420,6 +452,7 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
       outputDirectory: "schemas",
       yamlSchemaDirectory: ".yaml_schemas",
       collectionsDirectory: "collections",
+      tablesDirectory: "tables",
     },
     migrations: {
       enabled: true,
@@ -433,15 +466,43 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
     functions: [],
   };
 
-  const yamlContent = yaml.dump(template, {
+  let yamlContent = yaml.dump(template, {
     indent: 2,
     lineWidth: 120,
     sortKeys: false,
   });
 
-  // Add schema reference header
+  // Add inline comments to the schemas section
+  yamlContent = yamlContent.replace(
+    /schemas:\s*\n(\s*)outputDirectory: schemas\n(\s*)yamlSchemaDirectory: \.yaml_schemas\n(\s*)collectionsDirectory: collections\n(\s*)tablesDirectory: tables/,
+    `schemas:
+$1outputDirectory: schemas
+$2yamlSchemaDirectory: .yaml_schemas
+$3# Directory for legacy Databases API collection definitions
+$3collectionsDirectory: collections
+$4# Directory for new TablesDB API table definitions
+$4tablesDirectory: tables`
+  );
+
+  // Add schema reference header and documentation
   const schemaReference = "# yaml-language-server: $schema=./.yaml_schemas/appwrite-config.schema.json\n";
-  const finalContent = schemaReference + "# Appwrite Project Configuration\n" + yamlContent;
+  const documentation = `# Appwrite Project Configuration
+#
+# Authentication Configuration:
+# - key: Standard API key authentication
+# - sessionCookie: Session cookie from Appwrite CLI authentication
+# - authMethod: "auto" (detects available method), "session" (prefer session), "apikey" (prefer API key)
+# - Priority: Explicit CLI args > YAML config > ~/.appwrite/prefs.json > Error
+#
+# Directory Configuration:
+# - collectionsDirectory: Use for legacy Databases API (default: "collections")
+# - tablesDirectory: Use for new TablesDB API (default: "tables")
+# - API mode is auto-detected based on server version, or set explicitly via apiMode
+#
+# For dual API support, both directories can coexist with different definitions
+
+`;
+  const finalContent = schemaReference + documentation + yamlContent;
 
   fs.writeFileSync(outputPath, finalContent, "utf8");
 };
@@ -459,6 +520,10 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
         endpoint: config.appwriteEndpoint,
         project: config.appwriteProject,
         key: config.appwriteKey,
+        // Include session authentication fields
+        sessionCookie: config.sessionCookie,
+        authMethod: config.authMethod || "auto",
+        sessionMetadata: config.sessionMetadata,
       },
       logging: {
         enabled: config.logging?.enabled || false,
@@ -482,9 +547,10 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
         outputDirectory: config.schemaConfig?.outputDirectory || "schemas",
         yamlSchemaDirectory: config.schemaConfig?.yamlSchemaDirectory || ".yaml_schemas",
         collectionsDirectory: config.schemaConfig?.collectionsDirectory || "collections",
+        tablesDirectory: config.schemaConfig?.tablesDirectory || "tables",
       },
       migrations: {
-        enabled: config.useMigrations !== false,
+        enabled: true,
       },
       databases: config.databases?.map(db => ({
         id: db.$id,
@@ -574,9 +640,9 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
     }
 
     fs.writeFileSync(configPath, finalContent, "utf8");
-    console.log(`✅ Updated YAML configuration at ${configPath}`);
+    MessageFormatter.success(`Updated YAML configuration at ${configPath}`, { prefix: "Config" });
   } catch (error) {
-    console.error("❌ Error writing YAML config:", error instanceof Error ? error.message : error);
+    MessageFormatter.error("Error writing YAML config", error instanceof Error ? error : undefined, { prefix: "Config" });
     throw error;
   }
 };
@@ -640,9 +706,56 @@ export const addFunctionToYamlConfig = async (configPath: string, newFunction: A
     }
     
     fs.writeFileSync(configPath, finalContent, "utf8");
-    console.log(`✅ Added function "${newFunction.name}" to YAML config`);
+    MessageFormatter.success(`Added function "${newFunction.name}" to YAML config`, { prefix: "Config" });
   } catch (error) {
-    console.error("❌ Error adding function to YAML config:", error instanceof Error ? error.message : error);
+    MessageFormatter.error("Error adding function to YAML config", error instanceof Error ? error : undefined, { prefix: "Config" });
     throw error;
+  }
+};
+
+/**
+ * Extract session options from AppwriteConfig for YAML operations
+ * Useful for preserving session state during config reloads
+ */
+export const extractSessionOptionsFromConfig = (config: AppwriteConfig): YamlSessionOptions => {
+  return {
+    sessionCookie: config.sessionCookie,
+    authMethod: config.authMethod,
+    sessionMetadata: config.sessionMetadata,
+  };
+};
+
+/**
+ * Create session-preserved YAML config operations
+ * Maintains authentication state during config file updates
+ */
+export const createSessionPreservingYamlConfig = (configPath: string, sessionOptions: YamlSessionOptions) => {
+  return {
+    load: () => loadYamlConfigWithSession(configPath, sessionOptions),
+    write: (config: AppwriteConfig) => {
+      // Merge session options into config before writing
+      const enhancedConfig = {
+        ...config,
+        sessionCookie: sessionOptions.sessionCookie || config.sessionCookie,
+        authMethod: sessionOptions.authMethod || config.authMethod,
+        sessionMetadata: sessionOptions.sessionMetadata || config.sessionMetadata,
+      };
+      return writeYamlConfig(configPath, enhancedConfig);
+    },
+    addFunction: (func: AppwriteFunction) => addFunctionToYamlConfig(configPath, func),
+  };
+};
+
+/**
+ * Determine if YAML config has session authentication configured
+ */
+export const hasYamlSessionAuth = (configPath: string): boolean => {
+  try {
+    const fileContent = fs.readFileSync(configPath, "utf8");
+    const yamlData = yaml.load(fileContent) as any;
+
+    return !!(yamlData?.appwrite?.sessionCookie && yamlData.appwrite.sessionCookie.trim());
+  } catch (error) {
+    return false;
   }
 };

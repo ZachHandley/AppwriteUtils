@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../.yaml_schemas/collection.schema.json
+# Example Collection Definition
+name: ExampleCollection
+id: example_collection_1758927661474
+documentSecurity: false
+enabled: true
+permissions:
+  - permission: read
+    target: any
+  - permission: create
+    target: users
+  - permission: update
+    target: users
+  - permission: delete
+    target: users
+attributes:
+  - key: title
+    type: string
+    size: 255
+    required: true
+    description: "The title of the item"
+  - key: description
+    type: string
+    size: 1000
+    required: false
+    description: "A longer description"
+  - key: isActive
+    type: boolean
+    required: false
+    default: true
+  - key: someInt
+    type: integer
+    required: false
+    default: 0
+    min: 0
+  - key: someDouble
+    type: double
+    required: false
+    default: 0.0
+indexes:
+  - key: title_search
+    type: fulltext
+    attributes:
+      - title
+importDefs: []

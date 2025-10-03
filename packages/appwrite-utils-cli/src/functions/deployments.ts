@@ -15,6 +15,7 @@ import {
   updateFunctionSpecifications,
 } from "./methods.js";
 import ignore from "ignore";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 const findFunctionDirectory = (
   basePath: string,
@@ -57,7 +58,7 @@ export const deployFunction = async (
   ]
 ) => {
   const functions = new Functions(client);
-  console.log(chalk.blue("Preparing function deployment..."));
+  MessageFormatter.processing("Preparing function deployment...", { prefix: "Deployment" });
 
   // Convert ignored patterns to lowercase for case-insensitive comparison
   const ignoredLower = ignored.map((pattern) => pattern.toLowerCase());
@@ -74,7 +75,7 @@ export const deployFunction = async (
     throw new Error(`${codePath} is not a directory`);
   }
 
-  console.log(chalk.blue(`Creating tarball from ${codePath}`));
+  MessageFormatter.processing(`Creating tarball from ${codePath}`, { prefix: "Deployment" });
 
   const progressBar = new cliProgress.SingleBar({
     format:
@@ -105,7 +106,7 @@ export const deployFunction = async (
               relativePath.includes(`\\${pattern}`)
           )
         ) {
-          console.log(chalk.gray(`Ignoring ${path}`));
+          MessageFormatter.debug(`Ignoring ${path}`, undefined, { prefix: "Deployment" });
           return false;
         }
         return true;
@@ -121,7 +122,7 @@ export const deployFunction = async (
   );
 
   try {
-    console.log(chalk.blue("🚀 Creating deployment..."));
+    MessageFormatter.processing("Creating deployment...", { prefix: "Deployment" });
     // Start with 1 as default total since we don't know the chunk size yet
     progressBar.start(1, 0);
 
@@ -146,7 +147,7 @@ export const deployFunction = async (
             if (chunks === total) {
               progressBar.update(total);
               progressBar.stop();
-              console.log(chalk.green("✅ Upload complete!"));
+              MessageFormatter.success("Upload complete!", { prefix: "Deployment" });
             }
           }
         }
@@ -163,7 +164,7 @@ export const deployFunction = async (
     return functionResponse;
   } catch (error) {
     progressBar.stop();
-    console.error(chalk.red("❌ Deployment failed:"), error);
+    MessageFormatter.error("Deployment failed", error instanceof Error ? error : undefined, { prefix: "Deployment" });
     throw error;
   }
 };
@@ -197,12 +198,12 @@ export const deployLocalFunction = async (
   }
 
   if (functionConfig.predeployCommands?.length) {
-    console.log(chalk.blue("Executing predeploy commands..."));
+    MessageFormatter.processing("Executing predeploy commands...", { prefix: "Deployment" });
     const isWindows = platform() === "win32";
 
     for (const command of functionConfig.predeployCommands) {
       try {
-        console.log(chalk.gray(`Executing: ${command}`));
+        MessageFormatter.debug(`Executing: ${command}`, undefined, { prefix: "Deployment" });
         execSync(command, {
           cwd: resolvedPath,
           stdio: "inherit",
@@ -210,9 +211,10 @@ export const deployLocalFunction = async (
           windowsHide: true,
         });
       } catch (error) {
-        console.error(
-          chalk.red(`Failed to execute predeploy command: ${command}`),
-          error
+        MessageFormatter.error(
+          `Failed to execute predeploy command: ${command}`,
+          error instanceof Error ? error : undefined,
+          { prefix: "Deployment" }
         );
         throw new Error(``);
       }
@@ -223,7 +225,7 @@ export const deployLocalFunction = async (
   if (!functionExists) {
     await createFunction(client, functionConfig);
   } else {
-    console.log(chalk.blue("Updating function..."));
+    MessageFormatter.processing("Updating function...", { prefix: "Deployment" });
     await updateFunction(client, functionConfig);
   }
 

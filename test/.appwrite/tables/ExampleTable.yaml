@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../.yaml_schemas/table.schema.json
+# Example Table Definition
+name: ExampleTable
+id: example_table_1759444926849
+rowSecurity: false
+enabled: true
+permissions:
+  - permission: read
+    target: any
+  - permission: create
+    target: users
+  - permission: update
+    target: users
+  - permission: delete
+    target: users
+columns:
+  - key: title
+    type: string
+    size: 255
+    required: true
+    description: "The title of the item"
+  - key: description
+    type: string
+    size: 1000
+    required: false
+    description: "A longer description"
+  - key: isActive
+    type: boolean
+    required: false
+    default: true
+  - key: uniqueCode
+    type: string
+    size: 50
+    required: false
+    unique: true
+    description: "Unique identifier code (TablesDB feature)"
+indexes:
+  - key: title_search
+    type: fulltext
+    attributes:
+      - title
+importDefs: []

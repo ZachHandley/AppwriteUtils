@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appwrite-utils.dev/schemas/table.schema.json",
+  "title": "Appwrite Table Definition",
+  "description": "YAML configuration for Appwrite table definitions (new TablesDB API)",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Collection name",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "description": "Collection ID",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    },
+    "documentSecurity": {
+      "type": "boolean",
+      "description": "Enable document-level security",
+      "default": false
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the collection is enabled",
+      "default": true
+    },
+    "permissions": {
+      "type": "array",
+      "description": "Collection-level permissions",
+      "items": {
+        "$ref": "#/$defs/permission"
+      },
+      "default": []
+    },
+    "indexes": {
+      "type": "array",
+      "description": "Collection indexes",
+      "items": {
+        "$ref": "#/$defs/index"
+      },
+      "default": []
+    },
+    "importDefs": {
+      "type": "array",
+      "description": "Import definitions for data migration",
+      "default": []
+    },
+    "columns": {
+      "type": "array",
+      "description": "Table columns (fields)",
+      "items": {
+        "$ref": "#/$defs/column"
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "permission": {
+      "type": "object",
+      "properties": {
+        "permission": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "create",
+            "update",
+            "delete"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "description": "Permission target (e.g., 'users', 'guests', role:admin)"
+        }
+      },
+      "required": [
+        "permission",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "attribute": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Attribute key/name",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "integer",
+            "double",
+            "boolean",
+            "datetime",
+            "email",
+            "ip",
+            "url",
+            "enum",
+            "relationship"
+          ]
+        },
+        "size": {
+          "type": "number",
+          "description": "Maximum size for string attributes"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "array": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {
+          "description": "Default value for the attribute"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum value for numeric attributes"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum value for numeric attributes"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowed values for enum attributes"
+        },
+        "relatedCollection": {
+          "type": "string",
+          "description": "Related collection for relationship attributes"
+        },
+        "relationType": {
+          "type": "string",
+          "enum": [
+            "oneToOne",
+            "oneToMany",
+            "manyToOne",
+            "manyToMany"
+          ]
+        },
+        "twoWay": {
+          "type": "boolean",
+          "description": "Enable two-way relationship"
+        },
+        "twoWayKey": {
+          "type": "string",
+          "description": "Key for the reverse relationship"
+        },
+        "onDelete": {
+          "type": "string",
+          "enum": [
+            "cascade",
+            "restrict",
+            "setNull"
+          ]
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "parent",
+            "child"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "index": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Index key/name"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "key",
+            "fulltext",
+            "unique"
+          ]
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attribute names to include in the index",
+          "minItems": 1
+        },
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ]
+          },
+          "description": "Sort orders for indexed attributes"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Column names to include in the index",
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "key",
+            "type",
+            "attributes"
+          ]
+        },
+        {
+          "required": [
+            "key",
+            "type",
+            "columns"
+          ]
+        }
+      ]
+    },
+    "column": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Attribute key/name",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "integer",
+            "double",
+            "boolean",
+            "datetime",
+            "email",
+            "ip",
+            "url",
+            "enum",
+            "relationship"
+          ]
+        },
+        "size": {
+          "type": "number",
+          "description": "Maximum size for string attributes"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "array": {
+          "type": "boolean",
+          "default": false
+        },
+        "default": {
+          "description": "Default value for the attribute"
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum value for numeric attributes"
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum value for numeric attributes"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowed values for enum attributes"
+        },
+        "relationType": {
+          "type": "string",
+          "enum": [
+            "oneToOne",
+            "oneToMany",
+            "manyToOne",
+            "manyToMany"
+          ]
+        },
+        "twoWay": {
+          "type": "boolean",
+          "description": "Enable two-way relationship"
+        },
+        "twoWayKey": {
+          "type": "string",
+          "description": "Key for the reverse relationship"
+        },
+        "onDelete": {
+          "type": "string",
+          "enum": [
+            "cascade",
+            "restrict",
+            "setNull"
+          ]
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "parent",
+            "child"
+          ]
+        },
+        "relatedTable": {
+          "type": "string",
+          "description": "Related table for relationship columns"
+        }
+      },
+      "required": [
+        "key",
+        "type"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

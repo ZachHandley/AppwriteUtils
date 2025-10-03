@@ -258,23 +258,22 @@ export const transferDatabaseLocalToLocal = async (
   fromDbId: string,
   targetDbId: string
 ) => {
-  console.log(
-    chalk.blue(`Starting database transfer from ${fromDbId} to ${targetDbId}`)
+  MessageFormatter.info(
+    `Starting database transfer from ${fromDbId} to ${targetDbId}`,
+    { prefix: "Transfer" }
   );
   // Get all collections from source database
   const sourceCollections = await fetchAllCollections(fromDbId, localDb);
-  console.log(
-    chalk.blue(
-      `Found ${sourceCollections.length} collections in source database`
-    )
+  MessageFormatter.info(
+    `Found ${sourceCollections.length} collections in source database`,
+    { prefix: "Transfer" }
   );
 
   // Process each collection
   for (const collection of sourceCollections) {
-    console.log(
-      chalk.yellow(
-        `Processing collection: ${collection.name} (${collection.$id})`
-      )
+    MessageFormatter.processing(
+      `Processing collection: ${collection.name} (${collection.$id})`,
+      { prefix: "Transfer" }
     );
 
     try {
@@ -288,8 +287,9 @@ export const transferDatabaseLocalToLocal = async (
 
       if (existingCollection.collections.length > 0) {
         targetCollection = existingCollection.collections[0];
-        console.log(
-          chalk.green(`Collection ${collection.name} exists in target database`)
+        MessageFormatter.info(
+          `Collection ${collection.name} exists in target database`,
+          { prefix: "Transfer" }
         );
 
         // Update collection if needed
@@ -309,13 +309,15 @@ export const transferDatabaseLocalToLocal = async (
               collection.enabled
             )
           );
-          console.log(chalk.green(`Collection ${collection.name} updated`));
+          MessageFormatter.success(
+            `Collection ${collection.name} updated`,
+            { prefix: "Transfer" }
+          );
         }
       } else {
-        console.log(
-          chalk.yellow(
-            `Creating collection ${collection.name} in target database...`
-          )
+        MessageFormatter.progress(
+          `Creating collection ${collection.name} in target database...`,
+          { prefix: "Transfer" }
         );
         targetCollection = await tryAwaitWithRetry(async () =>
           localDb.createCollection(
@@ -330,10 +332,9 @@ export const transferDatabaseLocalToLocal = async (
       }
 
       // Handle attributes with enhanced status checking
-      console.log(
-        chalk.blue(
-          `Creating attributes for collection ${collection.name} with enhanced monitoring...`
-        )
+      MessageFormatter.info(
+        `Creating attributes for collection ${collection.name} with enhanced monitoring...`,
+        { prefix: "Transfer" }
       );
 
       const allAttributes = collection.attributes.map((attr) =>
@@ -348,18 +349,17 @@ export const transferDatabaseLocalToLocal = async (
         );
 
       if (!attributeSuccess) {
-        console.log(
-          chalk.red(
-            `❌ Failed to create all attributes for collection ${collection.name}, skipping to next collection`
-          )
+        MessageFormatter.error(
+          `Failed to create all attributes for collection ${collection.name}, skipping to next collection`,
+          undefined,
+          { prefix: "Transfer" }
         );
         continue;
       }
 
-      console.log(
-        chalk.green(
-          `✅ All attributes created successfully for collection ${collection.name}`
-        )
+      MessageFormatter.success(
+        `All attributes created successfully for collection ${collection.name}`,
+        { prefix: "Transfer" }
       );
 
       // Handle indexes
@@ -381,10 +381,14 @@ export const transferDatabaseLocalToLocal = async (
               index as any
             )
           );
-          console.log(chalk.green(`Index ${index.key} created`));
+          MessageFormatter.success(
+            `Index ${index.key} created`,
+            { prefix: "Transfer" }
+          );
         } else {
-          console.log(
-            chalk.blue(`Index ${index.key} exists, checking for updates...`)
+          MessageFormatter.info(
+            `Index ${index.key} exists, checking for updates...`,
+            { prefix: "Transfer" }
           );
           await tryAwaitWithRetry(async () =>
             createOrUpdateIndex(
@@ -409,9 +413,10 @@ export const transferDatabaseLocalToLocal = async (
         targetCollection.$id
       );
     } catch (error) {
-      console.error(
-        chalk.red(`Error processing collection ${collection.name}:`),
-        error
+      MessageFormatter.error(
+        `Error processing collection ${collection.name}`,
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Transfer" }
       );
     }
   }
@@ -430,18 +435,16 @@ export const transferDatabaseLocalToRemote = async (
 
   // Get all collections from source database
   const sourceCollections = await fetchAllCollections(fromDbId, localDb);
-  console.log(
-    chalk.blue(
-      `Found ${sourceCollections.length} collections in source database`
-    )
+  MessageFormatter.info(
+    `Found ${sourceCollections.length} collections in source database`,
+    { prefix: "Transfer" }
   );
 
   // Process each collection
   for (const collection of sourceCollections) {
-    console.log(
-      chalk.yellow(
-        `Processing collection: ${collection.name} (${collection.$id})`
-      )
+    MessageFormatter.processing(
+      `Processing collection: ${collection.name} (${collection.$id})`,
+      { prefix: "Transfer" }
     );
 
     try {
@@ -453,8 +456,9 @@ export const transferDatabaseLocalToRemote = async (
 
       if (existingCollection.collections.length > 0) {
         targetCollection = existingCollection.collections[0];
-        console.log(
-          chalk.green(`Collection ${collection.name} exists in remote database`)
+        MessageFormatter.info(
+          `Collection ${collection.name} exists in remote database`,
+          { prefix: "Transfer" }
         );
 
         // Update collection if needed
@@ -474,13 +478,15 @@ export const transferDatabaseLocalToRemote = async (
               collection.enabled
             )
           );
-          console.log(chalk.green(`Collection ${collection.name} updated`));
+          MessageFormatter.success(
+            `Collection ${collection.name} updated`,
+            { prefix: "Transfer" }
+          );
         }
       } else {
-        console.log(
-          chalk.yellow(
-            `Creating collection ${collection.name} in remote database...`
-          )
+        MessageFormatter.progress(
+          `Creating collection ${collection.name} in remote database...`,
+          { prefix: "Transfer" }
         );
         targetCollection = await tryAwaitWithRetry(async () =>
           remoteDb.createCollection(
@@ -495,10 +501,9 @@ export const transferDatabaseLocalToRemote = async (
       }
 
       // Handle attributes with enhanced status checking
-      console.log(
-        chalk.blue(
-          `Creating attributes for collection ${collection.name} with enhanced monitoring...`
-        )
+      MessageFormatter.info(
+        `Creating attributes for collection ${collection.name} with enhanced monitoring...`,
+        { prefix: "Transfer" }
       );
 
       const attributesToCreate = collection.attributes.map((attr) =>
@@ -514,25 +519,22 @@ export const transferDatabaseLocalToRemote = async (
         );
 
       if (!attributesSuccess) {
-        console.log(
-          chalk.red(
-            `Failed to create some attributes for collection ${collection.name}`
-          )
+        MessageFormatter.warning(
+          `Failed to create some attributes for collection ${collection.name}`,
+          { prefix: "Transfer" }
         );
         // Continue with the transfer even if some attributes failed
       } else {
-        console.log(
-          chalk.green(
-            `All attributes created successfully for collection ${collection.name}`
-          )
+        MessageFormatter.success(
+          `All attributes created successfully for collection ${collection.name}`,
+          { prefix: "Transfer" }
         );
       }
 
       // Handle indexes with enhanced status checking
-      console.log(
-        chalk.blue(
-          `Creating indexes for collection ${collection.name} with enhanced monitoring...`
-        )
+      MessageFormatter.info(
+        `Creating indexes for collection ${collection.name} with enhanced monitoring...`,
+        { prefix: "Transfer" }
       );
 
       const indexesSuccess = await createOrUpdateIndexesWithStatusCheck(
@@ -544,17 +546,15 @@ export const transferDatabaseLocalToRemote = async (
       );
 
       if (!indexesSuccess) {
-        console.log(
-          chalk.red(
-            `Failed to create some indexes for collection ${collection.name}`
-          )
+        MessageFormatter.warning(
+          `Failed to create some indexes for collection ${collection.name}`,
+          { prefix: "Transfer" }
         );
         // Continue with the transfer even if some indexes failed
       } else {
-        console.log(
-          chalk.green(
-            `All indexes created successfully for collection ${collection.name}`
-          )
+        MessageFormatter.success(
+          `All indexes created successfully for collection ${collection.name}`,
+          { prefix: "Transfer" }
         );
       }
 
@@ -573,9 +573,10 @@ export const transferDatabaseLocalToRemote = async (
         targetCollection.$id
       );
     } catch (error) {
-      console.error(
-        chalk.red(`Error processing collection ${collection.name}:`),
-        error
+      MessageFormatter.error(
+        `Error processing collection ${collection.name}`,
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Transfer" }
       );
     }
   }
@@ -587,7 +588,10 @@ export const transferUsersLocalToRemote = async (
   projectId: string,
   apiKey: string
 ) => {
-  console.log(chalk.blue("Starting user transfer to remote instance..."));
+  MessageFormatter.info(
+    "Starting user transfer to remote instance...",
+    { prefix: "Transfer" }
+  );
 
   const client = getClient(endpoint, projectId, apiKey);
   const remoteUsers = new Users(client);
@@ -620,7 +624,10 @@ export const transferUsersLocalToRemote = async (
           
           // If user exists, update only the differences
           if (remoteUser) {
-            console.log(chalk.blue(`User ${user.$id} exists, checking for updates...`));
+            MessageFormatter.info(
+              `User ${user.$id} exists, checking for updates...`,
+              { prefix: "Transfer" }
+            );
             let hasUpdates = false;
 
             // Update name if different
@@ -628,7 +635,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updateName(user.$id, user.name)
               );
-              console.log(chalk.green(`Updated name for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated name for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -637,7 +647,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updateEmail(user.$id, user.email)
               );
-              console.log(chalk.green(`Updated email for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated email for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -651,7 +664,10 @@ export const transferUsersLocalToRemote = async (
                   remoteUsers.updatePhone(user.$id, normalizedLocalPhone)
                 );
               }
-              console.log(chalk.green(`Updated phone for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated phone for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -660,7 +676,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updatePrefs(user.$id, user.prefs)
               );
-              console.log(chalk.green(`Updated preferences for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated preferences for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -669,7 +688,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updateLabels(user.$id, user.labels)
               );
-              console.log(chalk.green(`Updated labels for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated labels for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -678,7 +700,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updateEmailVerification(user.$id, user.emailVerification)
               );
-              console.log(chalk.green(`Updated email verification for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated email verification for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -687,7 +712,10 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updatePhoneVerification(user.$id, user.phoneVerification)
               );
-              console.log(chalk.green(`Updated phone verification for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated phone verification for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
@@ -696,15 +724,24 @@ export const transferUsersLocalToRemote = async (
               await tryAwaitWithRetry(async () =>
                 remoteUsers.updateStatus(user.$id, user.status)
               );
-              console.log(chalk.green(`Updated status for user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated status for user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
               hasUpdates = true;
             }
 
             if (!hasUpdates) {
-              console.log(chalk.yellow(`User ${user.$id} is already up to date, skipping...`));
+              MessageFormatter.info(
+                `User ${user.$id} is already up to date, skipping...`,
+                { prefix: "Transfer" }
+              );
             } else {
               totalTransferred++;
-              console.log(chalk.green(`Updated user ${user.$id}`));
+              MessageFormatter.success(
+                `Updated user ${user.$id}`,
+                { prefix: "Transfer" }
+              );
             }
             continue;
           }
@@ -773,10 +810,9 @@ export const transferUsersLocalToRemote = async (
                   !hashOptions.salt ||
                   typeof hashOptions.costCpu !== "number"
                 ) {
-                  console.log(
-                    chalk.yellow(
-                      `User ${user.$id}: Using default Scrypt parameters due to missing hashOptions`
-                    )
+                  MessageFormatter.warning(
+                    `User ${user.$id}: Using default Scrypt parameters due to missing hashOptions`,
+                    { prefix: "Transfer" }
                   );
                 }
 
@@ -814,10 +850,9 @@ export const transferUsersLocalToRemote = async (
                   !hashOptions.saltSeparator ||
                   !hashOptions.signerKey
                 ) {
-                  console.log(
-                    chalk.yellow(
-                      `User ${user.$id}: Missing critical Scrypt Modified parameters in hashOptions`
-                    )
+                  MessageFormatter.warning(
+                    `User ${user.$id}: Missing critical Scrypt Modified parameters in hashOptions`,
+                    { prefix: "Transfer" }
                   );
                 }
 
@@ -886,10 +921,9 @@ export const transferUsersLocalToRemote = async (
                 break;
 
               default:
-                console.log(
-                  chalk.yellow(
-                    `Unknown hash type '${hashType}' for user ${user.$id}, falling back to Argon2`
-                  )
+                MessageFormatter.warning(
+                  `Unknown hash type '${hashType}' for user ${user.$id}, falling back to Argon2`,
+                  { prefix: "Transfer" }
                 );
                 await tryAwaitWithRetry(async () =>
                   remoteUsers.createArgon2User(
@@ -902,16 +936,14 @@ export const transferUsersLocalToRemote = async (
                 break;
             }
 
-            console.log(
-              chalk.green(
-                `User ${user.$id} created with preserved ${hashType} password`
-              )
+            MessageFormatter.success(
+              `User ${user.$id} created with preserved ${hashType} password`,
+              { prefix: "Transfer" }
             );
           } catch (error) {
-            console.log(
-              chalk.yellow(
-                `Failed to create user ${user.$id} with ${hashType} hash, trying with temporary password`
-              )
+            MessageFormatter.warning(
+              `Failed to create user ${user.$id} with ${hashType} hash, trying with temporary password`,
+              { prefix: "Transfer" }
             );
 
             // Fallback to creating user with temporary password
@@ -925,10 +957,9 @@ export const transferUsersLocalToRemote = async (
               )
             );
 
-            console.log(
-              chalk.yellow(
-                `User ${user.$id} created with temporary password - password reset required`
-              )
+            MessageFormatter.warning(
+              `User ${user.$id} created with temporary password - password reset required`,
+              { prefix: "Transfer" }
             );
           }
         } else {
@@ -946,10 +977,9 @@ export const transferUsersLocalToRemote = async (
           );
 
           if (!user.password) {
-            console.log(
-              chalk.yellow(
-                `User ${user.$id} created with temporary password - password reset required`
-              )
+            MessageFormatter.warning(
+              `User ${user.$id} created with temporary password - password reset required`,
+              { prefix: "Transfer" }
             );
           }
         }
@@ -995,9 +1025,16 @@ export const transferUsersLocalToRemote = async (
         }
 
         totalTransferred++;
-        console.log(chalk.green(`Transferred user ${user.$id}`));
+        MessageFormatter.success(
+          `Transferred user ${user.$id}`,
+          { prefix: "Transfer" }
+        );
       } catch (error) {
-        console.error(chalk.red(`Failed to transfer user ${user.$id}:`), error);
+        MessageFormatter.error(
+          `Failed to transfer user ${user.$id}`,
+          error instanceof Error ? error : new Error(String(error)),
+          { prefix: "Transfer" }
+        );
       }
     }
 
@@ -1007,7 +1044,8 @@ export const transferUsersLocalToRemote = async (
     lastId = usersList.users[usersList.users.length - 1].$id;
   }
 
-  console.log(
-    chalk.green(`Successfully transferred ${totalTransferred} users`)
+  MessageFormatter.success(
+    `Successfully transferred ${totalTransferred} users`,
+    { prefix: "Transfer" }
   );
 };

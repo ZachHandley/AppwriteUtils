@@ -64,7 +64,14 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async createRow(params: CreateRowParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.createRow(params);
+      // Remap 'id' to 'rowId' for TablesDB SDK compatibility
+      const result = await this.tablesDB.createRow({
+        databaseId: params.databaseId,
+        tableId: params.tableId,
+        rowId: params.id,
+        data: params.data,
+        permissions: params.permissions
+      });
       return {
         data: result,
         rows: [result]
@@ -80,7 +87,13 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateRow(params: UpdateRowParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.updateRow(params);
+      const result = await this.tablesDB.updateRow(
+        params.databaseId,
+        params.tableId,
+        params.id,
+        params.data,
+        params.permissions || []
+      );
       return {
         data: result,
         rows: [result]
@@ -93,10 +106,14 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async deleteRow(params: DeleteRowParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteRow(params);
+      const result = await this.tablesDB.deleteRow(
+        params.databaseId,
+        params.tableId,
+        params.id
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -106,10 +123,14 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async getRow(params: { databaseId: string; tableId: string; id: string }): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.getRow(params);
+      const result = await this.tablesDB.getRow(
+        params.databaseId,
+        params.tableId,
+        params.id
+      );
       return {
         data: result,
         rows: [result]
@@ -143,7 +164,14 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async createTable(params: CreateTableParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.createTable(params);
+      const result = await this.tablesDB.createTable(
+        params.databaseId,
+        params.id, // tableId
+        params.name,
+        params.permissions || [],
+        params.documentSecurity ?? false,
+        params.enabled ?? true
+      );
       return {
         data: result,
         tables: [result]
@@ -159,7 +187,14 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateTable(params: UpdateTableParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.updateTable(params);
+      const result = await this.tablesDB.updateTable(
+        params.databaseId,
+        params.id, // tableId
+        params.name,
+        params.permissions,
+        params.documentSecurity,
+        params.enabled
+      );
       return {
         data: result,
         tables: [result]
@@ -172,10 +207,13 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async deleteTable(params: DeleteTableParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteTable(params);
+      const result = await this.tablesDB.deleteTable(
+        params.databaseId,
+        params.tableId
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -185,10 +223,13 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async getTable(params: GetTableParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.getTable(params);
+      const result = await this.tablesDB.getTable(
+        params.databaseId,
+        params.tableId
+      );
       return {
         data: result,
         tables: [result]
@@ -221,7 +262,14 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async createIndex(params: CreateIndexParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.createIndex(params);
+      const result = await this.tablesDB.createIndex(
+        params.databaseId,
+        params.tableId,
+        params.key,
+        params.type,
+        params.attributes,
+        params.orders || []
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -231,10 +279,14 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async deleteIndex(params: DeleteIndexParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteIndex(params);
+      const result = await this.tablesDB.deleteIndex(
+        params.databaseId,
+        params.tableId,
+        params.key
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -248,9 +300,136 @@ export class TablesDBAdapter extends BaseAdapter {
   // Attribute Operations
   async createAttribute(params: CreateAttributeParams): Promise<ApiResponse> {
     try {
-      // Prefer createColumn if available, fallback to createAttribute
-      const fn = this.tablesDB.createColumn || this.tablesDB.createAttribute;
-      const result = await fn.call(this.tablesDB, params);
+      // TablesDB uses type-specific attribute methods like the legacy SDK
+      let result;
+
+      switch (params.type.toLowerCase()) {
+        case 'string':
+          result = await this.tablesDB.createStringAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.size || 255,
+            params.required ?? false,
+            params.default,
+            params.array ?? false,
+            params.encrypt ?? false
+          );
+          break;
+
+        case 'integer':
+          result = await this.tablesDB.createIntegerAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.min,
+            params.max,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'float':
+        case 'double':
+          result = await this.tablesDB.createFloatAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.min,
+            params.max,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'boolean':
+          result = await this.tablesDB.createBooleanAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'datetime':
+          result = await this.tablesDB.createDatetimeAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'email':
+          result = await this.tablesDB.createEmailAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'enum':
+          result = await this.tablesDB.createEnumAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.elements || [],
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'ip':
+          result = await this.tablesDB.createIpAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'url':
+          result = await this.tablesDB.createUrlAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.required ?? false,
+            params.default,
+            params.array ?? false
+          );
+          break;
+
+        case 'relationship':
+          result = await this.tablesDB.createRelationshipAttribute(
+            params.databaseId,
+            params.tableId,
+            params.key,
+            params.relatedCollection || '',
+            params.type || 'oneToOne',
+            params.twoWay ?? false,
+            params.onDelete || 'restrict'
+          );
+          break;
+
+        default:
+          throw new AdapterError(
+            `Unsupported attribute type: ${params.type}`,
+            'UNSUPPORTED_ATTRIBUTE_TYPE'
+          );
+      }
+
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -263,8 +442,15 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse> {
     try {
-      const fn = this.tablesDB.updateColumn || this.tablesDB.updateAttribute;
-      const result = await fn.call(this.tablesDB, params);
+      // TablesDB uses type-specific update methods or generic updateAttribute with positional params
+      // Try type-specific first, fallback to generic
+      const result = await this.tablesDB.updateStringAttribute(
+        params.databaseId,
+        params.tableId,
+        params.key,
+        params.required ?? false,
+        params.default
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -274,11 +460,14 @@ export class TablesDBAdapter extends BaseAdapter {
       );
     }
   }
-  
+
   async deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse> {
     try {
-      const fn = this.tablesDB.deleteColumn || this.tablesDB.deleteAttribute;
-      const result = await fn.call(this.tablesDB, params);
+      const result = await this.tablesDB.deleteAttribute(
+        params.databaseId,
+        params.tableId,
+        params.key
+      );
       return { data: result };
     } catch (error) {
       throw new AdapterError(

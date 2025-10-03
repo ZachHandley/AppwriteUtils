@@ -3,6 +3,12 @@ import path from "path";
 import type { AppwriteConfig, Attribute, CollectionCreate } from "appwrite-utils";
 import { toCamelCase, toPascalCase } from "../utils/index.js";
 import chalk from "chalk";
+import {
+  extractSimpleRelationships,
+  resolveCollectionName,
+  type SimpleRelationship
+} from "./relationshipExtractor.js";
+import { MessageFormatter } from "./messageFormatter.js";
 
 export interface JsonSchemaProperty {
   type: string | string[];
@@ -36,7 +42,7 @@ export interface JsonSchema {
 export class JsonSchemaGenerator {
   private config: AppwriteConfig;
   private appwriteFolderPath: string;
-  private relationshipMap = new Map<string, any[]>();
+  private relationshipMap = new Map<string, SimpleRelationship[]>();
 
   constructor(config: AppwriteConfig, appwriteFolderPath: string) {
     this.config = config;
@@ -45,31 +51,11 @@ export class JsonSchemaGenerator {
   }
 
   private resolveCollectionName = (idOrName: string): string => {
-    const col = this.config.collections?.find(
-      (c) => c.$id === (idOrName as any) || c.name === idOrName
-    );
-    return col?.name ?? idOrName;
+    return resolveCollectionName(this.config, idOrName);
   };
 
   private extractRelationships(): void {
-    if (!this.config.collections) return;
-
-    this.config.collections.forEach((collection) => {
-      if (!collection.attributes) return;
-
-      collection.attributes.forEach((attr) => {
-        if (attr.type === "relationship" && attr.relatedCollection) {
-          const relationships = this.relationshipMap.get(collection.name) || [];
-          relationships.push({
-            attributeKey: attr.key,
-            relatedCollection: this.resolveCollectionName(attr.relatedCollection),
-            relationType: attr.relationType,
-            isArray: attr.relationType === "oneToMany" || attr.relationType === "manyToMany"
-          });
-          this.relationshipMap.set(collection.name, relationships);
-        }
-      });
-    });
+    this.relationshipMap = extractSimpleRelationships(this.config);
   }
 
   private attributeToJsonSchemaProperty(attribute: Attribute): JsonSchemaProperty {
@@ -254,7 +240,7 @@ export class JsonSchemaGenerator {
 
     if (!this.config.collections) {
       if (verbose) {
-        console.log(chalk.yellow("No collections found in config"));
+        MessageFormatter.warning("No collections found in config", { prefix: "Schema" });
       }
       return;
     }
@@ -266,7 +252,7 @@ export class JsonSchemaGenerator {
     }
 
     if (verbose) {
-      console.log(chalk.blue(`Generating JSON schemas for ${this.config.collections.length} collections...`));
+      MessageFormatter.processing(`Generating JSON schemas for ${this.config.collections.length} collections...`, { prefix: "Schema" });
     }
 
     this.config.collections.forEach((collection) => {
@@ -277,9 +263,9 @@ export class JsonSchemaGenerator {
       if (outputFormat === "json" || outputFormat === "both") {
         const jsonPath = path.join(jsonSchemasPath, `${camelCaseName}.json`);
         fs.writeFileSync(jsonPath, JSON.stringify(schema, null, 2), { encoding: "utf-8" });
-        
+
         if (verbose) {
-          console.log(chalk.green(`✓ JSON schema written to ${jsonPath}`));
+          MessageFormatter.success(`JSON schema written to ${jsonPath}`, { prefix: "Schema" });
         }
       }
 
@@ -288,9 +274,9 @@ export class JsonSchemaGenerator {
         const tsContent = this.generateTypeScriptSchema(schema, collection.name);
         const tsPath = path.join(jsonSchemasPath, `${camelCaseName}.schema.ts`);
         fs.writeFileSync(tsPath, tsContent, { encoding: "utf-8" });
-        
+
         if (verbose) {
-          console.log(chalk.green(`✓ TypeScript schema written to ${tsPath}`));
+          MessageFormatter.success(`TypeScript schema written to ${tsPath}`, { prefix: "Schema" });
         }
       }
     });
@@ -301,7 +287,7 @@ export class JsonSchemaGenerator {
     }
 
     if (verbose) {
-      console.log(chalk.green("✓ JSON schema generation completed"));
+      MessageFormatter.success("JSON schema generation completed", { prefix: "Schema" });
     }
   }
 
@@ -358,7 +344,7 @@ export default jsonSchemas;
     fs.writeFileSync(indexPath, indexContent, { encoding: "utf-8" });
 
     if (verbose) {
-      console.log(chalk.green(`✓ Index file written to ${indexPath}`));
+      MessageFormatter.success(`Index file written to ${indexPath}`, { prefix: "Schema" });
     }
   }
 

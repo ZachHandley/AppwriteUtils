@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/exampleCollection.json",
+  "title": "ExampleCollection",
+  "type": "object",
+  "properties": {
+    "$id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$"
+    },
+    "$createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "$updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "$permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "someInt": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "someDouble": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "$id",
+    "$createdAt",
+    "$updatedAt",
+    "title"
+  ],
+  "additionalProperties": false
+}

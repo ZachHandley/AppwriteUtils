@@ -3,7 +3,9 @@ import type { Attribute } from "appwrite-utils";
 import { createOrUpdateAttributeWithStatusCheck } from "../collections/attributes.js";
 import { fetchAndCacheCollectionByName } from "../collections/methods.js";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
-import chalk from "chalk";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { logger } from "../shared/logging.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export interface QueuedOperation {
   type: "attribute";
@@ -12,128 +14,355 @@ export interface QueuedOperation {
   collection?: Models.Collection;
   dependencies?: string[];
 }
+
+// Global state management
 export const queuedOperations: QueuedOperation[] = [];
 export const nameToIdMapping: Map<string, string> = new Map();
+export const processedCollections: Set<string> = new Set();
+export const processedAttributes: Set<string> = new Set(); // format: "collectionId:attributeKey"
 
 export const enqueueOperation = (operation: QueuedOperation) => {
+  // Avoid duplicate queue entries for same attribute
+  const attributeKey = operation.attribute?.key;
+  const collectionId = operation.collectionId;
+
+  logger.info('Enqueueing operation', {
+    type: operation.type,
+    attributeKey,
+    collectionId,
+    dependencies: operation.dependencies,
+    queueSizeBefore: queuedOperations.length,
+    operation: 'enqueueOperation'
+  });
+
+  if (attributeKey && collectionId) {
+    const duplicateIndex = queuedOperations.findIndex(
+      (op) => op.collectionId === collectionId && op.attribute?.key === attributeKey
+    );
+
+    if (duplicateIndex !== -1) {
+      MessageFormatter.info(`Replacing existing queue entry for attribute: ${attributeKey}`);
+      logger.info('Replacing duplicate queue entry', {
+        attributeKey,
+        collectionId,
+        duplicateIndex,
+        operation: 'enqueueOperation'
+      });
+      queuedOperations[duplicateIndex] = operation;
+      return;
+    }
+  }
+
   queuedOperations.push(operation);
+  logger.debug('Operation enqueued successfully', {
+    attributeKey,
+    collectionId,
+    queueSizeAfter: queuedOperations.length,
+    operation: 'enqueueOperation'
+  });
 };
 
-export const processQueue = async (db: Databases, dbId: string) => {
-  console.log("---------------------------------");
-  console.log(`Starting Queue processing of ${dbId}`);
-  console.log("---------------------------------");
+/**
+ * Clear all caches and processing state - use between operations
+ */
+export const clearProcessingState = () => {
+  const sizeBefore = {
+    collections: processedCollections.size,
+    attributes: processedAttributes.size,
+    nameMapping: nameToIdMapping.size
+  };
+
+  processedCollections.clear();
+  processedAttributes.clear();
+  nameToIdMapping.clear();
+
+  MessageFormatter.success("Cleared processing state caches");
+  logger.info('Processing state cleared', {
+    sizeBefore,
+    operation: 'clearProcessingState'
+  });
+};
+
+/**
+ * Check if a collection has already been fully processed
+ */
+export const isCollectionProcessed = (collectionId: string): boolean => {
+  return processedCollections.has(collectionId);
+};
+
+/**
+ * Mark a collection as fully processed
+ */
+export const markCollectionProcessed = (collectionId: string, collectionName?: string) => {
+  processedCollections.add(collectionId);
+
+  const logData = {
+    collectionId,
+    collectionName,
+    totalProcessedCollections: processedCollections.size,
+    operation: 'markCollectionProcessed'
+  };
+
+  if (collectionName) {
+    MessageFormatter.success(`Marked collection '${collectionName}' (${collectionId}) as processed`);
+  }
+
+  logger.info('Collection marked as processed', logData);
+};
+
+/**
+ * Check if a specific attribute has been processed
+ */
+export const isAttributeProcessed = (collectionId: string, attributeKey: string): boolean => {
+  return processedAttributes.has(`${collectionId}:${attributeKey}`);
+};
+
+/**
+ * Mark a specific attribute as processed
+ */
+export const markAttributeProcessed = (collectionId: string, attributeKey: string) => {
+  const identifier = `${collectionId}:${attributeKey}`;
+  processedAttributes.add(identifier);
+
+  logger.debug('Attribute marked as processed', {
+    collectionId,
+    attributeKey,
+    identifier,
+    totalProcessedAttributes: processedAttributes.size,
+    operation: 'markAttributeProcessed'
+  });
+};
+
+/**
+ * Process only specific attributes in the queue, not entire collections
+ * This prevents triggering full collection re-processing cycles
+ */
+export const processQueue = async (db: Databases | DatabaseAdapter, dbId: string) => {
+  const startTime = Date.now();
+
+  if (queuedOperations.length === 0) {
+    MessageFormatter.info("No queued operations to process");
+    logger.info('Queue processing skipped - no operations', {
+      dbId,
+      operation: 'processQueue'
+    });
+    return;
+  }
+
+  MessageFormatter.section(`Starting surgical queue processing of ${queuedOperations.length} operations for ${dbId}`);
+
+  logger.info('Starting queue processing', {
+    dbId,
+    queueSize: queuedOperations.length,
+    operations: queuedOperations.map(op => ({
+      type: op.type,
+      attributeKey: op.attribute?.key,
+      collectionId: op.collectionId,
+      dependencies: op.dependencies
+    })),
+    operation: 'processQueue'
+  });
+
   let progress = true;
+  let attempts = 0;
+  const maxAttempts = 3; // Prevent infinite loops
 
-  while (progress) {
+  while (progress && attempts < maxAttempts) {
     progress = false;
-    console.log("Processing queued operations:");
-    for (let i = 0; i < queuedOperations.length; i++) {
+    attempts++;
+
+    MessageFormatter.info(`Queue processing attempt ${attempts}/${maxAttempts}`);
+
+    logger.info('Queue processing attempt started', {
+      attempt: attempts,
+      maxAttempts,
+      remainingOperations: queuedOperations.length,
+      dbId,
+      operation: 'processQueue'
+    });
+
+    for (let i = queuedOperations.length - 1; i >= 0; i--) {
       const operation = queuedOperations[i];
-      let collectionFound: Models.Collection | undefined;
 
-      // Handle relationship attribute operations
-      if (operation.attribute?.type === "relationship") {
-        // Attempt to resolve the collection directly if collectionId is specified
-        if (operation.collectionId) {
-          console.log(`\tFetching collection by ID: ${operation.collectionId}`);
-          try {
-            collectionFound = await tryAwaitWithRetry(
-              async () => await db.getCollection(dbId, operation.collectionId!)
-            );
-          } catch (e) {
-            console.log(
-              `\tCollection not found by ID: ${operation.collectionId}`
-            );
+      if (!operation.attribute || !operation.collectionId) {
+        MessageFormatter.warning("Invalid operation, removing from queue");
+        queuedOperations.splice(i, 1);
+        continue;
+      }
+
+      const attributeKey = operation.attribute.key;
+      const collectionId = operation.collectionId;
+
+      // Skip if this specific attribute was already processed
+      if (isAttributeProcessed(collectionId, attributeKey)) {
+        MessageFormatter.debug(`Attribute '${attributeKey}' already processed, removing from queue`);
+        logger.debug('Removing already processed attribute from queue', {
+          attributeKey,
+          collectionId,
+          queueIndex: i,
+          operation: 'processQueue'
+        });
+        queuedOperations.splice(i, 1);
+        continue;
+      }
+
+      let targetCollection: Models.Collection | undefined;
+
+      // Resolve the target collection (where the attribute will be created)
+      try {
+        targetCollection = await tryAwaitWithRetry(
+          async () => {
+            if ('getMetadata' in db && typeof db.getMetadata === 'function') {
+              // DatabaseAdapter
+              return (await (db as DatabaseAdapter).getTable({ databaseId: dbId, tableId: collectionId })).data;
+            } else {
+              // Legacy Databases
+              return await (db as Databases).getCollection(dbId, collectionId);
+            }
           }
-        }
-        // Attempt to resolve related collection if specified and not already found
-        if (!collectionFound && operation.attribute?.relatedCollection) {
-          // First, try treating relatedCollection as an ID
+        );
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        MessageFormatter.error(`Target collection ${collectionId} not found, removing from queue`);
+        logger.error('Target collection not found during queue processing', {
+          collectionId,
+          attributeKey,
+          error: errorMessage,
+          operation: 'processQueue'
+        });
+        queuedOperations.splice(i, 1);
+        continue;
+      }
+
+      // For relationship attributes, ensure the related collection exists
+      let canProcess = true;
+      if (operation.attribute.type === "relationship") {
+        const relatedCollection = operation.attribute.relatedCollection;
+        if (relatedCollection) {
+          // Try to resolve related collection by ID first, then by name
+          let relatedFound = false;
+
           try {
-            const relAttr: any = operation.attribute as any;
-            const byId = await tryAwaitWithRetry(
-              async () => await db.getCollection(dbId, relAttr.relatedCollection as string)
+            await tryAwaitWithRetry(
+              async () => {
+                if ('getMetadata' in db && typeof db.getMetadata === 'function') {
+                  // DatabaseAdapter
+                  return (await (db as DatabaseAdapter).getTable({ databaseId: dbId, tableId: relatedCollection })).data;
+                } else {
+                  // Legacy Databases
+                  return await (db as Databases).getCollection(dbId, relatedCollection);
+                }
+              }
             );
-            // We still need the target collection (operation.collectionId) to create the attribute on,
-            // so only use this branch to warm caches/mappings and continue to dependency checks.
-            // Do not override collectionFound with the related collection.
+            relatedFound = true;
+            nameToIdMapping.set(relatedCollection, relatedCollection); // Cache the ID mapping
           } catch (_) {
-            // Not an ID or not found; fall back to name-based cache
+            // Try by name lookup
+            const cachedId = nameToIdMapping.get(relatedCollection);
+            if (cachedId) {
+              try {
+                await tryAwaitWithRetry(
+                  async () => {
+                    if ('getMetadata' in db && typeof db.getMetadata === 'function') {
+                      // DatabaseAdapter
+                      return (await (db as DatabaseAdapter).getTable({ databaseId: dbId, tableId: cachedId })).data;
+                    } else {
+                      // Legacy Databases
+                      return await (db as Databases).getCollection(dbId, cachedId);
+                    }
+                  }
+                );
+                relatedFound = true;
+              } catch (_) {
+                nameToIdMapping.delete(relatedCollection); // Remove stale cache
+              }
+            }
+
+            if (!relatedFound) {
+              // Final attempt: search by name
+              try {
+                const collections = 'getMetadata' in db && typeof db.getMetadata === 'function'
+                  ? await (db as DatabaseAdapter).listTables({ databaseId: dbId, queries: [Query.equal("name", relatedCollection)] })
+                  : await (db as Databases).listCollections(dbId, [Query.equal("name", relatedCollection)]);
+
+                if (collections.total && collections.total > 0) {
+                  const firstCollection = 'getMetadata' in db && typeof db.getMetadata === 'function'
+                    ? (collections as any).tables?.[0]
+                    : (collections as any).collections?.[0];
+                  nameToIdMapping.set(relatedCollection, firstCollection.$id);
+                  relatedFound = true;
+                }
+              } catch (_) {
+                // Related collection truly doesn't exist yet
+              }
+            }
           }
 
-          // Warm cache by name (used by attribute creation path), but do not use as target collection
-          const relAttr: any = operation.attribute as any;
-          await fetchAndCacheCollectionByName(
-            db,
-            dbId,
-            relAttr.relatedCollection
-          );
-        }
-        // Handle dependencies if collection still not found
-        if (!collectionFound) {
-          for (const dep of operation.dependencies || []) {
-            collectionFound = await fetchAndCacheCollectionByName(
-              db,
-              dbId,
-              dep
+          if (!relatedFound) {
+            MessageFormatter.warning(
+              `Related collection '${relatedCollection}' not ready for attribute '${attributeKey}', keeping in queue`
             );
-            if (collectionFound) break; // Break early if collection is found
+            canProcess = false;
           }
-        }
-      } else if (operation.collectionId) {
-        // Handle non-relationship operations with a specified collectionId
-        console.log(`\tFetching collection by ID: ${operation.collectionId}`);
-        try {
-          collectionFound = await tryAwaitWithRetry(
-            async () => await db.getCollection(dbId, operation.collectionId!)
-          );
-        } catch (e) {
-          console.log(
-            `\tCollection not found by ID: ${operation.collectionId}`
-          );
         }
       }
 
-      // Process the operation if the collection is found
-      if (collectionFound && operation.attribute) {
-        console.log(chalk.cyan(
-          `\t📋 Queue processing relationship attribute: ${operation.attribute.key} for collection: ${collectionFound.name}`
-        ));
+      if (canProcess && targetCollection) {
+        MessageFormatter.progress(
+          `Processing queued ${operation.attribute.type} attribute: '${attributeKey}' for collection: '${targetCollection.name}'`
+        );
+
         const success = await createOrUpdateAttributeWithStatusCheck(
           db,
           dbId,
-          collectionFound,
+          targetCollection,
           operation.attribute
         );
-        
+
         if (success) {
-          console.log(chalk.green(`\t✅ Successfully processed queued attribute: ${operation.attribute.key}`));
+          MessageFormatter.success(`Successfully processed queued attribute: '${attributeKey}'`);
+          logger.info('Queued attribute processed successfully', {
+            attributeKey,
+            collectionId,
+            targetCollectionName: targetCollection.name,
+            operation: 'processQueue'
+          });
+          markAttributeProcessed(collectionId, attributeKey);
           queuedOperations.splice(i, 1);
-          i--; // Adjust index since we're modifying the array
           progress = true;
         } else {
-          console.log(chalk.red(`\t❌ Failed to process queued attribute: ${operation.attribute.key}, removing from queue`));
+          MessageFormatter.error(`Failed to process queued attribute: '${attributeKey}', removing from queue`);
+          logger.error('Failed to process queued attribute', {
+            attributeKey,
+            collectionId,
+            targetCollectionName: targetCollection.name,
+            operation: 'processQueue'
+          });
           queuedOperations.splice(i, 1);
-          i--; // Adjust index since we're modifying the array
         }
-      } else {
-        console.log(chalk.yellow(
-          `\t⚠️ Collection not found for queued operation, removing from queue: ${operation.attribute?.key || 'unknown'}`
-        ));
-        queuedOperations.splice(i, 1);
-        i--; // Adjust index since we're modifying the array
       }
     }
-    console.log(`\tFinished processing queued operations`);
+
+    if (queuedOperations.length === 0) {
+      break;
+    }
+
+    MessageFormatter.info(`Remaining operations after attempt ${attempts}: ${queuedOperations.length}`);
   }
 
   if (queuedOperations.length > 0) {
-    console.error("Unresolved operations remain due to unmet dependencies.");
-    console.log(queuedOperations);
+    MessageFormatter.warning(
+      `${queuedOperations.length} operations remain unresolved after ${maxAttempts} attempts:`
+    );
+    queuedOperations.forEach((op, index) => {
+      MessageFormatter.warning(
+        `  ${index + 1}. ${op.attribute?.type} attribute '${op.attribute?.key}' for collection ${op.collectionId}`
+      );
+    });
+    MessageFormatter.warning("These may have unmet dependencies or require manual intervention");
+  } else {
+    MessageFormatter.success("All queued operations processed successfully");
   }
 
-  console.log("---------------------------------");
-  console.log(`Queue processing complete for ${dbId}`);
-  console.log("---------------------------------");
+  MessageFormatter.section(`Surgical queue processing complete for ${dbId}`);
 };

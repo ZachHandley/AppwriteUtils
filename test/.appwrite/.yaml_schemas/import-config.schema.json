@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appwrite-utils.dev/schemas/import-config.schema.json",
+  "title": "Appwrite Import Configuration",
+  "description": "YAML configuration for importing data into Appwrite collections",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "object",
+      "description": "Data source configuration",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path to the data file relative to .appwrite directory",
+          "examples": [
+            "importData/users.json",
+            "data/products.csv"
+          ]
+        },
+        "basePath": {
+          "type": "string",
+          "description": "JSON path to the data array (e.g., 'RECORDS')",
+          "examples": [
+            "RECORDS",
+            "data",
+            "items"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "json",
+            "csv",
+            "yaml"
+          ],
+          "default": "json",
+          "description": "Source file type"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "description": "Target collection configuration",
+      "properties": {
+        "collection": {
+          "type": "string",
+          "description": "Name of the target collection",
+          "examples": [
+            "Users",
+            "Products",
+            "Orders"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "create",
+            "update"
+          ],
+          "default": "create",
+          "description": "Import operation type"
+        },
+        "primaryKey": {
+          "type": "string",
+          "default": "id",
+          "description": "Primary key field name in source data"
+        },
+        "createUsers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to create user accounts for user collections"
+        }
+      },
+      "required": [
+        "collection"
+      ],
+      "additionalProperties": false
+    },
+    "mapping": {
+      "type": "object",
+      "description": "Field mapping and transformation configuration",
+      "properties": {
+        "attributes": {
+          "type": "array",
+          "description": "Field mapping configuration",
+          "items": {
+            "$ref": "#/$defs/attributeMapping"
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "description": "Relationship mappings between collections",
+          "items": {
+            "$ref": "#/$defs/relationshipMapping"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "attributes"
+      ],
+      "additionalProperties": false
+    },
+    "options": {
+      "type": "object",
+      "description": "Import options and settings",
+      "properties": {
+        "batchSize": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50,
+          "description": "Batch size for processing"
+        },
+        "skipValidation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip data validation during import"
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Perform dry run without actual import"
+        },
+        "continueOnError": {
+          "type": "boolean",
+          "default": true,
+          "description": "Continue processing if individual items fail"
+        },
+        "updateMapping": {
+          "type": "object",
+          "description": "Configuration for update operations",
+          "properties": {
+            "originalIdField": {
+              "type": "string",
+              "description": "Field in source data for matching existing records"
+            },
+            "targetField": {
+              "type": "string",
+              "description": "Field in collection to match against"
+            }
+          },
+          "required": [
+            "originalIdField",
+            "targetField"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "source",
+    "target",
+    "mapping"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "attributeMapping": {
+      "type": "object",
+      "description": "Single field mapping configuration",
+      "properties": {
+        "oldKey": {
+          "type": "string",
+          "description": "Source field name"
+        },
+        "oldKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Multiple source field names (alternative to oldKey)"
+        },
+        "targetKey": {
+          "type": "string",
+          "description": "Target field name in collection"
+        },
+        "valueToSet": {
+          "description": "Static value to set (alternative to oldKey/oldKeys)"
+        },
+        "fileData": {
+          "type": "object",
+          "description": "File handling configuration",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path template (supports {field} placeholders)",
+              "examples": [
+                "{avatar_url}",
+                "assets/profiles/{user_id}.jpg",
+                "files/{filename}"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "description": "File name template (supports {field} placeholders)",
+              "examples": [
+                "{firstName}_{lastName}_avatar",
+                "{productName}_image",
+                "{timestamp}_{filename}"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "converters": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "anyToString",
+              "anyToNumber",
+              "anyToBoolean",
+              "anyToDate",
+              "stringToLowerCase",
+              "stringToUpperCase",
+              "stringTrim",
+              "numberToString",
+              "booleanToString",
+              "dateToString",
+              "dateToTimestamp",
+              "timestampToDate",
+              "arrayToString",
+              "stringToArray",
+              "removeNulls",
+              "removeEmpty"
+            ]
+          },
+          "description": "Converter function names",
+          "default": []
+        },
+        "validation": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rule": {
+                "type": "string",
+                "enum": [
+                  "required",
+                  "email",
+                  "url",
+                  "phone",
+                  "minLength",
+                  "maxLength",
+                  "pattern",
+                  "numeric",
+                  "positive",
+                  "negative",
+                  "integer",
+                  "double",
+                  "boolean",
+                  "date",
+                  "array",
+                  "object"
+                ],
+                "description": "Validation rule name"
+              },
+              "params": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Validation parameters with {field} placeholders"
+              }
+            },
+            "required": [
+              "rule",
+              "params"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Validation rules",
+          "default": []
+        },
+        "afterImport": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "createFileAndUpdateField",
+                  "updateCreatedDocument",
+                  "checkAndUpdateFieldInDocument",
+                  "setFieldFromOtherCollectionDocument",
+                  "setFieldFromOtherCollectionDocuments",
+                  "setTargetFieldFromOtherCollectionDocumentsByMatchingField",
+                  "createOrGetBucket"
+                ],
+                "description": "Post-import action name"
+              },
+              "params": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    }
+                  ]
+                },
+                "description": "Action parameters (supports {field} placeholders)"
+              }
+            },
+            "required": [
+              "action",
+              "params"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Actions to execute after import",
+          "default": []
+        }
+      },
+      "required": [
+        "targetKey"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "oldKey"
+          ]
+        },
+        {
+          "required": [
+            "oldKeys"
+          ]
+        },
+        {
+          "required": [
+            "valueToSet"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "relationshipMapping": {
+      "type": "object",
+      "description": "Relationship mapping between collections",
+      "properties": {
+        "sourceField": {
+          "type": "string",
+          "description": "Source field containing old ID"
+        },
+        "targetField": {
+          "type": "string",
+          "description": "Target field to set new ID"
+        },
+        "targetCollection": {
+          "type": "string",
+          "description": "Collection to find new ID in"
+        },
+        "fieldToSet": {
+          "type": "string",
+          "description": "Field to set (defaults to sourceField)"
+        },
+        "targetFieldToMatch": {
+          "type": "string",
+          "description": "Field to match in target collection (defaults to targetField)"
+        }
+      },
+      "required": [
+        "sourceField",
+        "targetField",
+        "targetCollection"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

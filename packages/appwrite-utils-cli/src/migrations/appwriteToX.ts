@@ -28,6 +28,7 @@ import {
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 import { listBuckets } from "../storage/methods.js";
 import { listFunctions, listFunctionDeployments } from "../functions/methods.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export class AppwriteToX {
   config: AppwriteConfig;
@@ -96,19 +97,62 @@ export class AppwriteToX {
   async appwriteSync(config: AppwriteConfig, databases?: Models.Database[]) {
     const db = getDatabaseFromConfig(config);
     if (!databases) {
-      databases = await fetchAllDatabases(db);
+      try {
+        MessageFormatter.info("Fetching remote databases...", { prefix: "Migration" });
+        databases = await fetchAllDatabases(db);
+        MessageFormatter.info(`Found ${databases.length} remote databases`, { prefix: "Migration" });
+      } catch (error) {
+        MessageFormatter.error(
+          "Failed to fetch remote databases",
+          error instanceof Error ? error : new Error(String(error)),
+          { prefix: "Migration" }
+        );
+        throw new Error(`Database fetch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
     let updatedConfig: AppwriteConfig = { ...config };
+
+    // Initialize databases array if it doesn't exist
+    if (!updatedConfig.databases) {
+      updatedConfig.databases = [];
+    }
+
+    // Sync remote databases to local config - add missing ones
+    MessageFormatter.info(`Syncing ${databases.length} remote databases with local config...`, { prefix: "Migration" });
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    for (const remoteDb of databases) {
+      // Check if this database already exists in the config
+      const existingDbIndex = updatedConfig.databases.findIndex(
+        (localDb) => localDb.$id === remoteDb.$id
+      );
+
+      if (existingDbIndex === -1) {
+        // Database doesn't exist locally, add it
+        MessageFormatter.success(`Adding new database to config: ${remoteDb.name} (${remoteDb.$id})`, { prefix: "Migration" });
+        updatedConfig.databases.push({
+          $id: remoteDb.$id,
+          name: remoteDb.name,
+        });
+        addedCount++;
+      } else {
+        // Database exists, update name if different
+        if (updatedConfig.databases[existingDbIndex].name !== remoteDb.name) {
+          MessageFormatter.info(`Updating database name: ${updatedConfig.databases[existingDbIndex].name} -> ${remoteDb.name}`, { prefix: "Migration" });
+          updatedConfig.databases[existingDbIndex].name = remoteDb.name;
+          updatedCount++;
+        }
+      }
+    }
+
+    MessageFormatter.success(`Database sync summary: ${addedCount} added, ${updatedCount} updated, ${updatedConfig.databases.length} total`, { prefix: "Migration" });
 
     // Fetch all buckets
     const allBuckets = await listBuckets(this.storage);
 
     // Loop through each database
     for (const database of databases) {
-      if (!this.config.useMigrations && database.name.toLowerCase() === "migrations") {
-        continue;
-      }
-
       // Match bucket to database
       const matchedBucket = allBuckets.buckets.find((bucket) =>
         bucket.$id.toLowerCase().includes(database.$id.toLowerCase())
@@ -139,7 +183,7 @@ export class AppwriteToX {
         updatedConfig.collections = [];
       }
       for (const collection of collections) {
-        console.log(`Processing collection: ${collection.name}`);
+        MessageFormatter.processing(`Processing collection: ${collection.name}`, { prefix: "Migration" });
         const existingCollectionIndex = updatedConfig.collections.findIndex(
           (c) => c.name === collection.name
         );
@@ -161,23 +205,30 @@ export class AppwriteToX {
             attribute.type === "relationship" &&
             attribute.relatedCollection
           ) {
-            console.log(
-              `Fetching related collection for ID: ${attribute.relatedCollection}`
+            MessageFormatter.info(
+              `Fetching related collection for ID: ${attribute.relatedCollection}`,
+              { prefix: "Migration" }
             );
             try {
               const relatedCollectionPulled = await db.getCollection(
                 database.$id,
                 attribute.relatedCollection
               );
-              console.log(
-                `Fetched Collection Name: ${relatedCollectionPulled.name}`
+              MessageFormatter.info(
+                `Fetched Collection Name: ${relatedCollectionPulled.name}`,
+                { prefix: "Migration" }
               );
               attribute.relatedCollection = relatedCollectionPulled.name;
-              console.log(
-                `Updated attribute.relatedCollection to: ${attribute.relatedCollection}`
+              MessageFormatter.info(
+                `Updated attribute.relatedCollection to: ${attribute.relatedCollection}`,
+                { prefix: "Migration" }
               );
             } catch (error) {
-              console.log("Error fetching related collection:", error);
+              MessageFormatter.error(
+                "Error fetching related collection",
+                error instanceof Error ? error : new Error(String(error)),
+                { prefix: "Migration" }
+              );
             }
           }
         }
@@ -215,8 +266,9 @@ export class AppwriteToX {
         }
       }
 
-      console.log(
-        `Processed ${collections.length} collections in ${database.name}`
+      MessageFormatter.success(
+        `Processed ${collections.length} collections in ${database.name}`,
+        { prefix: "Migration" }
       );
     }
     // Add unmatched buckets as global buckets
@@ -260,32 +312,46 @@ export class AppwriteToX {
       })
     );
 
-    // Make sure to update the config with all changes
+    // Make sure to update the config with all changes including databases
     updatedConfig.functions = this.updatedConfig.functions;
     this.updatedConfig = updatedConfig;
+    MessageFormatter.success(`Sync completed - ${updatedConfig.databases.length} databases, ${updatedConfig.collections?.length || 0} collections, ${updatedConfig.buckets?.length || 0} buckets, ${updatedConfig.functions?.length || 0} functions`, { prefix: "Migration" });
   }
 
   async toSchemas(databases?: Models.Database[]) {
-    await this.appwriteSync(this.config, databases);
-    const generator = new SchemaGenerator(
-      this.updatedConfig,
-      this.appwriteFolderPath
-    );
+    try {
+      MessageFormatter.info("Starting sync-from-Appwrite process...", { prefix: "Migration" });
+      await this.appwriteSync(this.config, databases);
 
-    // Check if this is a YAML-based project
-    const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
-    const isYamlProject = !!yamlConfigPath;
+      const generator = new SchemaGenerator(
+        this.updatedConfig,
+        this.appwriteFolderPath
+      );
 
-    if (isYamlProject) {
-      console.log("📄 Detected YAML configuration - generating YAML collection definitions");
-      generator.updateYamlCollections();
-      await generator.updateConfig(this.updatedConfig, true);
-    } else {
-      console.log("📝 Generating TypeScript collection definitions");
-      generator.updateTsSchemas();
-      await generator.updateConfig(this.updatedConfig, false);
+      // Check if this is a YAML-based project
+      const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
+      const isYamlProject = !!yamlConfigPath;
+
+      if (isYamlProject) {
+        MessageFormatter.info("Detected YAML configuration - generating YAML collection definitions", { prefix: "Migration" });
+        generator.updateYamlCollections();
+        await generator.updateConfig(this.updatedConfig, true);
+      } else {
+        MessageFormatter.info("Generating TypeScript collection definitions", { prefix: "Migration" });
+        generator.updateTsSchemas();
+        await generator.updateConfig(this.updatedConfig, false);
+      }
+
+      MessageFormatter.info("Generating Zod schemas from synced collections...", { prefix: "Migration" });
+      generator.generateSchemas();
+      MessageFormatter.success("Sync-from-Appwrite process completed successfully", { prefix: "Migration" });
+    } catch (error) {
+      MessageFormatter.error(
+        "Error during sync-from-Appwrite process",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Migration" }
+      );
+      throw error;
     }
-    
-    generator.generateSchemas();
   }
 }

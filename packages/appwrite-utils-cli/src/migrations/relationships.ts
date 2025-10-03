@@ -6,6 +6,7 @@ import type {
   RelationshipAttribute,
 } from "appwrite-utils";
 import { logger } from "../shared/logging.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 /**
  * Finds collections that have defined relationship attributes.
@@ -44,24 +45,27 @@ export async function resolveAndUpdateRelationships(
 
   // Process each collection sequentially
   for (const collection of collections) {
-    console.log(
-      `Processing collection: ${collection.name} (${collection.$id})`
+    MessageFormatter.processing(
+      `Processing collection: ${collection.name} (${collection.$id})`,
+      { prefix: "Migration" }
     );
     const relAttributeMap = collectionsWithRelationships.get(
       collection.name
     ) as RelationshipAttribute[]; // Get the relationship attributes for the collections
 
     if (!relAttributeMap) {
-      console.log(
-        `No mapping found for collection: ${collection.name}, skipping...`
+      MessageFormatter.info(
+        `No mapping found for collection: ${collection.name}, skipping...`,
+        { prefix: "Migration" }
       );
       continue;
     }
 
     await processCollection(dbId, database, collection, relAttributeMap);
   }
-  console.log(
-    `Completed relationship resolution and update for database ID: ${dbId}`
+  MessageFormatter.success(
+    `Completed relationship resolution and update for database ID: ${dbId}`,
+    { prefix: "Migration" }
   );
 }
 
@@ -82,8 +86,9 @@ async function processCollection(
       ]);
 
     const documents = response.documents;
-    console.log(
-      `Fetched ${documents.length} documents from collection: ${collection.name}`
+    MessageFormatter.info(
+      `Fetched ${documents.length} documents from collection: ${collection.name}`,
+      { prefix: "Migration" }
     );
 
     if (documents.length > 0) {
@@ -119,7 +124,10 @@ async function findDocumentsByOriginalId(
     Query.equal("$id", relatedCollectionId),
   ]);
   if (collection.total === 0) {
-    console.log(`Collection ${relatedCollectionId} doesn't exist, skipping...`);
+    MessageFormatter.warning(
+      `Collection ${relatedCollectionId} doesn't exist, skipping...`,
+      { prefix: "Migration" }
+    );
     return undefined;
   }
   const targetAttr = collection.collections[0].attributes.find(
@@ -127,8 +135,9 @@ async function findDocumentsByOriginalId(
     (attr) => attr.key === targetKey
   ) as any;
   if (!targetAttr) {
-    console.log(
-      `Attribute ${targetKey} not found in collection ${relatedCollectionId}, skipping...`
+    MessageFormatter.warning(
+      `Attribute ${targetKey} not found in collection ${relatedCollectionId}, skipping...`,
+      { prefix: "Migration" }
     );
     return undefined;
   }
@@ -160,7 +169,7 @@ async function prepareDocumentUpdates(
   documents: Models.Document[],
   relationships: RelationshipAttribute[]
 ): Promise<{ collectionId: string; documentId: string; updatePayload: any }[]> {
-  console.log(`Preparing updates for collection: ${collectionName}`);
+  MessageFormatter.processing(`Preparing updates for collection: ${collectionName}`, { prefix: "Migration" });
   const updates: {
     collectionId: string;
     documentId: string;
@@ -173,7 +182,7 @@ async function prepareDocumentUpdates(
   const thisCollectionId = thisCollection?.$id;
 
   if (!thisCollectionId) {
-    console.log(`No collection found with name: ${collectionName}`);
+    MessageFormatter.warning(`No collection found with name: ${collectionName}`, { prefix: "Migration" });
     return [];
   }
 
@@ -183,7 +192,7 @@ async function prepareDocumentUpdates(
     for (const rel of relationships) {
       // Skip if not dealing with the parent side of a two-way relationship
       if (rel.twoWay && rel.side !== "parent") {
-        console.log("Skipping non-parent side of two-way relationship...");
+        MessageFormatter.info("Skipping non-parent side of two-way relationship...", { prefix: "Migration" });
         continue;
       }
 
@@ -192,7 +201,7 @@ async function prepareDocumentUpdates(
       const originalIdField = rel.importMapping?.originalIdField;
       const targetField = rel.importMapping?.targetField || originalIdField; // Use originalIdField if targetField is not specified
       if (!originalIdField) {
-        console.log("Missing originalIdField in importMapping, skipping...");
+        MessageFormatter.warning("Missing originalIdField in importMapping, skipping...", { prefix: "Migration" });
         continue;
       }
       const originalId = doc[originalIdField as keyof typeof doc];
@@ -207,8 +216,9 @@ async function prepareDocumentUpdates(
       ).collections[0];
 
       if (!relatedCollection) {
-        console.log(
-          `Related collection ${rel.relatedCollection} not found, skipping...`
+        MessageFormatter.warning(
+          `Related collection ${rel.relatedCollection} not found, skipping...`,
+          { prefix: "Migration" }
         );
         continue;
       }
@@ -240,7 +250,7 @@ async function prepareDocumentUpdates(
         updatePayload[relationshipKey] = isSingleReference
           ? newRefs[0] || existingRefIds[0]
           : allRefs;
-        console.log(`Updating ${relationshipKey} with ${allRefs.length} refs`);
+        MessageFormatter.info(`Updating ${relationshipKey} with ${allRefs.length} refs`, { prefix: "Migration" });
       }
     }
 

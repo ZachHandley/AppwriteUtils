@@ -4,7 +4,6 @@ import {
   Query,
   ID,
   type Models,
-  Client,
   Compression,
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
@@ -17,24 +16,16 @@ import {
   type AfterImportActions,
   type AppwriteConfig,
 } from "appwrite-utils";
+import { getClientFromConfig } from "../utils/getClientFromConfig.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export const getDatabaseFromConfig = (config: AppwriteConfig) => {
-  if (!config.appwriteClient) {
-    config.appwriteClient = new Client()
-      .setEndpoint(config.appwriteEndpoint)
-      .setProject(config.appwriteProject)
-      .setKey(config.appwriteKey);
-  }
+  getClientFromConfig(config); // Sets config.appwriteClient if missing
   return new Databases(config.appwriteClient!);
 };
 
 export const getStorageFromConfig = (config: AppwriteConfig) => {
-  if (!config.appwriteClient) {
-    config.appwriteClient = new Client()
-      .setEndpoint(config.appwriteEndpoint)
-      .setProject(config.appwriteProject)
-      .setKey(config.appwriteKey);
-  }
+  getClientFromConfig(config); // Sets config.appwriteClient if missing
   return new Storage(config.appwriteClient!);
 };
 
@@ -52,7 +43,11 @@ export const afterImportActions = {
         async () => await db.updateDocument(dbId, collId, docId, data)
       );
     } catch (error) {
-      console.error("Error updating document: ", error);
+      MessageFormatter.error(
+        "Error updating document",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
+      );
     }
   },
   checkAndUpdateFieldInDocument: async (
@@ -78,7 +73,11 @@ export const afterImportActions = {
         );
       }
     } catch (error) {
-      console.error("Error updating document: ", error);
+      MessageFormatter.error(
+        "Error updating document",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
+      );
     }
   },
   setFieldFromOtherCollectionDocument: async (
@@ -133,13 +132,15 @@ export const afterImportActions = {
         );
       }
 
-      console.log(
-        `Field ${fieldName} updated successfully in document ${docId}.`
+      MessageFormatter.success(
+        `Field ${fieldName} updated successfully in document ${docId}`,
+        { prefix: "Import" }
       );
     } catch (error) {
-      console.error(
-        "Error setting field from other collection document: ",
-        error
+      MessageFormatter.error(
+        "Error setting field from other collection document",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
       );
     }
   },
@@ -239,14 +240,16 @@ export const afterImportActions = {
             )
         );
 
-        console.log(
-          `Field ${fieldName} updated successfully in document ${docId} with ${documentIds.length} document IDs.`
+        MessageFormatter.success(
+          `Field ${fieldName} updated successfully in document ${docId} with ${documentIds.length} document IDs`,
+          { prefix: "Import" }
         );
       }
     } catch (error) {
-      console.error(
-        "Error setting field from other collection documents: ",
-        error
+      MessageFormatter.error(
+        "Error setting field from other collection documents",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
       );
     }
   },
@@ -339,14 +342,16 @@ export const afterImportActions = {
             )
         );
 
-        console.log(
-          `Field ${fieldName} updated successfully in document ${docId} with values from field ${targetField}.`
+        MessageFormatter.success(
+          `Field ${fieldName} updated successfully in document ${docId} with values from field ${targetField}`,
+          { prefix: "Import" }
         );
       }
     } catch (error) {
-      console.error(
-        "Error setting field from other collection documents: ",
-        error
+      MessageFormatter.error(
+        "Error setting field from other collection documents",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
       );
     }
   },
@@ -410,7 +415,11 @@ export const afterImportActions = {
         );
       }
     } catch (error) {
-      console.error("Error creating or getting bucket: ", error);
+      MessageFormatter.error(
+        "Error creating or getting bucket",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
+      );
     }
   },
   createFileAndUpdateField: async (
@@ -435,16 +444,19 @@ export const afterImportActions = {
       //   `Processing field ${fieldName} in collection ${collId} for document ${docId} in database ${dbId} in bucket ${bucketId} with path ${filePath} and name ${fileName}...`
       // );
       if (filePath.length === 0 || fileName.length === 0) {
-        console.error(
-          `File path or name is empty for field ${fieldName} in collection ${collId}, skipping...`
+        MessageFormatter.error(
+          `File path or name is empty for field ${fieldName} in collection ${collId}, skipping...`,
+          undefined,
+          { prefix: "Import" }
         );
         return;
       }
 
       let isArray = false;
       if (!attribute) {
-        console.log(
-          `Field ${fieldName} not found in collection ${collId}, weird, skipping...`
+        MessageFormatter.warning(
+          `Field ${fieldName} not found in collection ${collId}, weird, skipping...`,
+          { prefix: "Import" }
         );
         return;
       } else if (attribute.array === true) {
@@ -478,8 +490,10 @@ export const afterImportActions = {
           async () => await fetch(filePath)
         );
         if (!response.ok)
-          console.error(
-            `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`
+          MessageFormatter.error(
+            `Failed to fetch ${filePath}: ${response.statusText} for document ${docId} with field ${fieldName}`,
+            undefined,
+            { prefix: "Import" }
           );
 
         // Use arrayBuffer if buffer is not available
@@ -495,7 +509,10 @@ export const afterImportActions = {
           async () => await storage.createFile(bucketId, ID.unique(), inputFile)
         );
 
-        console.log("Created file from URL: ", file.$id);
+        MessageFormatter.success(
+          `Created file from URL: ${file.$id}`,
+          { prefix: "Import" }
+        );
 
         // After uploading, adjust the updateData based on whether the field is an array or not
         if (isArray) {
@@ -516,8 +533,10 @@ export const afterImportActions = {
         const files = fs.readdirSync(filePath);
         const fileFullName = files.find((file) => file.includes(fileName));
         if (!fileFullName) {
-          console.error(
-            `File starting with '${fileName}' not found in '${filePath}'`
+          MessageFormatter.error(
+            `File starting with '${fileName}' not found in '${filePath}'`,
+            undefined,
+            { prefix: "Import" }
           );
           return;
         }
@@ -538,15 +557,23 @@ export const afterImportActions = {
               [fieldName]: updateData,
             })
         );
-        console.log("Created file from path: ", file.$id);
+        MessageFormatter.success(
+          `Created file from path: ${file.$id}`,
+          { prefix: "Import" }
+        );
       }
     } catch (error) {
       logger.error(
         `Error creating file and updating field, params were:\ndbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}\n\nError: ${error}`
       );
-      console.error("Error creating file and updating field: ", error);
-      console.log(
-        `Params were: dbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}`
+      MessageFormatter.error(
+        "Error creating file and updating field",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Import" }
+      );
+      MessageFormatter.info(
+        `Params were: dbId: ${dbId}, collId: ${collId}, docId: ${docId}, fieldName: ${fieldName}, filePath: ${filePath}, fileName: ${fileName}`,
+        { prefix: "Import" }
       );
     }
   },

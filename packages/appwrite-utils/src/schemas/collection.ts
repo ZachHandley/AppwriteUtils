@@ -3,6 +3,40 @@ import { importDefSchemas } from "./importDef.js";
 import { attributeSchema } from "./attribute.js";
 import { indexSchema } from "./index.js";
 
+/**
+ * Collection Schema for Legacy Databases API
+ *
+ * Collections use the traditional Appwrite terminology:
+ * - Container: `collections`
+ * - Items: `documents`
+ * - Fields: `attributes`
+ *
+ * This schema is designed for the legacy Databases API and maintains full backward compatibility.
+ * For new projects or enhanced performance, consider using the Table schema which supports both
+ * legacy and TablesDB terminology.
+ *
+ * @example
+ * ```typescript
+ * import { CollectionCreateSchema } from "appwrite-utils";
+ *
+ * const collection = CollectionCreateSchema.parse({
+ *   name: "Users",
+ *   attributes: [
+ *     { key: "email", type: "string", required: true },
+ *     { key: "name", type: "string", required: true }
+ *   ],
+ *   indexes: [
+ *     { key: "email_idx", type: "unique", attributes: ["email"] }
+ *   ]
+ * });
+ * ```
+ *
+ * Key differences from Tables:
+ * - Collections: Always use 'attributes' (legacy Databases API)
+ * - Tables: Support both 'attributes' and 'columns' (TablesDB API)
+ * - Collections: Standard performance characteristics
+ * - Tables: Enhanced performance with bulk operations
+ */
 export const CollectionSchema = z.object({
   name: z.string().describe("The name of the collection"),
   $id: z

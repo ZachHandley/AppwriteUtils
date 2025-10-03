@@ -21,9 +21,11 @@ import { ID, Users, type Databases } from "node-appwrite";
 import { logger } from "../shared/logging.js";
 import { findOrCreateOperation, updateOperation } from "../shared/migrationHelpers.js";
 import { AuthUserCreateSchema } from "../schemas/authUser.js";
+import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
 import { UsersController } from "../users/methods.js";
 import { finalizeByAttributeMap } from "../utils/helperFunctions.js";
 import { isEmpty } from "es-toolkit/compat";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 // Define a schema for the structure of collection import data using Zod for validation
 export const CollectionImportDataSchema = z.object({
@@ -185,9 +187,9 @@ export class DataLoader {
   loadData(importDef: ImportDef): any[] {
     // Simply join appwriteFolderPath with the importDef.filePath
     const filePath = path.resolve(this.appwriteFolderPath, importDef.filePath);
-    console.log(`Loading data from: ${filePath}`); // Add logging
+    MessageFormatter.info(`Loading data from: ${filePath}`, { prefix: "Data" });
     if (!fs.existsSync(filePath)) {
-      console.error(`File not found: ${filePath}`);
+      MessageFormatter.error(`File not found: ${filePath}`, undefined, { prefix: "Data" });
       return [];
     }
 
@@ -197,7 +199,7 @@ export class DataLoader {
       ? JSON.parse(rawData)[importDef.basePath]
       : JSON.parse(rawData);
 
-    console.log(`Loaded ${parsedData?.length || 0} items from ${filePath}`);
+    MessageFormatter.success(`Loaded ${parsedData?.length || 0} items from ${filePath}`, { prefix: "Data" });
     return parsedData;
   }
 
@@ -313,10 +315,12 @@ export class DataLoader {
         collection.$id = collectionExists.$id;
         this.config.collections[index] = collectionConfig;
         // Find or create an import operation for the collection
+        const adapter = new LegacyAdapter(this.database);
         const collectionImportOperation = await findOrCreateOperation(
-          this.database,
-          collection.$id!,
-          "importData"
+          adapter,
+          dbId,
+          "importData",
+          collection.$id!
         );
         // Store the operation ID in the map
         this.collectionImportOperations.set(
@@ -373,13 +377,14 @@ export class DataLoader {
 
   // Main method to start the data loading process for a given database ID
   async start(dbId: string) {
-    console.log("---------------------------------");
-    console.log(`Starting data setup for database: ${dbId}`);
-    console.log("---------------------------------");
+    MessageFormatter.divider();
+    MessageFormatter.info(`Starting data setup for database: ${dbId}`, { prefix: "Data" });
+    MessageFormatter.divider();
     await this.setupMaps(dbId);
     const allUsers = await this.getAllUsers();
-    console.log(
-      `Fetched ${allUsers.length} users, waiting a few seconds to let the program catch up...`
+    MessageFormatter.info(
+      `Fetched ${allUsers.length} users, waiting a few seconds to let the program catch up...`,
+      { prefix: "Data" }
     );
     await new Promise((resolve) => setTimeout(resolve, 5000));
     // Iterate over the configured databases to find the matching one
@@ -431,17 +436,17 @@ export class DataLoader {
           this.prepareUpdateData(db, collection, updateDef);
         }
       }
-      console.log("Running update references");
+      MessageFormatter.info("Running update references", { prefix: "Data" });
       // this.dealWithMergedUsers();
       this.updateOldReferencesForNew();
-      console.log("Done running update references");
+      MessageFormatter.success("Done running update references", { prefix: "Data" });
     }
     // for (const collection of this.config.collections) {
     //   this.resolveDataItemRelationships(collection);
     // }
-    console.log("---------------------------------");
-    console.log(`Data setup for database: ${dbId} completed`);
-    console.log("---------------------------------");
+    MessageFormatter.divider();
+    MessageFormatter.success(`Data setup for database: ${dbId} completed`, { prefix: "Data" });
+    MessageFormatter.divider();
     if (this.shouldWriteFile) {
       this.writeMapsToJsonFile();
     }
@@ -528,8 +533,9 @@ export class DataLoader {
 
       if (!collectionData || !collectionData.data) continue;
 
-      console.log(
-        `Updating references for collection: ${collectionConfig.name}`
+      MessageFormatter.processing(
+        `Updating references for collection: ${collectionConfig.name}`,
+        { prefix: "Data" }
       );
 
       let needsUpdate = false;
@@ -728,10 +734,10 @@ export class DataLoader {
       const outputFile = path.join(outputDir, fileName);
       fs.writeFile(outputFile, JSON.stringify(data, null, 2), "utf8", (err) => {
         if (err) {
-          console.error(`Error writing data to ${fileName}:`, err);
+          MessageFormatter.error(`Error writing data to ${fileName}`, err instanceof Error ? err : new Error(String(err)), { prefix: "Data" });
           return;
         }
-        console.log(`Data successfully written to ${fileName}`);
+        MessageFormatter.success(`Data successfully written to ${fileName}`, { prefix: "Data" });
       });
     };
 
@@ -951,11 +957,13 @@ export class DataLoader {
       this.oldIdToNewIdPerCollectionMap
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMap)
         .get(this.getCollectionKey(collection.name));
+    const adapter = new LegacyAdapter(this.database);
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
-        this.database,
-        collection.$id!,
-        "importData"
+        adapter,
+        db.$id,
+        "importData",
+        collection.$id!
       );
       // Store the operation ID in the map
       this.collectionImportOperations.set(
@@ -964,10 +972,12 @@ export class DataLoader {
       );
       operationId = collectionImportOperation.$id;
     }
-    await updateOperation(this.database, operationId, {
-      status: "ready",
-      total: rawData.length,
-    });
+    if (operationId) {
+      await updateOperation(adapter, db.$id, operationId, {
+        status: "ready",
+        total: rawData.length,
+      });
+    }
     // Retrieve the current user data and the current collection data from the import map
     const currentUserData = this.importMap.get(this.getCollectionKey("users"));
     const currentData = this.importMap.get(
@@ -1178,11 +1188,13 @@ export class DataLoader {
     let operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
+    const adapter = new LegacyAdapter(this.database);
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
-        this.database,
-        collection.$id!,
-        "importData"
+        adapter,
+        db.$id,
+        "importData",
+        collection.$id!
       );
       // Store the operation ID in the map
       this.collectionImportOperations.set(
@@ -1191,10 +1203,12 @@ export class DataLoader {
       );
       operationId = collectionImportOperation.$id;
     }
-    await updateOperation(this.database, operationId, {
-      status: "ready",
-      total: rawData.length,
-    });
+    if (operationId) {
+      await updateOperation(adapter, db.$id, operationId, {
+        status: "ready",
+        total: rawData.length,
+      });
+    }
     // Initialize a new map for old ID to new ID mappings
     const oldIdToNewIdMapNew = new Map<string, string>();
     // Retrieve or initialize the collection-specific old ID to new ID map

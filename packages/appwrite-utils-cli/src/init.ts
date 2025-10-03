@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 import inquirer from "inquirer";
 import { createEmptyCollection, setupDirsFiles } from "./utils/setupFiles.js";
+import { MessageFormatter } from "./shared/messageFormatter.js";
 
-console.log("Welcome to Appwrite Utils CLI Tool by Zach Handley");
-console.log(
-  "For more information, visit https://github.com/zachhandley/appwrite-utils"
-);
+MessageFormatter.banner("Appwrite Utils CLI Tool by Zach Handley", "For more information, visit https://github.com/zachhandley/appwrite-utils");
 
 async function main() {
   const answers = await inquirer.prompt([
@@ -34,31 +32,31 @@ async function main() {
             input.trim() !== "" || "Collection name cannot be empty.",
         },
       ]);
-      console.log(`Creating collection config file for '${collectionName}'...`);
+      MessageFormatter.progress(`Creating collection config file for '${collectionName}'...`, { prefix: "Init" });
       createEmptyCollection(collectionName);
       break;
     case "Create function (not available)":
-      console.log("This feature is not available yet.");
+      MessageFormatter.warning("This feature is not available yet.", { prefix: "Init" });
       break;
     case "Setup directories and files":
-      console.log("Setting up directories and files...");
+      MessageFormatter.progress("Setting up directories and files...", { prefix: "Init" });
       setupDirsFiles(false); // Assuming false means no example data
       break;
     case "Setup directories and files with example data":
-      console.log("Setting up directories and files with example data...");
+      MessageFormatter.progress("Setting up directories and files with example data...", { prefix: "Init" });
       setupDirsFiles(true); // Assuming false means no example data
       break;
     case "Exit":
-      console.log("Exiting...");
+      MessageFormatter.info("Exiting...", { prefix: "Init" });
       process.exit(0);
       break;
     default:
-      console.log("Invalid option, please try again.");
+      MessageFormatter.warning("Invalid option, please try again.", { prefix: "Init" });
       break;
   }
 }
 
 main().catch((error) => {
-  console.error("An error occurred:", error);
+  MessageFormatter.error("An error occurred", error instanceof Error ? error : new Error(String(error)), { prefix: "Init" });
   process.exit(1);
 });

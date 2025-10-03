@@ -132,3 +132,5 @@ packages/*/**/*.json
 packages/*/**/zlogs
 .claude
 .treesummary
+.code
+test/.appwrite/config.yaml

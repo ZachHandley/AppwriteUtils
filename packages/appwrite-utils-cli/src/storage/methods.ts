@@ -17,6 +17,9 @@ import { retryFailedPromises } from "../utils/retryFailedPromises.js";
 import { InputFile } from "node-appwrite/file";
 import { MessageFormatter, Messages } from "../shared/messageFormatter.js";
 import { ProgressManager } from "../shared/progressManager.js";
+import { recordBackup } from "../shared/backupTracking.js";
+import { AdapterFactory } from "../adapters/AdapterFactory.js";
+import { createBackupZip } from "./backupCompression.js";
 
 export const getStorage = (config: AppwriteConfig) => {
   const client = getClientFromConfig(config);
@@ -274,30 +277,70 @@ export const initOrGetDocumentStorage = async (
   }
 };
 
-export const initOrGetBackupStorage = async (
-  config: AppwriteConfig,
+/**
+ * Initializes or gets the centralized backup bucket
+ * All backups are stored in a single "appwrite-backups" bucket
+ */
+export const initBackupBucket = async (
   storage: Storage
-) => {
+): Promise<Models.Bucket | undefined> => {
+  const BACKUP_BUCKET_ID = "appwrite-backups";
+  const BACKUP_BUCKET_NAME = "Backups";
+
   try {
-    return await tryAwaitWithRetry(
-      async () => await storage.getBucket("backup")
-    );
-  } catch (e) {
-    return await initOrGetDocumentStorage(
-      storage,
-      config,
-      "backups",
-      "Database Backups"
-    );
+    // Try to get existing bucket
+    const bucket = await storage.getBucket(BACKUP_BUCKET_ID);
+    return bucket;
+  } catch (error) {
+    // Bucket doesn't exist, create it
+    try {
+      const bucket = await storage.createBucket(
+        BACKUP_BUCKET_ID,
+        BACKUP_BUCKET_NAME,
+        [
+          Permission.read(Role.any()),
+          Permission.create(Role.users()),
+          Permission.update(Role.users()),
+          Permission.delete(Role.users())
+        ],
+        false, // fileSecurity
+        true,  // enabled
+        undefined, // maximumFileSize
+        undefined, // allowedFileExtensions
+        Compression.Gzip, // compression
+        false,     // encryption
+        false      // antivirus
+      );
+
+      MessageFormatter.success(`Created backup bucket: ${BACKUP_BUCKET_ID}`);
+      return bucket;
+    } catch (createError) {
+      MessageFormatter.error("Failed to create backup bucket",
+        createError instanceof Error ? createError : new Error(String(createError))
+      );
+      return undefined;
+    }
   }
 };
+
+export interface DatabaseBackupResult {
+  backupFileId: string;
+  backupFileName: string;
+  backupSizeBytes: number;
+  databaseId: string;
+  databaseName: string;
+  collectionCount: number;
+  documentCount: number;
+  format: 'json' | 'zip';
+}
 
 export const backupDatabase = async (
   config: AppwriteConfig,
   database: Databases,
   databaseId: string,
-  storage: Storage
-): Promise<void> => {
+  storage: Storage,
+  format: 'json' | 'zip' = 'json'
+): Promise<DatabaseBackupResult> => {
   const startTime = Date.now();
   
   MessageFormatter.banner("Database Backup", `Backing up database: ${databaseId}`);
@@ -317,7 +360,7 @@ export const backupDatabase = async (
     total: 100,
     error: "",
     status: "in_progress",
-  }, undefined, config.useMigrations);
+  });
 
   let progress: ProgressManager | null = null;
   let totalDocuments = 0;
@@ -449,8 +492,7 @@ export const backupDatabase = async (
                   error: "",
                   status: "in_progress",
                 },
-                backupOperation.$id,
-                config.useMigrations
+                backupOperation.$id
               );
             }
 
@@ -484,20 +526,62 @@ export const backupDatabase = async (
     }
 
     MessageFormatter.step(3, 3, "Creating backup file");
-    
-    const bucket = await initOrGetDocumentStorage(storage, config, databaseId);
-    const backupData = JSON.stringify(data);
-    const backupSize = Buffer.byteLength(backupData, 'utf8');
-    const fileName = `${new Date().toISOString()}-${databaseId}.json`;
-    
-    const inputFile = InputFile.fromPlainText(backupData, fileName);
+
+    const bucket = await initBackupBucket(storage);
+    if (!bucket) {
+      throw new Error("Failed to initialize backup bucket");
+    }
+
+    let inputFile: any;
+    let fileName: string;
+    let backupSize: number;
+
+    if (format === 'zip') {
+      // Create compressed backup
+      const zipBuffer = await createBackupZip(data);
+      fileName = `${new Date().toISOString()}-${databaseId}.zip`;
+      backupSize = zipBuffer.length;
+      inputFile = InputFile.fromBuffer(new Uint8Array(zipBuffer), fileName);
+    } else {
+      // Use JSON format (existing logic)
+      const backupData = JSON.stringify(data, null, 2);
+      fileName = `${new Date().toISOString()}-${databaseId}.json`;
+      backupSize = Buffer.byteLength(backupData, 'utf8');
+      inputFile = InputFile.fromPlainText(backupData, fileName);
+    }
+
     const fileCreated = await storage.createFile(
-      bucket!.$id,
+      bucket.$id,
       ulid(),
       inputFile
     );
 
     progress?.stop();
+
+    // Record backup metadata
+    try {
+      const { adapter } = await AdapterFactory.create({
+        appwriteEndpoint: config.appwriteEndpoint,
+        appwriteProject: config.appwriteProject,
+        appwriteKey: config.appwriteKey,
+        sessionCookie: config.sessionCookie
+      });
+
+      await recordBackup(adapter, databaseId, {
+        backupId: fileCreated.$id,
+        databaseId: databaseId,
+        sizeBytes: backupSize,
+        collections: data.collections.length,
+        documents: processedDocuments,
+        format: format,
+        status: 'completed'
+      });
+    } catch (metadataError) {
+      // Don't fail backup if metadata recording fails
+      MessageFormatter.warning(
+        `Failed to record backup metadata: ${metadataError instanceof Error ? metadataError.message : String(metadataError)}`
+      );
+    }
 
     if (backupOperation) {
       await logOperation(
@@ -512,13 +596,12 @@ export const backupDatabase = async (
           error: "",
           status: "completed",
         },
-        backupOperation.$id,
-        config.useMigrations
+        backupOperation.$id
       );
     }
 
     const duration = Date.now() - startTime;
-    
+
     MessageFormatter.operationSummary("Backup", {
       database: databaseId,
       collections: data.collections.length,
@@ -529,11 +612,24 @@ export const backupDatabase = async (
     }, duration);
 
     MessageFormatter.success(Messages.BACKUP_COMPLETED(databaseId, backupSize));
+
+    // Return backup result for tracking
+    const dbData = JSON.parse(data.database);
+    return {
+      backupFileId: fileCreated.$id,
+      backupFileName: fileName,
+      backupSizeBytes: backupSize,
+      databaseId: databaseId,
+      databaseName: dbData.name || databaseId,
+      collectionCount: data.collections.length,
+      documentCount: processedDocuments,
+      format: format
+    };
   } catch (error) {
     progress?.fail(error instanceof Error ? error.message : String(error));
-    
+
     MessageFormatter.error("Backup failed", error instanceof Error ? error : new Error(String(error)));
-    
+
     if (backupOperation) {
       await logOperation(
         database,
@@ -547,11 +643,10 @@ export const backupDatabase = async (
           error: String(error),
           status: "error",
         },
-        backupOperation.$id,
-        config.useMigrations
+        backupOperation.$id
       );
     }
-    
+
     throw error;
   }
 };

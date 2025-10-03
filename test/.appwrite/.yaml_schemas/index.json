@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appwrite-utils.dev/schemas/index.json",
+  "title": "Appwrite Utils Schema Index",
+  "description": "Index of all available schemas for Appwrite Utils YAML configurations",
+  "type": "object",
+  "properties": {
+    "schemas": {
+      "type": "object",
+      "properties": {
+        "collection": {
+          "type": "string",
+          "const": "./collection.schema.json",
+          "description": "Schema for collection definitions (legacy Databases API)"
+        },
+        "table": {
+          "type": "string",
+          "const": "./table.schema.json",
+          "description": "Schema for table definitions (new TablesDB API)"
+        },
+        "appwriteConfig": {
+          "type": "string",
+          "const": "./appwrite-config.schema.json",
+          "description": "Schema for main Appwrite configuration"
+        },
+        "importConfig": {
+          "type": "string",
+          "const": "./import-config.schema.json",
+          "description": "Schema for import configurations"
+        }
+      }
+    }
+  }
+}

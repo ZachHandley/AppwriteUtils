@@ -9,6 +9,36 @@ export interface LoggingConfig {
   console: boolean;
 }
 
+/**
+ * Predefined logging configurations for common debugging scenarios
+ */
+export const LOGGING_PRESETS = {
+  /** Minimal logging - errors only to console */
+  minimal: {
+    enabled: false,
+    level: 'error',
+    console: true
+  },
+  /** Standard logging - info level to file and console */
+  standard: {
+    enabled: true,
+    level: 'info',
+    console: true
+  },
+  /** Debug logging - verbose debug output for troubleshooting */
+  debug: {
+    enabled: true,
+    level: 'debug',
+    console: true
+  },
+  /** Silent - no logging output */
+  silent: {
+    enabled: false,
+    level: 'error',
+    console: false
+  }
+} as const;
+
 const DEFAULT_LOGGING_CONFIG: LoggingConfig = {
   enabled: false,
   level: "info",
@@ -19,6 +49,18 @@ let loggingConfig: LoggingConfig = DEFAULT_LOGGING_CONFIG;
 
 export const configureLogging = (config: Partial<LoggingConfig> = {}) => {
   loggingConfig = { ...DEFAULT_LOGGING_CONFIG, ...config };
+};
+
+/**
+ * Configure logging using a preset
+ */
+export const configureLoggingPreset = (preset: keyof typeof LOGGING_PRESETS, logDirectory?: string) => {
+  const presetConfig = LOGGING_PRESETS[preset];
+  configureLogging({
+    ...presetConfig,
+    ...(logDirectory && { logDirectory })
+  });
+  updateLogger();
 };
 
 const createLogger = () => {
@@ -72,3 +114,36 @@ export let logger = createLogger();
 export const updateLogger = () => {
   logger = createLogger();
 };
+
+/**
+ * Enable debug logging for troubleshooting push process issues
+ * This is a convenience function for quickly enabling comprehensive logging
+ */
+export const enableDebugLogging = (logDirectory?: string) => {
+  configureLogging({
+    enabled: true,
+    level: 'debug',
+    console: true,
+    logDirectory
+  });
+  updateLogger();
+  logger.info('Debug logging enabled for push process troubleshooting', {
+    level: 'debug',
+    console: true,
+    logDirectory: logDirectory || 'zlogs',
+    operation: 'enableDebugLogging'
+  });
+};
+
+/**
+ * Disable logging (reset to default)
+ */
+export const disableLogging = () => {
+  configureLogging(DEFAULT_LOGGING_CONFIG);
+  updateLogger();
+};
+
+/**
+ * Get current logging configuration
+ */
+export const getLoggingConfig = () => ({ ...loggingConfig });

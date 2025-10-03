@@ -1,0 +1,379 @@
+import inquirer from "inquirer";
+import { join } from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { ulid } from "ulidx";
+import chalk from "chalk";
+import { Query } from "node-appwrite";
+import { MessageFormatter } from "../../shared/messageFormatter.js";
+import {
+  createFunctionTemplate,
+  deleteFunction,
+  downloadLatestFunctionDeployment,
+  listFunctions,
+  listSpecifications,
+} from "../../functions/methods.js";
+import { deployLocalFunction } from "../../functions/deployments.js";
+import { addFunctionToYamlConfig, findYamlConfig } from "../../config/yamlConfig.js";
+import { RuntimeSchema, type AppwriteFunction, type Runtime, type Specification } from "appwrite-utils";
+import type { InteractiveCLI } from "../../interactiveCLI.js";
+
+export const functionCommands = {
+  async createFunction(cli: InteractiveCLI): Promise<void> {
+    const { name } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "name",
+        message: "Function name:",
+        validate: (input) => input.length > 0,
+      },
+    ]);
+
+    const { template } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "template",
+        message: "Select a template:",
+        choices: [
+          { name: "TypeScript Node.js", value: "typescript-node" },
+          { name: "TypeScript with Hono Web Framework", value: "hono-typescript" },
+          { name: "Python with UV", value: "uv" },
+          { name: "Count Documents in Collection", value: "count-docs-in-collection" },
+          { name: "None (Empty Function)", value: "none" },
+        ],
+      },
+    ]);
+
+    // Get template defaults
+    const templateDefaults = (cli as any).getTemplateDefaults(template);
+
+    const { runtime } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "runtime",
+        message: "Select runtime:",
+        choices: Object.values(RuntimeSchema.Values),
+        default: templateDefaults.runtime,
+      },
+    ]);
+
+    const specifications = await listSpecifications(
+      (cli as any).controller!.appwriteServer!
+    );
+    const { specification } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "specification",
+        message: "Select specification:",
+        choices: [
+          { name: "None", value: undefined },
+          ...specifications.specifications.map((s: any) => ({
+            name: s.slug,
+            value: s.slug,
+          })),
+        ],
+        default: templateDefaults.specification,
+      },
+    ]);
+
+    const functionConfig: AppwriteFunction = {
+      $id: ulid(),
+      name,
+      runtime,
+      events: [],
+      execute: ["any"],
+      enabled: true,
+      logging: true,
+      entrypoint: templateDefaults.entrypoint,
+      commands: templateDefaults.commands,
+      specification: specification || templateDefaults.specification,
+      scopes: [],
+      timeout: 15,
+      schedule: "",
+      installationId: "",
+      providerRepositoryId: "",
+      providerBranch: "",
+      providerSilentMode: false,
+      providerRootDirectory: "",
+      templateRepository: "",
+      templateOwner: "",
+      templateRootDirectory: "",
+    };
+
+    if (template !== "none") {
+      await createFunctionTemplate(
+        template as "typescript-node" | "uv" | "count-docs-in-collection" | "hono-typescript",
+        name,
+        "./functions"
+      );
+    }
+
+    // Add to in-memory config
+    if (!(cli as any).controller!.config!.functions) {
+      (cli as any).controller!.config!.functions = [];
+    }
+    (cli as any).controller!.config!.functions.push(functionConfig);
+
+    // If using YAML config, also add to YAML file
+    const yamlConfigPath = findYamlConfig((cli as any).currentDir);
+    if (yamlConfigPath) {
+      try {
+        await addFunctionToYamlConfig(yamlConfigPath, functionConfig);
+      } catch (error) {
+        MessageFormatter.warning(
+          `Function created but failed to update YAML config: ${error instanceof Error ? error.message : error}`,
+          { prefix: "Functions" }
+        );
+      }
+    }
+
+    MessageFormatter.success("Function created successfully!", { prefix: "Functions" });
+  },
+
+  async deployFunction(cli: InteractiveCLI): Promise<void> {
+    await (cli as any).initControllerIfNeeded();
+    if (!(cli as any).controller?.config) {
+      MessageFormatter.error("Failed to initialize controller or load config", undefined, { prefix: "Functions" });
+      return;
+    }
+
+    const functions = await (cli as any).selectFunctions(
+      "Select function(s) to deploy:",
+      true,
+      true
+    );
+
+    if (!functions?.length) {
+      MessageFormatter.error("No function selected", undefined, { prefix: "Functions" });
+      return;
+    }
+
+    for (const functionConfig of functions) {
+      if (!functionConfig) {
+        MessageFormatter.error("Invalid function configuration", undefined, { prefix: "Functions" });
+        return;
+      }
+
+      // Ensure functions array exists
+      if (!(cli as any).controller.config.functions) {
+        (cli as any).controller.config.functions = [];
+      }
+
+      const functionNameLower = functionConfig.name
+        .toLowerCase()
+        .replace(/\s+/g, "-");
+
+      // Debug logging
+      MessageFormatter.info(`🔍 Function deployment debug:`, { prefix: "Functions" });
+      MessageFormatter.info(`  Function name: ${functionConfig.name}`, { prefix: "Functions" });
+      MessageFormatter.info(`  Function ID: ${functionConfig.$id}`, { prefix: "Functions" });
+      MessageFormatter.info(`  Config dirPath: ${functionConfig.dirPath || 'undefined'}`, { prefix: "Functions" });
+      if (functionConfig.dirPath) {
+        const expandedPath = functionConfig.dirPath.startsWith('~/')
+          ? functionConfig.dirPath.replace('~', os.homedir())
+          : functionConfig.dirPath;
+        MessageFormatter.info(`  Expanded dirPath: ${expandedPath}`, { prefix: "Functions" });
+      }
+      MessageFormatter.info(`  Appwrite folder: ${(cli as any).controller.getAppwriteFolderPath()}`, { prefix: "Functions" });
+      MessageFormatter.info(`  Current working dir: ${process.cwd()}`, { prefix: "Functions" });
+
+      // Helper function to expand tilde in paths
+      const expandTildePath = (path: string): string => {
+        if (path.startsWith('~/')) {
+          return path.replace('~', os.homedir());
+        }
+        return path;
+      };
+
+      // Check locations in priority order:
+      const priorityLocations = [
+        // 1. Config dirPath if specified (with tilde expansion)
+        functionConfig.dirPath ? expandTildePath(functionConfig.dirPath) : undefined,
+        // 2. Appwrite config folder/functions/name
+        join(
+          (cli as any).controller.getAppwriteFolderPath()!,
+          "functions",
+          functionNameLower
+        ),
+        // 3. Current working directory/functions/name
+        join(process.cwd(), "functions", functionNameLower),
+        // 4. Current working directory/name
+        join(process.cwd(), functionNameLower),
+      ].filter((val): val is string => val !== undefined);
+
+      MessageFormatter.info(`🔍 Priority locations to check:`, { prefix: "Functions" });
+      priorityLocations.forEach((loc, i) => {
+        MessageFormatter.info(`  ${i + 1}. ${loc}`, { prefix: "Functions" });
+      });
+
+      let functionPath: string | null = null;
+
+      // Check each priority location
+      for (const location of priorityLocations) {
+        MessageFormatter.info(`  Checking: ${location} - ${fs.existsSync(location) ? 'EXISTS' : 'NOT FOUND'}`, { prefix: "Functions" });
+        if (fs.existsSync(location)) {
+          MessageFormatter.success(`✅ Found function at: ${location}`, { prefix: "Functions" });
+          functionPath = location;
+          break;
+        }
+      }
+
+      // If not found in priority locations, do a broader search
+      if (!functionPath) {
+        MessageFormatter.info(`Function not found in primary locations, searching subdirectories...`, { prefix: "Functions" });
+
+        // Search in both appwrite config directory and current working directory
+        functionPath = await (cli as any).findFunctionInSubdirectories(
+          [(cli as any).controller.getAppwriteFolderPath()!, process.cwd()],
+          functionNameLower
+        );
+      }
+
+      if (!functionPath) {
+        const { shouldDownload } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "shouldDownload",
+            message:
+              "Function not found locally. Would you like to download the latest deployment?",
+            default: false,
+          },
+        ]);
+
+        if (shouldDownload) {
+          try {
+            MessageFormatter.progress("Downloading latest deployment...", { prefix: "Functions" });
+            const { path: downloadedPath, function: remoteFunction } =
+              await downloadLatestFunctionDeployment(
+                (cli as any).controller.appwriteServer!,
+                functionConfig.$id,
+                join((cli as any).controller.getAppwriteFolderPath()!, "functions")
+              );
+            MessageFormatter.success(`✨ Function downloaded to ${downloadedPath}`, { prefix: "Functions" });
+
+            functionPath = downloadedPath;
+            functionConfig.dirPath = downloadedPath;
+
+            const existingIndex = (cli as any).controller.config.functions.findIndex(
+              (f: any) => f?.$id === remoteFunction.$id
+            );
+
+            if (existingIndex >= 0) {
+              (cli as any).controller.config.functions[existingIndex].dirPath =
+                downloadedPath;
+            }
+
+            await (cli as any).reloadConfigWithSessionPreservation();
+          } catch (error) {
+            MessageFormatter.error("Failed to download function deployment", error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+            return;
+          }
+        } else {
+          MessageFormatter.error(`Function ${functionConfig.name} not found locally. Cannot deploy.`, undefined, { prefix: "Functions" });
+          return;
+        }
+      }
+
+      if (!(cli as any).controller.appwriteServer) {
+        MessageFormatter.error("Appwrite server not initialized", undefined, { prefix: "Functions" });
+        return;
+      }
+
+      try {
+        await deployLocalFunction(
+          (cli as any).controller.appwriteServer,
+          functionConfig.name,
+          {
+            ...functionConfig,
+            dirPath: functionPath,
+          },
+          functionPath
+        );
+        MessageFormatter.success("Function deployed successfully!", { prefix: "Functions" });
+      } catch (error) {
+        MessageFormatter.error("Failed to deploy function", error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+      }
+    }
+  },
+
+  async deleteFunction(cli: InteractiveCLI): Promise<void> {
+    const functions = await (cli as any).selectFunctions(
+      "Select functions to delete:",
+      true,
+      false
+    );
+
+    if (!functions.length) {
+      MessageFormatter.error("No functions selected", undefined, { prefix: "Functions" });
+      return;
+    }
+
+    for (const func of functions) {
+      try {
+        await deleteFunction((cli as any).controller!.appwriteServer!, func.$id);
+        MessageFormatter.success(`✨ Function ${func.name} deleted successfully!`, { prefix: "Functions" });
+      } catch (error) {
+        MessageFormatter.error(`Failed to delete function ${func.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+      }
+    }
+  },
+
+  async updateFunctionSpec(cli: InteractiveCLI): Promise<void> {
+    const remoteFunctions = await listFunctions(
+      (cli as any).controller!.appwriteServer!,
+      [Query.limit(1000)]
+    );
+    const localFunctions = (cli as any).getLocalFunctions();
+
+    const allFunctions = [
+      ...remoteFunctions.functions,
+      ...localFunctions.filter(
+        (f: any) => !remoteFunctions.functions.some((rf: any) => rf.name === f.name)
+      ),
+    ];
+
+    const functionsToUpdate = await inquirer.prompt([
+      {
+        type: "checkbox",
+        name: "functionId",
+        message: "Select functions to update:",
+        choices: allFunctions.map((f: any) => ({
+          name: `${f.name} (${f.$id})${
+            localFunctions.some((lf: any) => lf.name === f.name)
+              ? " (Local)"
+              : " (Remote)"
+          }`,
+          value: f.$id,
+        })),
+        loop: true,
+      },
+    ]);
+
+    const specifications = await listSpecifications(
+      (cli as any).controller!.appwriteServer!
+    );
+    const { specification } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "specification",
+        message: "Select new specification:",
+        choices: specifications.specifications.map((s: any) => ({
+          name: `${s.slug}`,
+          value: s.slug,
+        })),
+      },
+    ]);
+
+    try {
+      for (const functionId of functionsToUpdate.functionId) {
+        await (cli as any).controller!.updateFunctionSpecifications(
+          functionId,
+          specification
+        );
+        MessageFormatter.success(`Successfully updated function specification to ${specification}`, { prefix: "Functions" });
+      }
+    } catch (error) {
+      MessageFormatter.error("Error updating function specification", error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+    }
+  }
+};

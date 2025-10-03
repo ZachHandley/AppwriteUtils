@@ -1,115 +1,8 @@
 import { Databases, Query, type Models } from "node-appwrite";
-import { createOrUpdateAttributeWithStatusCheck } from "../collections/attributes.js";
-import { getMigrationCollectionSchemas } from "../storage/schemas.js";
-import {
-  areCollectionNamesSame,
-  delay,
-  toCamelCase,
-  tryAwaitWithRetry,
-} from "../utils/index.js";
+import { tryAwaitWithRetry } from "../utils/index.js";
 import { type AppwriteConfig } from "appwrite-utils";
 import { ulid } from "ulidx";
-
-export const setupMigrationDatabase = async (config: AppwriteConfig) => {
-  if (!config.useMigrations) {
-    console.log("Migrations database disabled, skipping setup");
-    return;
-  }
-
-  console.log("---------------------------------");
-  console.log("Starting Migrations Setup");
-  console.log("---------------------------------");
-  const database = new Databases(config.appwriteClient);
-  if (!config.appwriteClient) {
-    throw new Error("Appwrite client is not initialized in the config");
-  }
-  let db: Models.Database | undefined;
-  const migrationCollectionsSetup = getMigrationCollectionSchemas();
-
-  try {
-    db = await tryAwaitWithRetry(
-      async () => await database.get("migrations"),
-      undefined,
-      true
-    );
-    console.log("Migrations database found");
-  } catch (e) {
-    db = await tryAwaitWithRetry(
-      async () => await database.create("migrations", "Migrations", true)
-    );
-    console.log("Migrations database created");
-  }
-
-  if (!db) {
-    console.error("Failed to create or retrieve the migrations database");
-    return;
-  }
-
-  for (const [collectionName, { collection, attributes }] of Object.entries(
-    migrationCollectionsSetup
-  )) {
-    const collectionId = toCamelCase(collectionName);
-    let collectionFound: Models.Collection | undefined;
-    try {
-      collectionFound = await tryAwaitWithRetry(
-        async () => await database.getCollection(db.$id, collectionId),
-        undefined,
-        true
-      );
-      console.log(`Collection found: ${collectionId}`);
-    } catch (e) {
-      console.log(`Collection not found: ${collectionId}`);
-      try {
-        collectionFound = await tryAwaitWithRetry(
-          async () =>
-            await database.createCollection(
-              db.$id,
-              collectionId,
-              collectionName,
-              undefined,
-              collection.documentSecurity,
-              collection.enabled
-            ),
-          undefined,
-          true
-        );
-        console.log(`Collection created: ${collectionId}`);
-      } catch (createError) {
-        console.error(
-          `Failed to create collection: ${collectionId}`,
-          createError
-        );
-        continue;
-      }
-    }
-
-    if (!collectionFound) {
-      console.error(`Failed to create or retrieve collection: ${collectionId}`);
-      continue;
-    }
-
-    for (const attribute of attributes) {
-      try {
-        await createOrUpdateAttributeWithStatusCheck(
-          database,
-          db.$id,
-          collectionFound,
-          attribute
-        );
-        await delay(100);
-        console.log(`Attribute created/updated: ${attribute.key}`);
-      } catch (attrError) {
-        console.error(
-          `Failed to create/update attribute: ${attribute.key}`,
-          attrError
-        );
-      }
-    }
-  }
-  console.log("---------------------------------");
-  console.log("Migrations Setup Complete");
-  console.log("---------------------------------");
-};
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export const ensureDatabasesExist = async (config: AppwriteConfig, databasesToEnsure?: Models.Database[]) => {
   if (!config.appwriteClient) {
@@ -119,7 +12,7 @@ export const ensureDatabasesExist = async (config: AppwriteConfig, databasesToEn
   const databasesToCreate = databasesToEnsure || config.databases || [];
 
   if (!databasesToCreate.length) {
-    console.log("No databases to create");
+    MessageFormatter.info("No databases to create");
     return;
   }
 
@@ -127,44 +20,28 @@ export const ensureDatabasesExist = async (config: AppwriteConfig, databasesToEn
     async () => await database.list([Query.limit(500)])
   );
 
-  const migrationsDatabase = existingDatabases.databases.find(
-    (d) => d.name.toLowerCase().trim().replace(" ", "") === "migrations"
-  );
-  if (config.useMigrations && existingDatabases.databases.length !== 0 && migrationsDatabase) {
-    console.log("Creating all databases including migrations");
-    databasesToCreate.push(migrationsDatabase);
-  }
-
   for (const db of databasesToCreate) {
     if (!existingDatabases.databases.some((d) => d.name === db.name)) {
       await tryAwaitWithRetry(
         async () => await database.create(db.$id || ulid(), db.name, true)
       );
-      console.log(`${db.name} database created`);
+      MessageFormatter.success(`${db.name} database created`);
     }
   }
 };
 
 export const wipeOtherDatabases = async (
   database: Databases,
-  databasesToKeep: Models.Database[],
-  useMigrations: boolean = true
+  databasesToKeep: Models.Database[]
 ) => {
-  console.log(`Databases to keep: ${databasesToKeep.map(db => db.name).join(", ")}`);
+  MessageFormatter.info(`Databases to keep: ${databasesToKeep.map(db => db.name).join(", ")}`);
   const allDatabases = await tryAwaitWithRetry(
     async () => await database.list([Query.limit(500)])
   );
-  const migrationsDatabase = allDatabases.databases.find(
-    (d) => d.name.toLowerCase().trim().replace(" ", "") === "migrations"
-  );
-  if (useMigrations && allDatabases.databases.length !== 0 && migrationsDatabase) {
-    console.log("Wiping all databases except migrations");
-    databasesToKeep.push(migrationsDatabase);
-  }
   for (const db of allDatabases.databases) {
     if (!databasesToKeep.some((d) => d.name === db.name)) {
       await tryAwaitWithRetry(async () => await database.delete(db.$id));
-      console.log(`Deleted database: ${db.name}`);
+      MessageFormatter.success(`Deleted database: ${db.name}`);
     }
   }
 };
@@ -194,7 +71,7 @@ export const ensureCollectionsExist = async (
           true
         )
       );
-      console.log(`${collection.name} collection created in ${database.name}`);
+      MessageFormatter.success(`${collection.name} collection created in ${database.name}`);
     }
   }
 };

@@ -4,9 +4,530 @@ import {
   parseAttribute,
   type Attribute,
 } from "appwrite-utils";
-import { nameToIdMapping, enqueueOperation } from "../shared/operationQueue.js";
-import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
+import {
+  nameToIdMapping,
+  enqueueOperation,
+  markAttributeProcessed,
+  isAttributeProcessed
+} from "../shared/operationQueue.js";
+import { delay, tryAwaitWithRetry, calculateExponentialBackoff } from "../utils/helperFunctions.js";
 import chalk from "chalk";
+import type { DatabaseAdapter, CreateAttributeParams, UpdateAttributeParams, DeleteAttributeParams } from "../adapters/DatabaseAdapter.js";
+import { logger } from "../shared/logging.js";
+import { MessageFormatter } from "../shared/messageFormatter.js";
+import { isDatabaseAdapter } from "../utils/typeGuards.js";
+
+// Threshold for treating min/max values as undefined (10 billion)
+const MIN_MAX_THRESHOLD = 10_000_000_000;
+
+// Extreme values that Appwrite may return, which should be treated as undefined
+const EXTREME_MIN_INTEGER = -9223372036854776000;
+const EXTREME_MAX_INTEGER = 9223372036854776000;
+const EXTREME_MIN_FLOAT = -1.7976931348623157e+308;
+const EXTREME_MAX_FLOAT = 1.7976931348623157e+308;
+
+/**
+ * Type guard to check if an attribute has min/max properties
+ */
+const hasMinMaxProperties = (attribute: Attribute): attribute is Attribute & { min?: number; max?: number } => {
+  return attribute.type === 'integer' || attribute.type === 'double' || attribute.type === 'float';
+};
+
+/**
+ * Normalizes min/max values for integer and float attributes
+ * Sets values to undefined if they exceed the threshold or are extreme values from database
+ */
+const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: number } => {
+  if (!hasMinMaxProperties(attribute)) {
+    logger.debug(`Attribute '${attribute.key}' does not have min/max properties`, {
+      type: attribute.type,
+      operation: 'normalizeMinMaxValues'
+    });
+    return {};
+  }
+
+  const { type, min, max } = attribute;
+  let normalizedMin = min;
+  let normalizedMax = max;
+
+  logger.debug(`Normalizing min/max values for attribute '${attribute.key}'`, {
+    type,
+    originalMin: min,
+    originalMax: max,
+    operation: 'normalizeMinMaxValues'
+  });
+
+  // Handle min value
+  if (normalizedMin !== undefined && normalizedMin !== null) {
+    const minValue = Number(normalizedMin);
+    const originalMin = normalizedMin;
+
+    // Check if it exceeds threshold or is an extreme database value
+    if (type === 'integer') {
+      if (Math.abs(minValue) >= MIN_MAX_THRESHOLD || minValue === EXTREME_MIN_INTEGER) {
+        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMin,
+          numericValue: minValue,
+          reason: Math.abs(minValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
+          threshold: MIN_MAX_THRESHOLD,
+          extremeValue: EXTREME_MIN_INTEGER,
+          operation: 'normalizeMinMaxValues'
+        });
+        normalizedMin = undefined;
+      }
+    } else { // float/double
+      if (Math.abs(minValue) >= MIN_MAX_THRESHOLD || minValue === EXTREME_MIN_FLOAT) {
+        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMin,
+          numericValue: minValue,
+          reason: Math.abs(minValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
+          threshold: MIN_MAX_THRESHOLD,
+          extremeValue: EXTREME_MIN_FLOAT,
+          operation: 'normalizeMinMaxValues'
+        });
+        normalizedMin = undefined;
+      }
+    }
+  }
+
+  // Handle max value
+  if (normalizedMax !== undefined && normalizedMax !== null) {
+    const maxValue = Number(normalizedMax);
+    const originalMax = normalizedMax;
+
+    // Check if it exceeds threshold or is an extreme database value
+    if (type === 'integer') {
+      if (Math.abs(maxValue) >= MIN_MAX_THRESHOLD || maxValue === EXTREME_MAX_INTEGER) {
+        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMax,
+          numericValue: maxValue,
+          reason: Math.abs(maxValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
+          threshold: MIN_MAX_THRESHOLD,
+          extremeValue: EXTREME_MAX_INTEGER,
+          operation: 'normalizeMinMaxValues'
+        });
+        normalizedMax = undefined;
+      }
+    } else { // float/double
+      if (Math.abs(maxValue) >= MIN_MAX_THRESHOLD || maxValue === EXTREME_MAX_FLOAT) {
+        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMax,
+          numericValue: maxValue,
+          reason: Math.abs(maxValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
+          threshold: MIN_MAX_THRESHOLD,
+          extremeValue: EXTREME_MAX_FLOAT,
+          operation: 'normalizeMinMaxValues'
+        });
+        normalizedMax = undefined;
+      }
+    }
+  }
+
+  const result = { min: normalizedMin, max: normalizedMax };
+  logger.debug(`Min/max normalization complete for attribute '${attribute.key}'`, {
+    type,
+    result,
+    operation: 'normalizeMinMaxValues'
+  });
+
+  return result;
+};
+
+/**
+ * Normalizes an attribute for comparison by handling extreme database values
+ * This is used when comparing database attributes with config attributes
+ */
+const normalizeAttributeForComparison = (attribute: Attribute): Attribute => {
+  if (!hasMinMaxProperties(attribute)) {
+    return attribute;
+  }
+
+  const { min, max } = normalizeMinMaxValues(attribute);
+  return { ...(attribute as any), min, max };
+};
+
+/**
+ * Helper function to create an attribute using either the adapter or legacy API
+ */
+const createAttributeViaAdapter = async (
+  db: Databases | DatabaseAdapter,
+  dbId: string,
+  collectionId: string,
+  attribute: Attribute
+): Promise<void> => {
+  const startTime = Date.now();
+  const adapterType = isDatabaseAdapter(db) ? 'adapter' : 'legacy';
+
+  logger.info(`Creating attribute '${attribute.key}' via ${adapterType}`, {
+    type: attribute.type,
+    dbId,
+    collectionId,
+    adapterType,
+    operation: 'createAttributeViaAdapter'
+  });
+
+  if (isDatabaseAdapter(db)) {
+    // Use the adapter's unified createAttribute method
+    const params: CreateAttributeParams = {
+      databaseId: dbId,
+      tableId: collectionId,
+      key: attribute.key,
+      type: attribute.type,
+      required: attribute.required || false,
+      array: attribute.array || false,
+      ...((attribute as any).size && { size: (attribute as any).size }),
+      ...((attribute as any).xdefault !== undefined && !attribute.required && { default: (attribute as any).xdefault }),
+      ...((attribute as any).encrypted && { encrypt: (attribute as any).encrypted }),
+      ...((attribute as any).min !== undefined && { min: (attribute as any).min }),
+      ...((attribute as any).max !== undefined && { max: (attribute as any).max }),
+      ...((attribute as any).elements && { elements: (attribute as any).elements }),
+      ...((attribute as any).relatedCollection && { relatedCollection: (attribute as any).relatedCollection }),
+      ...((attribute as any).relationType && { relationType: (attribute as any).relationType }),
+      ...((attribute as any).twoWay !== undefined && { twoWay: (attribute as any).twoWay }),
+      ...((attribute as any).onDelete && { onDelete: (attribute as any).onDelete }),
+      ...((attribute as any).twoWayKey && { twoWayKey: (attribute as any).twoWayKey })
+    };
+
+    logger.debug(`Adapter create parameters for '${attribute.key}'`, {
+      params,
+      operation: 'createAttributeViaAdapter'
+    });
+
+    await db.createAttribute(params);
+
+    const duration = Date.now() - startTime;
+    logger.info(`Successfully created attribute '${attribute.key}' via adapter`, {
+      duration,
+      operation: 'createAttributeViaAdapter'
+    });
+  } else {
+    // Use legacy type-specific methods
+    logger.debug(`Using legacy creation for attribute '${attribute.key}'`, {
+      operation: 'createAttributeViaAdapter'
+    });
+    await createLegacyAttribute(db, dbId, collectionId, attribute);
+
+    const duration = Date.now() - startTime;
+    logger.info(`Successfully created attribute '${attribute.key}' via legacy`, {
+      duration,
+      operation: 'createAttributeViaAdapter'
+    });
+  }
+};
+
+/**
+ * Helper function to update an attribute using either the adapter or legacy API
+ */
+const updateAttributeViaAdapter = async (
+  db: Databases | DatabaseAdapter,
+  dbId: string,
+  collectionId: string,
+  attribute: Attribute
+): Promise<void> => {
+  if (isDatabaseAdapter(db)) {
+    // Use the adapter's unified updateAttribute method
+    const params: UpdateAttributeParams = {
+      databaseId: dbId,
+      tableId: collectionId,
+      key: attribute.key,
+      required: attribute.required || false,
+      ...((attribute as any).xdefault !== undefined && !attribute.required && { default: (attribute as any).xdefault })
+    };
+    await db.updateAttribute(params);
+  } else {
+    // Use legacy type-specific methods
+    await updateLegacyAttribute(db, dbId, collectionId, attribute);
+  }
+};
+
+/**
+ * Legacy attribute creation using type-specific methods
+ */
+const createLegacyAttribute = async (
+  db: Databases,
+  dbId: string,
+  collectionId: string,
+  attribute: Attribute
+): Promise<void> => {
+  const startTime = Date.now();
+  const { min: normalizedMin, max: normalizedMax } = normalizeMinMaxValues(attribute);
+
+  logger.info(`Creating legacy attribute '${attribute.key}'`, {
+    type: attribute.type,
+    dbId,
+    collectionId,
+    normalizedMin,
+    normalizedMax,
+    operation: 'createLegacyAttribute'
+  });
+
+  switch (attribute.type) {
+    case "string":
+      const stringParams = {
+        size: (attribute as any).size || 255,
+        required: attribute.required || false,
+        defaultValue: (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        array: attribute.array || false,
+        encrypted: (attribute as any).encrypted
+      };
+      logger.debug(`Creating string attribute '${attribute.key}'`, {
+        ...stringParams,
+        operation: 'createLegacyAttribute'
+      });
+      await db.createStringAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        stringParams.size,
+        stringParams.required,
+        stringParams.defaultValue,
+        stringParams.array,
+        stringParams.encrypted
+      );
+      break;
+    case "integer":
+      const integerParams = {
+        required: attribute.required || false,
+        min: normalizedMin !== undefined ? parseInt(String(normalizedMin)) : undefined,
+        max: normalizedMax !== undefined ? parseInt(String(normalizedMax)) : undefined,
+        defaultValue: (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        array: attribute.array || false
+      };
+      logger.debug(`Creating integer attribute '${attribute.key}'`, {
+        ...integerParams,
+        operation: 'createLegacyAttribute'
+      });
+      await db.createIntegerAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        integerParams.required,
+        integerParams.min,
+        integerParams.max,
+        integerParams.defaultValue,
+        integerParams.array
+      );
+      break;
+    case "double":
+    case "float":
+      await db.createFloatAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        normalizedMin !== undefined ? Number(normalizedMin) : undefined,
+        normalizedMax !== undefined ? Number(normalizedMax) : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "boolean":
+      await db.createBooleanAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "datetime":
+      await db.createDatetimeAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "email":
+      await db.createEmailAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "ip":
+      await db.createIpAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "url":
+      await db.createUrlAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "enum":
+      await db.createEnumAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        (attribute as any).elements || [],
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.array || false
+      );
+      break;
+    case "relationship":
+      await db.createRelationshipAttribute(
+        dbId,
+        collectionId,
+        (attribute as any).relatedCollection!,
+        (attribute as any).relationType!,
+        (attribute as any).twoWay,
+        attribute.key,
+        (attribute as any).twoWayKey,
+        (attribute as any).onDelete
+      );
+      break;
+    default:
+      const error = new Error(`Unsupported attribute type: ${(attribute as any).type}`);
+      logger.error(`Unsupported attribute type for '${(attribute as any).key}'`, {
+        type: (attribute as any).type,
+        supportedTypes: ['string', 'integer', 'double', 'float', 'boolean', 'datetime', 'email', 'ip', 'url', 'enum', 'relationship'],
+        operation: 'createLegacyAttribute'
+      });
+      throw error;
+  }
+
+  const duration = Date.now() - startTime;
+  logger.info(`Successfully created legacy attribute '${attribute.key}'`, {
+    type: attribute.type,
+    duration,
+    operation: 'createLegacyAttribute'
+  });
+};
+
+/**
+ * Legacy attribute update using type-specific methods
+ */
+const updateLegacyAttribute = async (
+  db: Databases,
+  dbId: string,
+  collectionId: string,
+  attribute: Attribute
+): Promise<void> => {
+  const { min: normalizedMin, max: normalizedMax } = normalizeMinMaxValues(attribute);
+
+  switch (attribute.type) {
+    case "string":
+      await db.updateStringAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        attribute.size
+      );
+      break;
+    case "integer":
+      await db.updateIntegerAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        normalizedMin !== undefined ? parseInt(String(normalizedMin)) : undefined,
+        normalizedMax !== undefined ? parseInt(String(normalizedMax)) : undefined
+      );
+      break;
+    case "double":
+    case "float":
+      await db.updateFloatAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        normalizedMin !== undefined ? Number(normalizedMin) : undefined,
+        normalizedMax !== undefined ? Number(normalizedMax) : undefined,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "boolean":
+      await db.updateBooleanAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "datetime":
+      await db.updateDatetimeAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "email":
+      await db.updateEmailAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "ip":
+      await db.updateIpAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "url":
+      await db.updateUrlAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "enum":
+      await db.updateEnumAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        (attribute as any).elements || [],
+        attribute.required || false,
+        attribute.xdefault !== undefined && attribute.xdefault !== null && !attribute.required ? attribute.xdefault : undefined
+      );
+      break;
+    case "relationship":
+      await db.updateRelationshipAttribute(
+        dbId,
+        collectionId,
+        attribute.key,
+        (attribute as any).onDelete
+      );
+      break;
+    default:
+      throw new Error(`Unsupported attribute type for update: ${(attribute as any).type}`);
+  }
+};
 
 // Interface for attribute with status (fixing the type issue)
 interface AttributeWithStatus {
@@ -25,7 +546,7 @@ interface AttributeWithStatus {
  * Wait for attribute to become available, with retry logic for stuck attributes and exponential backoff
  */
 const waitForAttributeAvailable = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collectionId: string,
   attributeKey: string,
@@ -36,17 +557,26 @@ const waitForAttributeAvailable = async (
   const startTime = Date.now();
   let checkInterval = 2000; // Start with 2 seconds
 
+  logger.info(`Waiting for attribute '${attributeKey}' to become available`, {
+    dbId,
+    collectionId,
+    maxWaitTime,
+    retryCount,
+    maxRetries,
+    operation: 'waitForAttributeAvailable'
+  });
+
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
   if (retryCount > 0) {
-    const exponentialDelay = Math.min(2000 * Math.pow(2, retryCount), 30000);
-    console.log(
+    const exponentialDelay = calculateExponentialBackoff(retryCount);
+    MessageFormatter.info(
       chalk.blue(
         `Waiting for attribute '${attributeKey}' to become available (retry ${retryCount}, backoff: ${exponentialDelay}ms)...`
       )
     );
     await delay(exponentialDelay);
   } else {
-    console.log(
+    MessageFormatter.info(
       chalk.blue(
         `Waiting for attribute '${attributeKey}' to become available...`
       )
@@ -55,71 +585,100 @@ const waitForAttributeAvailable = async (
 
   while (Date.now() - startTime < maxWaitTime) {
     try {
-      const collection = await db.getCollection(dbId, collectionId);
+      const collection = isDatabaseAdapter(db)
+        ? (await db.getTable({ databaseId: dbId, tableId: collectionId })).data
+        : await db.getCollection(dbId, collectionId);
       const attribute = (collection.attributes as any[]).find(
         (attr: AttributeWithStatus) => attr.key === attributeKey
       ) as AttributeWithStatus | undefined;
 
       if (!attribute) {
-        console.log(chalk.red(`Attribute '${attributeKey}' not found`));
+        MessageFormatter.error(`Attribute '${attributeKey}' not found`);
         return false;
       }
 
-      console.log(
+      MessageFormatter.info(
         chalk.gray(`Attribute '${attributeKey}' status: ${attribute.status}`)
       );
 
+      const statusInfo = {
+        attributeKey,
+        status: attribute.status,
+        error: attribute.error,
+        dbId,
+        collectionId,
+        waitTime: Date.now() - startTime,
+        operation: 'waitForAttributeAvailable'
+      };
+
       switch (attribute.status) {
         case "available":
-          console.log(
+          MessageFormatter.info(
             chalk.green(`✅ Attribute '${attributeKey}' is now available`)
           );
+          logger.info(`Attribute '${attributeKey}' became available`, statusInfo);
           return true;
 
         case "failed":
-          console.log(
+          MessageFormatter.info(
             chalk.red(
               `❌ Attribute '${attributeKey}' failed: ${attribute.error}`
             )
           );
+          logger.error(`Attribute '${attributeKey}' failed`, statusInfo);
           return false;
 
         case "stuck":
-          console.log(
+          MessageFormatter.info(
             chalk.yellow(
               `⚠️ Attribute '${attributeKey}' is stuck, will retry...`
             )
           );
+          logger.warn(`Attribute '${attributeKey}' is stuck`, statusInfo);
           return false;
 
         case "processing":
           // Continue waiting
+          logger.debug(`Attribute '${attributeKey}' still processing`, statusInfo);
           break;
 
         case "deleting":
-          console.log(
+          MessageFormatter.info(
             chalk.yellow(`Attribute '${attributeKey}' is being deleted`)
           );
+          logger.warn(`Attribute '${attributeKey}' is being deleted`, statusInfo);
           break;
 
         default:
-          console.log(
+          MessageFormatter.info(
             chalk.yellow(
               `Unknown status '${attribute.status}' for attribute '${attributeKey}'`
             )
           );
+          logger.warn(`Unknown status for attribute '${attributeKey}'`, statusInfo);
           break;
       }
 
       await delay(checkInterval);
     } catch (error) {
-      console.log(chalk.red(`Error checking attribute status: ${error}`));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      MessageFormatter.error(`Error checking attribute status: ${errorMessage}`);
+
+      logger.error('Error checking attribute status', {
+        attributeKey,
+        dbId,
+        collectionId,
+        error: errorMessage,
+        waitTime: Date.now() - startTime,
+        operation: 'waitForAttributeAvailable'
+      });
+
       return false;
     }
   }
 
   // Timeout reached
-  console.log(
+  MessageFormatter.info(
     chalk.yellow(
       `⏰ Timeout waiting for attribute '${attributeKey}' (${maxWaitTime}ms)`
     )
@@ -127,7 +686,7 @@ const waitForAttributeAvailable = async (
 
   // If we have retries left and this isn't the last retry, try recreating
   if (retryCount < maxRetries) {
-    console.log(
+    MessageFormatter.info(
       chalk.yellow(
         `🔄 Retrying attribute creation (attempt ${
           retryCount + 1
@@ -144,13 +703,13 @@ const waitForAttributeAvailable = async (
  * Wait for all attributes in a collection to become available
  */
 const waitForAllAttributesAvailable = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collectionId: string,
   attributeKeys: string[],
   maxWaitTime: number = 60000
 ): Promise<string[]> => {
-  console.log(
+  MessageFormatter.info(
     chalk.blue(
       `Waiting for ${attributeKeys.length} attributes to become available...`
     )
@@ -178,40 +737,53 @@ const waitForAllAttributesAvailable = async (
  * Delete collection and recreate with retry logic
  */
 const deleteAndRecreateCollection = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Models.Collection,
   retryCount: number
 ): Promise<Models.Collection | null> => {
   try {
-    console.log(
+    MessageFormatter.info(
       chalk.yellow(
         `🗑️ Deleting collection '${collection.name}' for retry ${retryCount}`
       )
     );
 
     // Delete the collection
-    await db.deleteCollection(dbId, collection.$id);
-    console.log(chalk.yellow(`Deleted collection '${collection.name}'`));
+    if (isDatabaseAdapter(db)) {
+      await db.deleteTable({ databaseId: dbId, tableId: collection.$id });
+    } else {
+      await db.deleteCollection(dbId, collection.$id);
+    }
+    MessageFormatter.warning(`Deleted collection '${collection.name}'`);
 
     // Wait a bit before recreating
     await delay(2000);
 
     // Recreate the collection
-    console.log(chalk.blue(`🔄 Recreating collection '${collection.name}'`));
-    const newCollection = await db.createCollection(
-      dbId,
-      collection.$id,
-      collection.name,
-      collection.$permissions,
-      collection.documentSecurity,
-      collection.enabled
-    );
+    MessageFormatter.info(`🔄 Recreating collection '${collection.name}'`);
+    const newCollection = isDatabaseAdapter(db)
+      ? (await db.createTable({
+          databaseId: dbId,
+          id: collection.$id,
+          name: collection.name,
+          permissions: collection.$permissions,
+          documentSecurity: collection.documentSecurity,
+          enabled: collection.enabled
+        })).data
+      : await db.createCollection(
+          dbId,
+          collection.$id,
+          collection.name,
+          collection.$permissions,
+          collection.documentSecurity,
+          collection.enabled
+        );
 
-    console.log(chalk.green(`✅ Recreated collection '${collection.name}'`));
+    MessageFormatter.success(`✅ Recreated collection '${collection.name}'`);
     return newCollection;
   } catch (error) {
-    console.log(
+    MessageFormatter.info(
       chalk.red(
         `Failed to delete/recreate collection '${collection.name}': ${error}`
       )
@@ -224,6 +796,10 @@ const attributesSame = (
   databaseAttribute: Attribute,
   configAttribute: Attribute
 ): boolean => {
+  // Normalize both attributes for comparison (handle extreme database values)
+  const normalizedDbAttr = normalizeAttributeForComparison(databaseAttribute);
+  const normalizedConfigAttr = normalizeAttributeForComparison(configAttribute);
+
   const attributesToCheck = [
     "key",
     "type",
@@ -244,13 +820,13 @@ const attributesSame = (
 
   return attributesToCheck.every((attr) => {
     // Check if both objects have the attribute
-    const dbHasAttr = attr in databaseAttribute;
-    const configHasAttr = attr in configAttribute;
+    const dbHasAttr = attr in normalizedDbAttr;
+    const configHasAttr = attr in normalizedConfigAttr;
 
     // If both have the attribute, compare values
     if (dbHasAttr && configHasAttr) {
-      const dbValue = databaseAttribute[attr as keyof typeof databaseAttribute];
-      const configValue = configAttribute[attr as keyof typeof configAttribute];
+      const dbValue = normalizedDbAttr[attr as keyof typeof normalizedDbAttr];
+      const configValue = normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
 
       // Consider undefined and null as equivalent
       if (
@@ -260,6 +836,17 @@ const attributesSame = (
         return true;
       }
 
+      // Normalize booleans: treat undefined and false as equivalent
+      if (typeof dbValue === "boolean" || typeof configValue === "boolean") {
+        return Boolean(dbValue) === Boolean(configValue);
+      }
+      // For numeric comparisons, compare numbers if both are numeric-like
+      if (
+        (typeof dbValue === "number" || (typeof dbValue === "string" && dbValue !== "" && !isNaN(Number(dbValue)))) &&
+        (typeof configValue === "number" || (typeof configValue === "string" && configValue !== "" && !isNaN(Number(configValue))))
+      ) {
+        return Number(dbValue) === Number(configValue);
+      }
       return dbValue === configValue;
     }
 
@@ -270,12 +857,20 @@ const attributesSame = (
 
     // If one has the attribute and the other doesn't, check if it's undefined or null
     if (dbHasAttr && !configHasAttr) {
-      const dbValue = databaseAttribute[attr as keyof typeof databaseAttribute];
+      const dbValue = normalizedDbAttr[attr as keyof typeof normalizedDbAttr];
+      // Consider default-false booleans as equal to missing in config
+      if (typeof dbValue === "boolean") {
+        return dbValue === false; // missing in config equals false in db
+      }
       return dbValue === undefined || dbValue === null;
     }
 
     if (!dbHasAttr && configHasAttr) {
-      const configValue = configAttribute[attr as keyof typeof configAttribute];
+      const configValue = normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
+      // Consider default-false booleans as equal to missing in db
+      if (typeof configValue === "boolean") {
+        return configValue === false; // missing in db equals false in config
+      }
       return configValue === undefined || configValue === null;
     }
 
@@ -288,14 +883,14 @@ const attributesSame = (
  * Enhanced attribute creation with proper status monitoring and retry logic
  */
 export const createOrUpdateAttributeWithStatusCheck = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Models.Collection,
   attribute: Attribute,
   retryCount: number = 0,
   maxRetries: number = 5
 ): Promise<boolean> => {
-  console.log(
+  MessageFormatter.info(
     chalk.blue(
       `Creating/updating attribute '${attribute.key}' (attempt ${
         retryCount + 1
@@ -310,7 +905,7 @@ export const createOrUpdateAttributeWithStatusCheck = async (
     // If the attribute was queued (relationship dependency unresolved),
     // skip status polling and retry logic — the queue will handle it later.
     if (result === "queued") {
-      console.log(
+      MessageFormatter.info(
         chalk.yellow(
           `⏭️  Deferred relationship attribute '${attribute.key}' — queued for later once dependencies are available`
         )
@@ -335,7 +930,7 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
     // If not successful and we have retries left, delete specific attribute and try again
     if (retryCount < maxRetries) {
-      console.log(
+      MessageFormatter.info(
         chalk.yellow(
           `Attribute '${attribute.key}' failed/stuck, deleting and retrying...`
         )
@@ -343,8 +938,12 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
       // Try to delete the specific stuck attribute instead of the entire collection
       try {
-        await db.deleteAttribute(dbId, collection.$id, attribute.key);
-        console.log(
+        if (isDatabaseAdapter(db)) {
+          await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attribute.key });
+        } else {
+          await db.deleteAttribute(dbId, collection.$id, attribute.key);
+        }
+        MessageFormatter.info(
           chalk.yellow(
             `Deleted stuck attribute '${attribute.key}', will retry creation`
           )
@@ -354,7 +953,9 @@ export const createOrUpdateAttributeWithStatusCheck = async (
         await delay(3000);
 
         // Get fresh collection data
-        const freshCollection = await db.getCollection(dbId, collection.$id);
+        const freshCollection = isDatabaseAdapter(db)
+          ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data
+          : await db.getCollection(dbId, collection.$id);
 
         // Retry with the same collection (attribute should be gone now)
         return await createOrUpdateAttributeWithStatusCheck(
@@ -366,7 +967,7 @@ export const createOrUpdateAttributeWithStatusCheck = async (
           maxRetries
         );
       } catch (deleteError) {
-        console.log(
+        MessageFormatter.info(
           chalk.red(
             `Failed to delete stuck attribute '${attribute.key}': ${deleteError}`
           )
@@ -374,14 +975,16 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
         // If attribute deletion fails, only then try collection recreation as last resort
         if (retryCount >= maxRetries - 1) {
-          console.log(
+          MessageFormatter.info(
             chalk.yellow(
               `Last resort: Recreating collection for attribute '${attribute.key}'`
             )
           );
 
           // Get fresh collection data
-          const freshCollection = await db.getCollection(dbId, collection.$id);
+          const freshCollection = isDatabaseAdapter(db)
+          ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data
+          : await db.getCollection(dbId, collection.$id);
 
           // Delete and recreate collection
           const newCollection = await deleteAndRecreateCollection(
@@ -416,7 +1019,7 @@ export const createOrUpdateAttributeWithStatusCheck = async (
       }
     }
 
-    console.log(
+    MessageFormatter.info(
       chalk.red(
         `❌ Failed to create attribute '${attribute.key}' after ${
           maxRetries + 1
@@ -425,12 +1028,12 @@ export const createOrUpdateAttributeWithStatusCheck = async (
     );
     return false;
   } catch (error) {
-    console.log(
+    MessageFormatter.info(
       chalk.red(`Error creating attribute '${attribute.key}': ${error}`)
     );
 
     if (retryCount < maxRetries) {
-      console.log(
+      MessageFormatter.info(
         chalk.yellow(`Retrying attribute '${attribute.key}' due to error...`)
       );
 
@@ -452,7 +1055,7 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 };
 
 export const createOrUpdateAttribute = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Models.Collection,
   attribute: Attribute
@@ -466,7 +1069,7 @@ export const createOrUpdateAttribute = async (
       (attr: any) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
-    // console.log(`Found attribute: ${JSON.stringify(foundAttribute)}`);
+
   } catch (error) {
     foundAttribute = undefined;
   }
@@ -483,7 +1086,7 @@ export const createOrUpdateAttribute = async (
     !attributesSame(foundAttribute, attribute) &&
     updateEnabled
   ) {
-    // console.log(
+    // MessageFormatter.info(
     //   `Updating attribute with same key ${attribute.key} but different values`
     // );
     finalAttribute = {
@@ -496,14 +1099,18 @@ export const createOrUpdateAttribute = async (
     foundAttribute &&
     !attributesSame(foundAttribute, attribute)
   ) {
-    await db.deleteAttribute(dbId, collection.$id, attribute.key);
-    console.log(
+    if (isDatabaseAdapter(db)) {
+      await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attribute.key });
+    } else {
+      await db.deleteAttribute(dbId, collection.$id, attribute.key);
+    }
+    MessageFormatter.info(
       `Deleted attribute: ${attribute.key} to recreate it because they diff (update disabled temporarily)`
     );
     return "processed";
   }
 
-  // console.log(`${action}-ing attribute: ${finalAttribute.key}`);
+
 
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
@@ -514,7 +1121,9 @@ export const createOrUpdateAttribute = async (
   ) {
     // First try treating relatedCollection as an ID directly
     try {
-      const byIdCollection = await db.getCollection(dbId, finalAttribute.relatedCollection);
+      const byIdCollection = isDatabaseAdapter(db)
+        ? (await db.getTable({ databaseId: dbId, tableId: finalAttribute.relatedCollection })).data
+        : await db.getCollection(dbId, finalAttribute.relatedCollection);
       collectionFoundViaRelatedCollection = byIdCollection;
       relatedCollectionId = byIdCollection.$id;
       // Cache by name for subsequent lookups
@@ -528,32 +1137,35 @@ export const createOrUpdateAttribute = async (
         finalAttribute.relatedCollection
       );
       try {
-        collectionFoundViaRelatedCollection = await db.getCollection(
-          dbId,
-          relatedCollectionId!
-        );
+        collectionFoundViaRelatedCollection = isDatabaseAdapter(db)
+          ? (await db.getTable({ databaseId: dbId, tableId: relatedCollectionId! })).data
+          : await db.getCollection(dbId, relatedCollectionId!);
       } catch (e) {
-        // console.log(
+        // MessageFormatter.info(
         //   `Collection not found: ${finalAttribute.relatedCollection} when nameToIdMapping was set`
         // );
         collectionFoundViaRelatedCollection = undefined;
       }
     } else if (!collectionFoundViaRelatedCollection) {
-      const collectionsPulled = await db.listCollections(dbId, [
-        Query.equal("name", finalAttribute.relatedCollection),
-      ]);
-      if (collectionsPulled.total > 0) {
-        collectionFoundViaRelatedCollection = collectionsPulled.collections[0];
-        relatedCollectionId = collectionFoundViaRelatedCollection.$id;
-        nameToIdMapping.set(
-          finalAttribute.relatedCollection,
-          relatedCollectionId
-        );
+      const collectionsPulled = isDatabaseAdapter(db)
+        ? await db.listTables({ databaseId: dbId, queries: [Query.equal("name", finalAttribute.relatedCollection)] })
+        : await db.listCollections(dbId, [Query.equal("name", finalAttribute.relatedCollection)]);
+      if (collectionsPulled.total && collectionsPulled.total > 0) {
+        collectionFoundViaRelatedCollection = isDatabaseAdapter(db)
+          ? (collectionsPulled as any).tables?.[0]
+          : (collectionsPulled as any).collections?.[0];
+        relatedCollectionId = collectionFoundViaRelatedCollection?.$id;
+        if (relatedCollectionId) {
+          nameToIdMapping.set(
+            finalAttribute.relatedCollection,
+            relatedCollectionId
+          );
+        }
       }
     }
     // ONLY queue relationship attributes that have actual unresolved dependencies
     if (!(relatedCollectionId && collectionFoundViaRelatedCollection)) {
-      console.log(
+      MessageFormatter.info(
         chalk.yellow(
           `⏳ Queueing relationship attribute '${finalAttribute.key}' - related collection '${finalAttribute.relatedCollection}' not found yet`
         )
@@ -569,372 +1181,17 @@ export const createOrUpdateAttribute = async (
     }
   }
   finalAttribute = parseAttribute(finalAttribute);
-  // console.log(`Final Attribute: ${JSON.stringify(finalAttribute)}`);
-  switch (finalAttribute.type) {
-    case "string":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createStringAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.size,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false,
-              finalAttribute.encrypted
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateStringAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.size
-            )
-        );
-      }
-      break;
-    case "integer":
-      if (action === "create") {
-        if (
-          finalAttribute.min &&
-          BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
-        ) {
-          finalAttribute.min = undefined;
-        }
-        if (
-          finalAttribute.max &&
-          BigInt(finalAttribute.max) === BigInt(9223372036854776000)
-        ) {
-          finalAttribute.max = undefined;
-        }
-        const minValue =
-          finalAttribute.min !== undefined && finalAttribute.min !== null
-            ? parseInt(finalAttribute.min)
-            : -9007199254740991;
-        const maxValue =
-          finalAttribute.max !== undefined && finalAttribute.max !== null
-            ? parseInt(finalAttribute.max)
-            : 9007199254740991;
-        console.log(
-          `DEBUG: Creating integer attribute '${
-            finalAttribute.key
-          }' with min=${minValue}, max=${maxValue}, minType=${typeof minValue}, maxType=${typeof maxValue}`
-        );
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createIntegerAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              minValue,
-              maxValue,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        if (
-          finalAttribute.min &&
-          BigInt(finalAttribute.min) === BigInt(-9223372036854776000)
-        ) {
-          finalAttribute.min = undefined;
-        }
-        if (
-          finalAttribute.max &&
-          BigInt(finalAttribute.max) === BigInt(9223372036854776000)
-        ) {
-          finalAttribute.max = undefined;
-        }
-        const minValue =
-          finalAttribute.min !== undefined && finalAttribute.min !== null
-            ? parseInt(finalAttribute.min)
-            : 9007199254740991;
-        const maxValue =
-          finalAttribute.max !== undefined && finalAttribute.max !== null
-            ? parseInt(finalAttribute.max)
-            : 9007199254740991;
-        console.log(
-          `DEBUG: Updating integer attribute '${
-            finalAttribute.key
-          }' with min=${minValue}, max=${maxValue}, minType=${typeof minValue}, maxType=${typeof maxValue}`
-        );
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateIntegerAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              minValue,
-              maxValue
-            )
-        );
-      }
-      break;
-    case "double":
-    case "float": // Backward compatibility
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createFloatAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.min,
-              finalAttribute.max,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateFloatAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.min,
-              finalAttribute.max,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "boolean":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createBooleanAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateBooleanAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "datetime":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createDatetimeAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateDatetimeAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "email":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createEmailAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateEmailAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "ip":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createIpAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateIpAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "url":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createUrlAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateUrlAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "enum":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createEnumAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.elements,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null,
-              finalAttribute.array || false
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateEnumAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.elements,
-              finalAttribute.required || false,
-              finalAttribute.xdefault !== undefined && !finalAttribute.required
-                ? finalAttribute.xdefault
-                : null
-            )
-        );
-      }
-      break;
-    case "relationship":
-      if (action === "create") {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.createRelationshipAttribute(
-              dbId,
-              collection.$id,
-              relatedCollectionId!,
-              finalAttribute.relationType,
-              finalAttribute.twoWay,
-              finalAttribute.key,
-              finalAttribute.twoWayKey,
-              finalAttribute.onDelete
-            )
-        );
-      } else {
-        await tryAwaitWithRetry(
-          async () =>
-            await db.updateRelationshipAttribute(
-              dbId,
-              collection.$id,
-              finalAttribute.key,
-              finalAttribute.onDelete
-            )
-        );
-      }
-      break;
-    default:
-      console.error("Invalid attribute type");
-      break;
+
+
+  // Use adapter-based attribute creation/update
+  if (action === "create") {
+    await tryAwaitWithRetry(
+      async () => await createAttributeViaAdapter(db, dbId, collection.$id, finalAttribute)
+    );
+  } else {
+    await tryAwaitWithRetry(
+      async () => await updateAttributeViaAdapter(db, dbId, collection.$id, finalAttribute)
+    );
   }
   return "processed";
 };
@@ -943,12 +1200,12 @@ export const createOrUpdateAttribute = async (
  * Enhanced collection attribute creation with proper status monitoring
  */
 export const createUpdateCollectionAttributesWithStatusCheck = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Models.Collection,
   attributes: Attribute[]
 ): Promise<boolean> => {
-  console.log(
+  MessageFormatter.info(
     chalk.green(
       `Creating/Updating attributes for collection: ${collection.name} with status monitoring`
     )
@@ -968,7 +1225,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   // Handle attribute removal first
   if (attributesToRemove.length > 0) {
     if (indexesToRemove.length > 0) {
-      console.log(
+      MessageFormatter.info(
         chalk.red(
           `Removing indexes as they rely on an attribute that is being removed: ${indexesToRemove
             .map((index) => index.key)
@@ -977,26 +1234,38 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
       );
       for (const index of indexesToRemove) {
         await tryAwaitWithRetry(
-          async () => await db.deleteIndex(dbId, collection.$id, index.key)
+          async () => {
+            if (isDatabaseAdapter(db)) {
+              await db.deleteIndex({ databaseId: dbId, tableId: collection.$id, key: index.key });
+            } else {
+              await db.deleteIndex(dbId, collection.$id, index.key);
+            }
+          }
         );
         await delay(500); // Longer delay for deletions
       }
     }
     for (const attr of attributesToRemove) {
-      console.log(
+      MessageFormatter.info(
         chalk.red(
           `Removing attribute: ${attr.key} as it is no longer in the collection`
         )
       );
       await tryAwaitWithRetry(
-        async () => await db.deleteAttribute(dbId, collection.$id, attr.key)
+        async () => {
+          if (isDatabaseAdapter(db)) {
+            await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attr.key });
+          } else {
+            await db.deleteAttribute(dbId, collection.$id, attr.key);
+          }
+        }
       );
       await delay(500); // Longer delay for deletions
     }
   }
 
   // First, get fresh collection data and determine which attributes actually need processing
-  console.log(
+  MessageFormatter.info(
     chalk.blue(
       `Analyzing ${attributes.length} attributes to determine which need processing...`
     )
@@ -1004,9 +1273,11 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
   let currentCollection = collection;
   try {
-    currentCollection = await db.getCollection(dbId, collection.$id);
+    currentCollection = isDatabaseAdapter(db)
+      ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data
+      : await db.getCollection(dbId, collection.$id);
   } catch (error) {
-    console.log(
+    MessageFormatter.info(
       chalk.yellow(`Warning: Could not refresh collection data: ${error}`)
     );
   }
@@ -1021,24 +1292,32 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
       existingAttributesMap.set(attr.key, attr)
     );
   } catch (error) {
-    console.log(
+    MessageFormatter.info(
       chalk.yellow(`Warning: Could not parse existing attributes: ${error}`)
     );
   }
 
-  // Filter to only attributes that need processing (new or changed)
+  // Filter to only attributes that need processing (new, changed, or not yet processed)
   const attributesToProcess = attributes.filter((attribute) => {
+    // Skip if already processed in this session
+    if (isAttributeProcessed(currentCollection.$id, attribute.key)) {
+      MessageFormatter.info(
+        chalk.gray(`⏭️ Attribute '${attribute.key}' already processed in this session (skipping)`)
+      );
+      return false;
+    }
+
     const existing = existingAttributesMap.get(attribute.key);
     if (!existing) {
-      console.log(chalk.blue(`➕ New attribute: ${attribute.key}`));
+      MessageFormatter.info(`➕ New attribute: ${attribute.key}`);
       return true;
     }
 
     const needsUpdate = !attributesSame(existing, attribute);
     if (needsUpdate) {
-      console.log(chalk.blue(`🔄 Changed attribute: ${attribute.key}`));
+      MessageFormatter.info(`🔄 Changed attribute: ${attribute.key}`);
     } else {
-      console.log(
+      MessageFormatter.info(
         chalk.gray(`✅ Unchanged attribute: ${attribute.key} (skipping)`)
       );
     }
@@ -1046,7 +1325,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   });
 
   if (attributesToProcess.length === 0) {
-    console.log(
+    MessageFormatter.info(
       chalk.green(
         `✅ All ${attributes.length} attributes are already up to date for collection: ${collection.name}`
       )
@@ -1054,7 +1333,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     return true;
   }
 
-  console.log(
+  MessageFormatter.info(
     chalk.blue(
       `Creating ${attributesToProcess.length} attributes sequentially with status monitoring...`
     )
@@ -1071,7 +1350,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     const attributesToProcessThisRound = [...remainingAttributes];
     remainingAttributes = []; // Reset for next iteration
 
-    console.log(
+    MessageFormatter.info(
       chalk.blue(
         `\n=== Attempt ${
           overallRetryCount + 1
@@ -1082,7 +1361,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     );
 
     for (const attribute of attributesToProcessThisRound) {
-      console.log(
+      MessageFormatter.info(
         chalk.blue(`\n--- Processing attribute: ${attribute.key} ---`)
       );
 
@@ -1094,15 +1373,20 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
       );
 
       if (success) {
-        console.log(
+        MessageFormatter.info(
           chalk.green(`✅ Successfully created attribute: ${attribute.key}`)
         );
 
+        // Mark this specific attribute as processed
+        markAttributeProcessed(currentCollection.$id, attribute.key);
+
         // Get updated collection data for next iteration
         try {
-          currentCollection = await db.getCollection(dbId, collection.$id);
+          currentCollection = isDatabaseAdapter(db)
+      ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data as Models.Collection
+      : await db.getCollection(dbId, collection.$id);
         } catch (error) {
-          console.log(
+          MessageFormatter.info(
             chalk.yellow(`Warning: Could not refresh collection data: ${error}`)
           );
         }
@@ -1110,7 +1394,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         // Add delay between successful attributes
         await delay(1000);
       } else {
-        console.log(
+        MessageFormatter.info(
           chalk.red(
             `❌ Failed to create attribute: ${attribute.key}, will retry in next round`
           )
@@ -1120,7 +1404,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     }
 
     if (remainingAttributes.length === 0) {
-      console.log(
+      MessageFormatter.info(
         chalk.green(
           `\n✅ Successfully created all ${attributesToProcess.length} attributes for collection: ${collection.name}`
         )
@@ -1131,7 +1415,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     overallRetryCount++;
 
     if (overallRetryCount < maxOverallRetries) {
-      console.log(
+      MessageFormatter.info(
         chalk.yellow(
           `\n⏳ Waiting 5 seconds before retrying ${attributesToProcess.length} failed attributes...`
         )
@@ -1140,10 +1424,12 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
       // Refresh collection data before retry
       try {
-        currentCollection = await db.getCollection(dbId, collection.$id);
-        console.log(chalk.blue(`Refreshed collection data for retry`));
+        currentCollection = isDatabaseAdapter(db)
+      ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data as Models.Collection
+      : await db.getCollection(dbId, collection.$id);
+        MessageFormatter.info(`Refreshed collection data for retry`);
       } catch (error) {
-        console.log(
+        MessageFormatter.info(
           chalk.yellow(
             `Warning: Could not refresh collection data for retry: ${error}`
           )
@@ -1154,7 +1440,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
   // If we get here, some attributes still failed after all retries
   if (attributesToProcess.length > 0) {
-    console.log(
+    MessageFormatter.info(
       chalk.red(
         `\n❌ Failed to create ${
           attributesToProcess.length
@@ -1163,7 +1449,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
           .join(", ")}`
       )
     );
-    console.log(
+    MessageFormatter.info(
       chalk.red(
         `This may indicate a fundamental issue with the attribute definitions or Appwrite instance`
       )
@@ -1171,7 +1457,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
     return false;
   }
 
-  console.log(
+  MessageFormatter.info(
     chalk.green(
       `\n✅ Successfully created all ${attributes.length} attributes for collection: ${collection.name}`
     )
@@ -1180,12 +1466,12 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 };
 
 export const createUpdateCollectionAttributes = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   dbId: string,
   collection: Models.Collection,
   attributes: Attribute[]
 ): Promise<void> => {
-  console.log(
+  MessageFormatter.info(
     chalk.green(
       `Creating/Updating attributes for collection: ${collection.name}`
     )
@@ -1204,7 +1490,7 @@ export const createUpdateCollectionAttributes = async (
 
   if (attributesToRemove.length > 0) {
     if (indexesToRemove.length > 0) {
-      console.log(
+      MessageFormatter.info(
         chalk.red(
           `Removing indexes as they rely on an attribute that is being removed: ${indexesToRemove
             .map((index) => index.key)
@@ -1213,19 +1499,31 @@ export const createUpdateCollectionAttributes = async (
       );
       for (const index of indexesToRemove) {
         await tryAwaitWithRetry(
-          async () => await db.deleteIndex(dbId, collection.$id, index.key)
+          async () => {
+            if (isDatabaseAdapter(db)) {
+              await db.deleteIndex({ databaseId: dbId, tableId: collection.$id, key: index.key });
+            } else {
+              await db.deleteIndex(dbId, collection.$id, index.key);
+            }
+          }
         );
         await delay(100);
       }
     }
     for (const attr of attributesToRemove) {
-      console.log(
+      MessageFormatter.info(
         chalk.red(
           `Removing attribute: ${attr.key} as it is no longer in the collection`
         )
       );
       await tryAwaitWithRetry(
-        async () => await db.deleteAttribute(dbId, collection.$id, attr.key)
+        async () => {
+          if (isDatabaseAdapter(db)) {
+            await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attr.key });
+          } else {
+            await db.deleteAttribute(dbId, collection.$id, attr.key);
+          }
+        }
       );
       await delay(50);
     }
@@ -1244,14 +1542,14 @@ export const createUpdateCollectionAttributes = async (
     const results = await Promise.allSettled(attributePromises);
     results.forEach((result) => {
       if (result.status === "rejected") {
-        console.error("An attribute promise was rejected:", result.reason);
+        MessageFormatter.error("An attribute promise was rejected:", result.reason);
       }
     });
 
     // Add delay after each batch
     await delay(200);
   }
-  console.log(
+  MessageFormatter.info(
     `Finished creating/updating attributes for collection: ${collection.name}`
   );
 };

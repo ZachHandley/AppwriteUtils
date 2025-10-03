@@ -20,6 +20,7 @@ import {
 } from "../utils/helperFunctions.js";
 import { isUndefined } from "es-toolkit/compat";
 import { isEmpty } from "es-toolkit/compat";
+import { MessageFormatter } from "../shared/messageFormatter.js";
 
 export class UsersController {
   private config: AppwriteConfig;
@@ -43,7 +44,7 @@ export class UsersController {
 
   async wipeUsers() {
     const allUsers = await this.getAllUsers();
-    console.log("Deleting all users...");
+    MessageFormatter.progress("Deleting all users...", { prefix: "Users" });
 
     const createBatches = (finalData: any[], batchSize: number) => {
       const finalBatches: any[][] = [];
@@ -58,7 +59,7 @@ export class UsersController {
       const batchedUserPromises = createBatches(allUsers, 25); // Batch size of 25
 
       for (const batch of batchedUserPromises) {
-        console.log(`Deleting ${batch.length} users...`);
+        MessageFormatter.progress(`Deleting ${batch.length} users...`, { prefix: "Users" });
         await Promise.all(
           batch.map((user) =>
             tryAwaitWithRetry(async () => await this.users.delete(user.$id))
@@ -66,11 +67,11 @@ export class UsersController {
         );
         usersDeleted += batch.length;
         if (usersDeleted % 100 === 0) {
-          console.log(`Deleted ${usersDeleted} users...`);
+          MessageFormatter.progress(`Deleted ${usersDeleted} users...`, { prefix: "Users" });
         }
       }
     } else {
-      console.log("No users to delete");
+      MessageFormatter.info("No users to delete", { prefix: "Users" });
     }
   }
 
@@ -194,7 +195,7 @@ export class UsersController {
               item.email
             );
           } else {
-            console.log("Email update skipped: Email already exists.");
+            MessageFormatter.warning("Email update skipped: Email already exists.", { prefix: "Users" });
           }
         }
         if (item.password) {
@@ -228,8 +229,9 @@ export class UsersController {
         }
       }
       if (item.$createdAt && item.$updatedAt) {
-        console.log(
-          "$createdAt and $updatedAt are not yet supported, sorry about that!"
+        MessageFormatter.warning(
+          "$createdAt and $updatedAt are not yet supported, sorry about that!",
+          { prefix: "Users" }
         );
       }
       if (item.labels && item.labels.length) {
@@ -305,10 +307,10 @@ export class UsersController {
     let fromUsers = await localUsers.list([Query.limit(50)]);
 
     if (fromUsers.users.length === 0) {
-      console.log(`No users found`);
+      MessageFormatter.info("No users found", { prefix: "Users" });
       return;
     } else if (fromUsers.users.length < 50) {
-      console.log(`Transferring ${fromUsers.users.length} users to remote`);
+      MessageFormatter.progress(`Transferring ${fromUsers.users.length} users to remote`, { prefix: "Users" });
       const batchedPromises = fromUsers.users.map((user) => {
         return tryAwaitWithRetry(async () => {
           const toCreateObject: Partial<typeof user> = {

@@ -1,6 +1,5 @@
 import {
   AppwriteException,
-  Client,
   type Models,
   type Storage,
 } from "node-appwrite";
@@ -8,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CollectionImportData } from "../migrations/dataLoader.js";
 import type { ConfigCollection } from "appwrite-utils";
+import { getClientWithAuth } from "./getClientFromConfig.js";
 
 export const toPascalCase = (str: string): string => {
   return (
@@ -180,11 +180,29 @@ export const getAppwriteClient = (
   projectId: string,
   apiKey: string
 ) => {
-  return new Client()
-    .setEndpoint(endpoint)
-    .setProject(projectId)
-    .setKey(apiKey);
+  return getClientWithAuth(endpoint, projectId, apiKey);
 };
 
 export const delay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Calculates exponential backoff delay with configurable base and maximum
+ *
+ * @param retryCount - Current retry attempt number (0-indexed)
+ * @param baseDelay - Base delay in milliseconds (default: 2000)
+ * @param maxDelay - Maximum delay cap in milliseconds (default: 30000)
+ * @returns Calculated delay in milliseconds
+ *
+ * @example
+ * calculateExponentialBackoff(0) // Returns 2000
+ * calculateExponentialBackoff(1) // Returns 4000
+ * calculateExponentialBackoff(5) // Returns 30000 (capped)
+ */
+export const calculateExponentialBackoff = (
+  retryCount: number,
+  baseDelay: number = 2000,
+  maxDelay: number = 30000
+): number => {
+  return Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
+};

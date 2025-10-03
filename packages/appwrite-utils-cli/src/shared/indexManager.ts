@@ -3,6 +3,7 @@ import { Databases, IndexType, Query, type Models } from "node-appwrite";
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import chalk from "chalk";
 import pLimit from "p-limit";
+import { MessageFormatter } from "./messageFormatter.js";
 
 // Concurrency limits for different operations
 const indexLimit = pLimit(3);     // Low limit for index operations
@@ -48,7 +49,7 @@ export const createOrUpdateIndex = async (
       
       if (forceRecreate || !indexesSame(existingIndex, index)) {
         if (verbose) {
-          console.log(chalk.yellow(`⚠ Updating index ${index.key} in collection ${collectionId}`));
+          MessageFormatter.warning(`Updating index ${index.key} in collection ${collectionId}`, { prefix: "Index Manager" });
         }
         
         // Delete existing index
@@ -60,14 +61,14 @@ export const createOrUpdateIndex = async (
         shouldCreate = true;
       } else {
         if (verbose) {
-          console.log(chalk.green(`✓ Index ${index.key} is up to date`));
+          MessageFormatter.success(`Index ${index.key} is up to date`, { prefix: "Index Manager" });
         }
         return existingIndex;
       }
     } else {
       shouldCreate = true;
       if (verbose) {
-        console.log(chalk.blue(`+ Creating index ${index.key} in collection ${collectionId}`));
+        MessageFormatter.info(`Creating index ${index.key} in collection ${collectionId}`, { prefix: "Index Manager" });
       }
     }
 
@@ -84,7 +85,7 @@ export const createOrUpdateIndex = async (
       });
 
       if (verbose) {
-        console.log(chalk.green(`✓ Created index ${index.key}`));
+        MessageFormatter.success(`Created index ${index.key}`, { prefix: "Index Manager" });
       }
 
       return newIndex;
@@ -111,7 +112,7 @@ export const createOrUpdateIndexes = async (
   }
 
   if (verbose) {
-    console.log(chalk.blue(`Processing ${indexes.length} indexes for collection ${collectionId}`));
+    MessageFormatter.info(`Processing ${indexes.length} indexes for collection ${collectionId}`, { prefix: "Index Manager" });
   }
 
   // Process indexes sequentially to avoid conflicts
@@ -122,13 +123,13 @@ export const createOrUpdateIndexes = async (
       // Add delay between index operations to prevent rate limiting
       await delay(250);
     } catch (error) {
-      console.error(chalk.red(`❌ Failed to process index ${index.key}:`), error);
+      MessageFormatter.error(`Failed to process index ${index.key}`, error as Error, { prefix: "Index Manager" });
       throw error;
     }
   }
 
   if (verbose) {
-    console.log(chalk.green(`✓ Completed processing indexes for collection ${collectionId}`));
+    MessageFormatter.success(`Completed processing indexes for collection ${collectionId}`, { prefix: "Index Manager" });
   }
 };
 
@@ -184,7 +185,7 @@ export const deleteObsoleteIndexes = async (
   }
 
   if (verbose) {
-    console.log(chalk.yellow(`🗑️ Removing ${obsoleteIndexes.length} obsolete indexes from collection ${collection.name}`));
+    MessageFormatter.warning(`Removing ${obsoleteIndexes.length} obsolete indexes from collection ${collection.name}`, { prefix: "Index Manager" });
   }
 
   // Process deletions with rate limiting
@@ -196,7 +197,7 @@ export const deleteObsoleteIndexes = async (
     });
 
     if (verbose) {
-      console.log(chalk.gray(`🗑️ Deleted obsolete index ${index.key}`));
+      MessageFormatter.info(`Deleted obsolete index ${index.key}`, { prefix: "Index Manager" });
     }
 
     await delay(250);
@@ -245,8 +246,8 @@ export const validateIndexConfiguration = (
   }
 
   if (verbose && errors.length > 0) {
-    console.log(chalk.red(`❌ Index validation errors:`));
-    errors.forEach(error => console.log(chalk.red(`  - ${error}`)));
+    MessageFormatter.error("Index validation errors", undefined, { prefix: "Index Manager" });
+    errors.forEach(error => MessageFormatter.error(`  - ${error}`, undefined, { prefix: "Index Manager" }));
   }
 
   return { valid: errors.length === 0, errors };

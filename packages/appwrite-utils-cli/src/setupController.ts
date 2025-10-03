@@ -3,6 +3,7 @@ import { loadConfig } from "./utils/loadConfigs.js";
 import path from "path";
 import fs from "fs";
 import type { AppwriteConfig } from "appwrite-utils";
+import { MessageFormatter } from "./shared/messageFormatter.js";
 
 export class SetupController {
   private currentDir: string;
@@ -14,7 +15,7 @@ export class SetupController {
 
   async runSetup(withExampleData: boolean = false): Promise<void> {
     await setupDirsFiles(withExampleData, this.currentDir);
-    console.log("Setup completed successfully.");
+    MessageFormatter.success("Setup completed successfully", { prefix: "Setup" });
   }
 
   async loadConfig(): Promise<AppwriteConfig | null> {
@@ -24,7 +25,7 @@ export class SetupController {
         this.config = await loadConfig(appwriteDir);
         return this.config;
       } catch (error) {
-        console.error("Error loading config:", error);
+        MessageFormatter.error("Error loading config", error as Error, { prefix: "Setup" });
         return null;
       }
     }

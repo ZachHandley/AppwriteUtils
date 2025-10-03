@@ -74,10 +74,23 @@ export class MessageFormatter {
         console.log(chalk.gray(JSON.stringify(data, null, 2)));
       }
     }
-    
+
     if (!options.skipLogging) {
       logger.debug(`DEBUG: ${options.prefix ? `${options.prefix}: ` : ""}${message}`, data);
     }
+  }
+
+  static processing(message: string, options: MessageOptions = {}) {
+    const formatted = `${chalk.cyan("⚙️")} ${options.prefix ? `${options.prefix}: ` : ""}${message}`;
+    console.log(formatted);
+
+    if (!options.skipLogging) {
+      logger.info(`PROCESSING: ${options.prefix ? `${options.prefix}: ` : ""}${message}`);
+    }
+  }
+
+  static divider() {
+    console.log(chalk.gray("─".repeat(60)));
   }
 
   static banner(title: string, subtitle?: string) {
