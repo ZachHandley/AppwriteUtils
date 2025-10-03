@@ -339,8 +339,11 @@ export const createOrUpdateCollections = async (
     // Add delay after creating attributes
     await delay(250);
 
-    // For PUSH operations, only use indexes from local config (not remote)
-    const indexesToUse = indexes || [];
+    // ALWAYS use indexes from local config, NEVER from server
+    const localCollectionConfig = config.collections?.find(
+      c => c.name === collectionData.name || c.$id === collectionData.$id
+    );
+    const indexesToUse = localCollectionConfig?.indexes || [];
 
     MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
     await createOrUpdateIndexesWithStatusCheck(
@@ -349,6 +352,16 @@ export const createOrUpdateCollections = async (
       collectionToUse!.$id,
       collectionToUse!,
       indexesToUse as Indexes
+    );
+
+    // Delete indexes that exist on server but not in local config
+    const { deleteObsoleteIndexes } = await import('../shared/indexManager.js');
+    await deleteObsoleteIndexes(
+      database,
+      databaseId,
+      collectionToUse!,
+      { indexes: indexesToUse } as any,
+      { verbose: true }
     );
 
     // Mark this collection as fully processed to prevent re-processing
@@ -562,8 +575,11 @@ export const createOrUpdateCollectionsViaAdapter = async (
       }
     }
 
-    // Indexes
-    const idxs = (indexes || []) as any[];
+    // ALWAYS use indexes from local config, NEVER from server (TablesDB path)
+    const localTableConfig = config.collections?.find(
+      c => c.name === collectionData.name || c.$id === collectionData.$id
+    );
+    const idxs = (localTableConfig?.indexes || []) as any[];
     for (const idx of idxs) {
       try {
         await adapter.createIndex({

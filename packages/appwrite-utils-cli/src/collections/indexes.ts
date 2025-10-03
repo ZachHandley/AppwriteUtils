@@ -5,6 +5,9 @@ import { delay, tryAwaitWithRetry, calculateExponentialBackoff } from "../utils/
 import { isLegacyDatabases } from "../utils/typeGuards.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 
+// System attributes that are always available for indexing in Appwrite
+const SYSTEM_ATTRIBUTES = ['$id', '$createdAt', '$updatedAt', '$permissions'];
+
 // Interface for index with status
 interface IndexWithStatus {
   key: string;
@@ -116,12 +119,15 @@ export const createOrUpdateIndexWithStatusCheck = async (
     // First, validate that all required attributes exist
     const freshCollection = await db.getCollection(dbId, collectionId);
     const existingAttributeKeys = freshCollection.attributes.map((attr: any) => attr.key);
-    
-    const missingAttributes = index.attributes.filter(attr => !existingAttributeKeys.includes(attr));
+
+    // Include system attributes that are always available
+    const allAvailableAttributes = [...existingAttributeKeys, ...SYSTEM_ATTRIBUTES];
+
+    const missingAttributes = index.attributes.filter(attr => !allAvailableAttributes.includes(attr));
 
     if (missingAttributes.length > 0) {
       MessageFormatter.error(`Index '${index.key}' cannot be created: missing attributes [${missingAttributes.join(', ')}] (type: ${index.type})`);
-      MessageFormatter.error(`Available attributes: [${existingAttributeKeys.join(', ')}]`);
+      MessageFormatter.error(`Available attributes: [${existingAttributeKeys.join(', ')}, ${SYSTEM_ATTRIBUTES.join(', ')}]`);
       return false; // Don't retry if attributes are missing
     }
     
@@ -279,17 +285,35 @@ export const createOrUpdateIndex = async (
   if (existingIndex.total === 0) {
     // No existing index, create it
     createIndex = true;
-  } else if (
-    !existingIndex.indexes.some(
-      (existingIndex) =>
-        (existingIndex.key === index.key &&
-          existingIndex.type === index.type &&
-          existingIndex.attributes === index.attributes)
-    )
-  ) {
-    // Existing index doesn't match, delete and recreate
-    await db.deleteIndex(dbId, collectionId, existingIndex.indexes[0].key);
-    createIndex = true;
+  } else {
+    const existing = existingIndex.indexes[0];
+
+    // Check key and type
+    const keyMatches = existing.key === index.key;
+    const typeMatches = existing.type === index.type;
+
+    // Compare attributes as SETS (order doesn't matter, only content)
+    const existingAttrsSet = new Set(existing.attributes);
+    const newAttrsSet = new Set(index.attributes);
+    const attributesMatch =
+      existingAttrsSet.size === newAttrsSet.size &&
+      [...existingAttrsSet].every(attr => newAttrsSet.has(attr));
+
+    // Compare orders as SETS if both exist (order doesn't matter)
+    let ordersMatch = true;
+    if (index.orders && existing.orders) {
+      const existingOrdersSet = new Set(existing.orders);
+      const newOrdersSet = new Set(index.orders);
+      ordersMatch =
+        existingOrdersSet.size === newOrdersSet.size &&
+        [...existingOrdersSet].every(ord => newOrdersSet.has(ord));
+    }
+
+    // Only recreate if something genuinely changed
+    if (!keyMatches || !typeMatches || !attributesMatch || !ordersMatch) {
+      await db.deleteIndex(dbId, collectionId, existing.key);
+      createIndex = true;
+    }
   }
   
   if (createIndex) {
