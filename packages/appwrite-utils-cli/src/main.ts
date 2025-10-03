@@ -711,6 +711,11 @@ async function main() {
         }
       }
 
+      // Ensure trackingDatabaseId is defined before proceeding
+      if (!trackingDatabaseId) {
+        throw new Error('Tracking database ID is required for comprehensive backup');
+      }
+
       MessageFormatter.info(`Using tracking database: ${trackingDatabaseId}`, { prefix: "Backup" });
 
       // Create adapter for backup tracking
@@ -739,7 +744,7 @@ async function main() {
       operationStats.comprehensiveBackup = 1;
       operationStats.databasesBackedUp = result.databaseBackups.length;
       operationStats.bucketsBackedUp = result.bucketBackups.length;
-      operationStats.totalBackupSize = MessageFormatter.formatBytes(result.totalSizeBytes);
+      operationStats.totalBackupSize = result.totalSizeBytes;
 
       if (result.status === 'completed') {
         MessageFormatter.success(`Comprehensive backup completed successfully (ID: ${result.backupId})`, { prefix: "Backup" });

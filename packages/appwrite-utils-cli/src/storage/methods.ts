@@ -569,12 +569,14 @@ export const backupDatabase = async (
 
       await recordBackup(adapter, databaseId, {
         backupId: fileCreated.$id,
+        backupType: 'database',
         databaseId: databaseId,
         sizeBytes: backupSize,
         collections: data.collections.length,
         documents: processedDocuments,
         format: format,
-        status: 'completed'
+        status: 'completed',
+        restorationStatus: 'not_restored'
       });
     } catch (metadataError) {
       // Don't fail backup if metadata recording fails
