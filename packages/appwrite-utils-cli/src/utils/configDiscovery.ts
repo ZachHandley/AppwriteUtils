@@ -139,7 +139,9 @@ const YamlCollectionSchema = z.object({
       twoWay: z.boolean().optional(),
       twoWayKey: z.string().optional(),
       onDelete: z.string().optional(),
-      side: z.string().optional()
+      side: z.string().optional(),
+      encrypt: z.boolean().optional(),
+      format: z.string().optional()
     })
   ).optional().default([]),
   indexes: z.array(
@@ -191,7 +193,9 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
         twoWay: attr.twoWay,
         twoWayKey: attr.twoWayKey,
         onDelete: attr.onDelete as any,
-        side: attr.side as any
+        side: attr.side as any,
+        encrypted: (attr as any).encrypt,
+        format: (attr as any).format
       })),
       indexes: parsedCollection.indexes.map(idx => ({
         key: idx.key,
@@ -247,7 +251,9 @@ export const loadYamlTable = (filePath: string): any | null => {
         twoWay: attr.twoWay,
         twoWayKey: attr.twoWayKey,
         onDelete: attr.onDelete as any,
-        side: attr.side as any
+        side: attr.side as any,
+        encrypted: (attr as any).encrypt,
+        format: (attr as any).format
       })),
       indexes: parsedTable.indexes.map(idx => ({
         key: idx.key,

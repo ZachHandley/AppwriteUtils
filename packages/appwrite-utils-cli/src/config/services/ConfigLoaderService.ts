@@ -153,6 +153,64 @@ export class ConfigLoaderService {
         }
       }
 
+      // Load collections and tables from their respective directories
+      const configDir = path.dirname(yamlPath);
+      const collectionsDir = path.join(configDir, config.schemaConfig?.collectionsDirectory || "collections");
+      const tablesDir = path.join(configDir, config.schemaConfig?.tablesDirectory || "tables");
+
+      // Detect API mode to determine priority order
+      let apiMode: 'legacy' | 'tablesdb' = 'legacy';
+      try {
+        const { detectAppwriteVersionCached } = await import('../../utils/versionDetection.js');
+        const detection = await detectAppwriteVersionCached(
+          config.appwriteEndpoint,
+          config.appwriteProject,
+          config.appwriteKey
+        );
+        apiMode = detection.apiMode;
+      } catch {
+        // Fallback to legacy if detection fails
+      }
+
+      // Load with correct priority based on API mode
+      const { items, conflicts, fromCollections, fromTables } = apiMode === 'tablesdb'
+        ? await this.loadTablesFirst(tablesDir, collectionsDir)
+        : await this.loadCollectionsAndTables(collectionsDir, tablesDir);
+
+      config.collections = items;
+
+      // Report what was loaded
+      if (fromTables > 0 && fromCollections > 0) {
+        MessageFormatter.success(
+          `Loaded ${items.length} total items: ${fromCollections} from collections/, ${fromTables} from tables/`,
+          { prefix: "Config" }
+        );
+      } else if (fromCollections > 0) {
+        MessageFormatter.success(
+          `Loaded ${fromCollections} collections from collections/`,
+          { prefix: "Config" }
+        );
+      } else if (fromTables > 0) {
+        MessageFormatter.success(
+          `Loaded ${fromTables} tables from tables/`,
+          { prefix: "Config" }
+        );
+      }
+
+      // Report conflicts
+      if (conflicts.length > 0) {
+        MessageFormatter.warning(
+          `Found ${conflicts.length} naming conflicts`,
+          { prefix: "Config" }
+        );
+        conflicts.forEach(conflict => {
+          MessageFormatter.info(
+            `  - '${conflict.name}': ${conflict.source1} (used) vs ${conflict.source2} (skipped)`,
+            { prefix: "Config" }
+          );
+        });
+      }
+
       MessageFormatter.success(`Loaded YAML config from: ${yamlPath}`, {
         prefix: "Config",
       });
@@ -514,6 +572,67 @@ export class ConfigLoaderService {
     const fromCollections = items.filter((item: any) => !item._isFromTablesDir)
       .length;
     const fromTables = items.filter((item: any) => item._isFromTablesDir).length;
+
+    return {
+      items,
+      fromCollections,
+      fromTables,
+      conflicts,
+    };
+  }
+
+  /**
+   * Loads tables first (higher priority), then collections (backward compatibility)
+   * Used for TablesDB projects (>= 1.8.0)
+   * @param tablesDir Path to the tables directory
+   * @param collectionsDir Path to the collections directory
+   * @returns Loading result with items, counts, and conflicts
+   */
+  public async loadTablesFirst(
+    tablesDir: string,
+    collectionsDir: string
+  ): Promise<{
+    items: Collection[];
+    fromCollections: number;
+    fromTables: number;
+    conflicts: Array<{ name: string; source1: string; source2: string }>;
+  }> {
+    const items: Collection[] = [];
+    const loadedNames = new Set<string>();
+    const conflicts: Array<{ name: string; source1: string; source2: string }> = [];
+
+    // Load from tables/ directory first (HIGHER priority for TablesDB)
+    if (fs.existsSync(tablesDir)) {
+      const tables = await this.loadTables(tablesDir, { markAsTablesDir: true });
+      for (const table of tables) {
+        const name = table.name || table.tableId || table.$id || "";
+        loadedNames.add(name);
+        items.push(table);
+      }
+    }
+
+    // Load from collections/ directory second (LOWER priority, backward compatibility)
+    if (fs.existsSync(collectionsDir)) {
+      const collections = await this.loadCollections(collectionsDir);
+      for (const collection of collections) {
+        const name = collection.name || collection.$id || "";
+
+        // Check for conflicts - tables win
+        if (loadedNames.has(name)) {
+          conflicts.push({
+            name,
+            source1: "tables/",
+            source2: "collections/",
+          });
+        } else {
+          loadedNames.add(name);
+          items.push(collection);
+        }
+      }
+    }
+
+    const fromTables = items.filter((item: any) => item._isFromTablesDir).length;
+    const fromCollections = items.filter((item: any) => !item._isFromTablesDir).length;
 
     return {
       items,

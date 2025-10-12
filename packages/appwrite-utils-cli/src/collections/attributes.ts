@@ -935,6 +935,17 @@ const attributesSame = (
     });
   }
 
+  // Log differences if comparison failed (for debugging)
+  if (!result && differences.length > 0) {
+    MessageFormatter.debug(
+      `Attribute '${configAttribute.key}' differences detected:`,
+      { prefix: "Attributes" }
+    );
+    differences.forEach(diff => {
+      MessageFormatter.debug(`  ${diff}`, { prefix: "Attributes" });
+    });
+  }
+
   return result;
 };
 

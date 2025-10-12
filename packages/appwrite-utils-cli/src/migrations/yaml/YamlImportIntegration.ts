@@ -5,6 +5,7 @@ import { logger } from "../../shared/logging.js";
 import { normalizeYamlData, usesTableTerminology, convertTerminology, type YamlCollectionData } from "../../utils/yamlConverter.js";
 import path from "path";
 import fs from "fs";
+import yaml from "js-yaml";
 
 /**
  * Integration service that bridges YAML import configurations with the existing import system.
@@ -284,7 +285,6 @@ export class YamlImportIntegration {
       },
     };
 
-    const yaml = require("js-yaml");
     const yamlContent = yaml.dump(yamlConfig, {
       indent: 2,
       lineWidth: 120,

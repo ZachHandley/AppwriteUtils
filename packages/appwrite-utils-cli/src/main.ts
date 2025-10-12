@@ -17,9 +17,16 @@ import { MessageFormatter } from "./shared/messageFormatter.js";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 import path from "path";
 import fs from "fs";
+import { createRequire } from "node:module";
 import { loadAppwriteProjectConfig, findAppwriteProjectConfig, projectConfigToAppwriteConfig } from "./utils/projectConfig.js";
 import { hasSessionAuth, getAvailableSessions, getAuthenticationStatus } from "./utils/sessionAuth.js";
 import { findYamlConfig, loadYamlConfigWithSession } from "./config/yamlConfig.js";
+
+const require = createRequire(import.meta.url);
+if (!(globalThis as any).require) {
+  (globalThis as any).require = require;
+}
+
 
 interface CliOptions {
   config?: string;

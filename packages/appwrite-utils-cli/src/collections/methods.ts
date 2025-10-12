@@ -339,11 +339,11 @@ export const createOrUpdateCollections = async (
     // Add delay after creating attributes
     await delay(250);
 
-    // ALWAYS use indexes from local config, NEVER from server
+    // Prefer local config indexes, but fall back to collection's own indexes if no local config exists
     const localCollectionConfig = config.collections?.find(
       c => c.name === collectionData.name || c.$id === collectionData.$id
     );
-    const indexesToUse = localCollectionConfig?.indexes || [];
+    const indexesToUse = localCollectionConfig?.indexes ?? indexes ?? [];
 
     MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
     await createOrUpdateIndexesWithStatusCheck(
@@ -575,11 +575,11 @@ export const createOrUpdateCollectionsViaAdapter = async (
       }
     }
 
-    // ALWAYS use indexes from local config, NEVER from server (TablesDB path)
+    // Prefer local config indexes, but fall back to collection's own indexes if no local config exists (TablesDB path)
     const localTableConfig = config.collections?.find(
       c => c.name === collectionData.name || c.$id === collectionData.$id
     );
-    const idxs = (localTableConfig?.indexes || []) as any[];
+    const idxs = (localTableConfig?.indexes ?? indexes ?? []) as any[];
     for (const idx of idxs) {
       try {
         await adapter.createIndex({

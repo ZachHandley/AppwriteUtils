@@ -5,6 +5,8 @@ import type {
 } from "appwrite-utils";
 import type { ImportDataActions } from "../importDataActions.js";
 import { logger } from "../../shared/logging.js";
+import fs from "fs";
+import path from "path";
 
 /**
  * Service responsible for validation during import operations.
@@ -275,8 +277,6 @@ export class ValidationService {
 
           // Check if import file exists
           try {
-            const fs = require("fs");
-            const path = require("path");
             const filePath = path.resolve(appwriteFolderPath, importDef.filePath);
             if (!fs.existsSync(filePath)) {
               errors.push(

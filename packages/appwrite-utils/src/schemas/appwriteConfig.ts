@@ -32,6 +32,8 @@
  * ```
  */
 
+import fs from "fs";
+import path from "path";
 import { z } from "zod";
 import {
   CollectionCreateSchema,
@@ -233,9 +235,6 @@ export function getVersionAwareDirectory(
 
   // For auto mode, check filesystem if path is provided
   if (config.apiMode === 'auto' && appwriteFolderPath) {
-    const fs = require('fs');
-    const path = require('path');
-
     const tablesDir = path.join(appwriteFolderPath, config.schemaConfig?.tablesDirectory || 'tables');
     const collectionsDir = path.join(appwriteFolderPath, config.schemaConfig?.collectionsDirectory || 'collections');
 

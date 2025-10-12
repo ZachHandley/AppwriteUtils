@@ -231,19 +231,24 @@ export class AdapterFactory {
           .setEndpoint(config.appwriteEndpoint)
           .setProject(config.appwriteProject);
 
-        // Set authentication method based on priority
+        // Set authentication method with mode headers
+        // Prefer session with admin mode, fallback to API key with default mode
         if (config.sessionCookie && isValidSessionCookie(config.sessionCookie)) {
-          (client as any).setSession(config.sessionCookie);
+          client.setSession(config.sessionCookie);
+          client.headers['X-Appwrite-Mode'] = 'admin';
           logger.debug('Using session authentication for TablesDB adapter', {
             project: config.appwriteProject,
             operation: 'createTablesDBAdapter'
           });
         } else if (config.appwriteKey) {
           client.setKey(config.appwriteKey);
+          client.headers['X-Appwrite-Mode'] = 'default';
           logger.debug('Using API key authentication for TablesDB adapter', {
             project: config.appwriteProject,
             operation: 'createTablesDBAdapter'
           });
+        } else {
+          throw new Error("No authentication available for adapter");
         }
       }
 
@@ -311,19 +316,24 @@ export class AdapterFactory {
           .setEndpoint(config.appwriteEndpoint)
           .setProject(config.appwriteProject);
 
-        // Set authentication method based on priority
+        // Set authentication method with mode headers
+        // Prefer session with admin mode, fallback to API key with default mode
         if (config.sessionCookie && isValidSessionCookie(config.sessionCookie)) {
           (client as any).setSession(config.sessionCookie);
+          client.headers['X-Appwrite-Mode'] = 'admin';
           logger.debug('Using session authentication for Legacy adapter', {
             project: config.appwriteProject,
             operation: 'createLegacyAdapter'
           });
         } else if (config.appwriteKey) {
           client.setKey(config.appwriteKey);
+          client.headers['X-Appwrite-Mode'] = 'default';
           logger.debug('Using API key authentication for Legacy adapter', {
             project: config.appwriteProject,
             operation: 'createLegacyAdapter'
           });
+        } else {
+          throw new Error("No authentication available for adapter");
         }
       }
 

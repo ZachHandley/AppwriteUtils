@@ -67,32 +67,86 @@ export class ClientFactory {
       .setEndpoint(config.appwriteEndpoint)
       .setProject(config.appwriteProject);
 
-    // Apply authentication (priority already resolved by ConfigManager)
-    if (config.sessionCookie) {
-      // Session authentication (from ConfigManager's session loading)
+    // Apply authentication based on authMethod preference with mode headers
+    // Mode headers: "admin" for sessions (elevated permissions), "default" for API keys
+    const authMethod = config.authMethod || "auto";
+
+    logger.debug("Applying authentication with mode headers", {
+      prefix: "ClientFactory",
+      authMethod,
+      hasApiKey: !!config.appwriteKey,
+      hasSession: !!config.sessionCookie,
+    });
+
+    if (authMethod === "session") {
+      // Explicit session preference - use only session with admin mode
+      if (!config.sessionCookie) {
+        const error = new Error(
+          "authMethod set to 'session' but no session cookie available.\n\n" +
+          "Either:\n" +
+          "  - Run 'appwrite login' to create a session\n" +
+          "  - Change authMethod to 'apikey' or 'auto'\n" +
+          "  - Provide --sessionCookie flag"
+        );
+        logger.error("Failed to create client - session required", { prefix: "ClientFactory" });
+        throw error;
+      }
       client.setSession(config.sessionCookie);
-      logger.debug("Applied session authentication to client", {
+      client.headers['X-Appwrite-Mode'] =  'admin';
+      logger.debug("Applied session authentication with admin mode (explicit preference)", {
         prefix: "ClientFactory",
         email: config.sessionMetadata?.email,
       });
-    } else if (config.appwriteKey) {
-      // API key authentication (from config file or overrides)
+
+    } else if (authMethod === "apikey") {
+      // Explicit API key preference - use only API key with default mode
+      if (!config.appwriteKey || config.appwriteKey.trim().length === 0) {
+        const error = new Error(
+          "authMethod set to 'apikey' but no API key provided.\n\n" +
+          "Either:\n" +
+          "  - Set appwriteKey in your config file\n" +
+          "  - Provide --apiKey flag\n" +
+          "  - Set APPWRITE_API_KEY environment variable"
+        );
+        logger.error("Failed to create client - API key required", { prefix: "ClientFactory" });
+        throw error;
+      }
       client.setKey(config.appwriteKey);
-      logger.debug("Applied API key authentication to client", {
+      client.headers['X-Appwrite-Mode'] = 'default';
+      logger.debug("Applied API key authentication with default mode (explicit preference)", {
         prefix: "ClientFactory",
       });
+
     } else {
-      // No authentication available - this should have been caught by ConfigManager
-      const error = new Error(
-        "No authentication method available in configuration.\n\n" +
-        "This should have been resolved by ConfigManager during config loading.\n" +
-        "Expected either:\n" +
-        "  - config.sessionCookie (from session authentication)\n" +
-        "  - config.appwriteKey (from config file or CLI overrides)\n\n" +
-        "Suggestion: Ensure ConfigManager.loadConfig() was called before ClientFactory.createFromConfig()."
-      );
-      logger.error("Failed to create client - no authentication", { prefix: "ClientFactory" });
-      throw error;
+      // Auto mode: Prefer session with admin mode (like official CLI), fallback to API key
+      if (config.sessionCookie) {
+        client.setSession(config.sessionCookie);
+        client.headers['X-Appwrite-Mode'] = 'admin';
+        logger.debug("Applied session authentication with admin mode (auto - preferred)", {
+          prefix: "ClientFactory",
+          email: config.sessionMetadata?.email,
+        });
+      } else if (config.appwriteKey && config.appwriteKey.trim().length > 0) {
+        client.setKey(config.appwriteKey);
+        client.headers['X-Appwrite-Mode'] = 'default';
+        logger.debug("Applied API key authentication with default mode (auto - fallback)", {
+          prefix: "ClientFactory",
+        });
+      } else {
+        // No authentication available
+        const error = new Error(
+          "No authentication method available in configuration.\n\n" +
+          "Expected either:\n" +
+          "  - config.sessionCookie (from session authentication via 'appwrite login')\n" +
+          "  - config.appwriteKey (from config file, CLI flags, or environment)\n\n" +
+          "Suggestion:\n" +
+          "  - Run 'appwrite login' to create a session, OR\n" +
+          "  - Add appwriteKey to your config file, OR\n" +
+          "  - Provide --apiKey flag"
+        );
+        logger.error("Failed to create client - no authentication", { prefix: "ClientFactory" });
+        throw error;
+      }
     }
 
     // Create adapter with version detection

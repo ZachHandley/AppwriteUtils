@@ -516,6 +516,14 @@ importDefs: []
                 "type": "string",
                 "description": "Column description"
               },
+              "encrypt": {
+                "type": "boolean",
+                "description": "Whether the column should be encrypted"
+              },
+              "format": {
+                "type": "string",
+                "description": "Format for string columns"
+              },
               "min": {
                 "type": "number",
                 "description": "Minimum value for numeric columns"
@@ -709,6 +717,14 @@ importDefs: []
               "description": {
                 "type": "string",
                 "description": "Attribute description"
+              },
+              "encrypt": {
+                "type": "boolean",
+                "description": "Whether the attribute should be encrypted"
+              },
+              "format": {
+                "type": "string",
+                "description": "Format for string attributes"
               },
               "min": {
                 "type": "number",

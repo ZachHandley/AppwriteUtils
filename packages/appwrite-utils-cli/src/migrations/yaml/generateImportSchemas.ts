@@ -464,6 +464,14 @@ export function generateCollectionSchema(): any {
           "side": {
             "type": "string",
             "enum": ["parent", "child"]
+          },
+          "encrypt": {
+            "type": "boolean",
+            "description": "Whether the attribute should be encrypted"
+          },
+          "format": {
+            "type": "string",
+            "description": "Format for string attributes (e.g., email, url, ip)"
           }
         },
         "required": ["key", "type"],

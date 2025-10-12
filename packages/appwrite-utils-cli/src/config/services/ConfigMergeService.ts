@@ -80,6 +80,8 @@ export class ConfigMergeService {
 
     // Add session authentication (map 'cookie' to 'sessionCookie')
     merged.sessionCookie = session.cookie;
+
+    // Set authMethod to session (priority handled by ClientFactory)
     merged.authMethod = "session";
 
     // Add session metadata if available
