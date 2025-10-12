@@ -1,80 +1,26 @@
-import { type Attribute, attributeSchema } from "../schemas/attribute.js";
-import { stringAttributeSchema } from "../schemas/stringAttribute.js";
-import { integerAttributeSchema } from "../schemas/integerAttribute.js";
-import { doubleAttributeSchema, floatAttributeSchema } from "../schemas/doubleAttribute.js";
-import { booleanAttributeSchema } from "../schemas/booleanAttribute.js";
-import { datetimeAttributeSchema } from "../schemas/datetimeAttribute.js";
-import { emailAttributeSchema } from "../schemas/emailAttribute.js";
-import { ipAttributeSchema } from "../schemas/ipAttribute.js";
-import { urlAttributeSchema } from "../schemas/urlAttribute.js";
-import { enumAttributeSchema } from "../schemas/enumAttribute.js";
-import { relationshipAttributeSchema } from "../schemas/relationshipAttribute.js";
+import { attributeSchema, type Attribute } from "../schemas/attribute.js";
 
 export const parseAttribute = (
-  attribute: Attribute & {
-    default?: undefined | null | string | number | boolean;
-  }
+  attribute: Record<string, unknown>
 ): Attribute => {
-  let attributeToParse: any = { ...attribute };
+  const attributeToParse: Record<string, unknown> = { ...attribute };
 
-  // Check if 'default' is provided and set it as 'xdefault'
-  if (attribute.default !== undefined) {
-    if (attribute.default !== null) {
-      attributeToParse.xdefault = attribute.default;
-      delete attributeToParse.default;
-    } else {
-      delete attributeToParse.default;
+  // Normalize default into xdefault for compatibility with Appwrite SDK
+  if ("default" in attributeToParse) {
+    if (attributeToParse.default !== null && attributeToParse.default !== undefined) {
+      attributeToParse.xdefault = attributeToParse.default;
     }
+    delete attributeToParse.default;
   }
 
   if (
     attributeToParse.type === "string" &&
-    attributeToParse.format &&
+    typeof attributeToParse.format === "string" &&
     attributeToParse.format.length > 0
   ) {
     attributeToParse.type = attributeToParse.format.toLowerCase();
     delete attributeToParse.format;
   }
 
-  // Keep "double" as is - this is now our preferred type
-  // Legacy "float" will also be supported through the discriminated union
-
-  switch (attributeToParse.type) {
-    case "string":
-      return stringAttributeSchema.parse(attributeToParse);
-    case "integer":
-      if (
-        attributeToParse.min &&
-        BigInt(attributeToParse.min) === BigInt(-9223372036854776000)
-      ) {
-        attributeToParse.min = undefined;
-      }
-      if (
-        attributeToParse.max &&
-        BigInt(attributeToParse.max) === BigInt(9223372036854776000)
-      ) {
-        attributeToParse.max = undefined;
-      }
-      return integerAttributeSchema.parse(attributeToParse);
-    case "double":
-      return doubleAttributeSchema.parse(attributeToParse);
-    case "float":
-      return floatAttributeSchema.parse(attributeToParse);
-    case "boolean":
-      return booleanAttributeSchema.parse(attributeToParse);
-    case "datetime":
-      return datetimeAttributeSchema.parse(attributeToParse);
-    case "email":
-      return emailAttributeSchema.parse(attributeToParse);
-    case "ip":
-      return ipAttributeSchema.parse(attributeToParse);
-    case "url":
-      return urlAttributeSchema.parse(attributeToParse);
-    case "enum":
-      return enumAttributeSchema.parse(attributeToParse);
-    case "relationship":
-      return relationshipAttributeSchema.parse(attributeToParse);
-    default:
-      throw new Error(`Invalid attribute type: ${attributeToParse.type}`);
-  }
+  return attributeSchema.parse(attributeToParse);
 };

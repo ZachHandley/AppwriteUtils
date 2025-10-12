@@ -980,6 +980,7 @@ export class InteractiveCLI {
       $updatedAt: DateTime.now().toISO(),
       name: db.name,
       enabled: true,
+      type: (db as any).type || "document",
     }));
   }
 

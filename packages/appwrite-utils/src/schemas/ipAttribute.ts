@@ -1,24 +1,2 @@
-import { z } from "zod";
-
-export const ipAttributeSchema = z.object({
-  key: z.string().describe("The key of the attribute"),
-  type: z.literal("ip").describe("The type of the attribute"),
-  error: z
-    .string()
-    .default("Invalid String Attribute Schema")
-    .optional()
-    .describe("The error message if the attribute is invalid"),
-  required: z
-    .boolean()
-    .default(false)
-    .optional()
-    .describe("Whether the attribute is required or not"),
-  array: z
-    .boolean()
-    .default(false)
-    .optional()
-    .describe("Whether the attribute is an array or not"),
-  xdefault: z.string().nullish().describe("The default value of the attribute"),
-});
-
-export type IpAttribute = z.infer<typeof ipAttributeSchema>;
+export { ipAttributeSchema } from "./attribute.js";
+export type { IpAttribute } from "./attribute.js";

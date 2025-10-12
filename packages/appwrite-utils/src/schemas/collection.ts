@@ -104,3 +104,5 @@ export const CollectionsSchema = z
 export type Collection = z.infer<typeof CollectionSchema>;
 export type Collections = z.infer<typeof CollectionsSchema>;
 export type CollectionCreate = z.infer<typeof CollectionCreateSchema>;
+export type CollectionInput = z.input<typeof CollectionSchema>;
+export type CollectionCreateInput = z.input<typeof CollectionCreateSchema>;

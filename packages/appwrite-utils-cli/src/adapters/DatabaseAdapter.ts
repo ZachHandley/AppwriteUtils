@@ -43,6 +43,7 @@ export interface CreateTableParams {
   name: string;
   permissions?: string[];
   documentSecurity?: boolean;
+  rowSecurity?: boolean;
   enabled?: boolean;
 }
 
@@ -52,6 +53,7 @@ export interface UpdateTableParams {
   name: string;
   permissions?: string[];
   documentSecurity?: boolean;
+  rowSecurity?: boolean;
   enabled?: boolean;
 }
 
@@ -130,8 +132,20 @@ export interface UpdateAttributeParams {
   databaseId: string;
   tableId: string;
   key: string;
+  type?: string;
   required?: boolean;
   default?: any;
+  size?: number;
+  min?: number;
+  max?: number;
+  array?: boolean;
+  encrypt?: boolean;
+  elements?: string[];
+  relatedCollection?: string;
+  relationType?: string;
+  twoWay?: boolean;
+  twoWayKey?: string;
+  onDelete?: string;
 }
 
 export interface DeleteAttributeParams {

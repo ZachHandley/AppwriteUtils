@@ -66,6 +66,8 @@ export {
 } from "./schemas/appwriteConfig.js";
 export {
   type CollectionCreate,
+  type CollectionCreateInput,
+  type CollectionInput,
   CollectionCreateSchema,
   CollectionSchema,
   type Collection,

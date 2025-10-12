@@ -8,11 +8,20 @@ import {
   nameToIdMapping,
   enqueueOperation,
   markAttributeProcessed,
-  isAttributeProcessed
+  isAttributeProcessed,
 } from "../shared/operationQueue.js";
-import { delay, tryAwaitWithRetry, calculateExponentialBackoff } from "../utils/helperFunctions.js";
+import {
+  delay,
+  tryAwaitWithRetry,
+  calculateExponentialBackoff,
+} from "../utils/helperFunctions.js";
 import chalk from "chalk";
-import type { DatabaseAdapter, CreateAttributeParams, UpdateAttributeParams, DeleteAttributeParams } from "../adapters/DatabaseAdapter.js";
+import type {
+  DatabaseAdapter,
+  CreateAttributeParams,
+  UpdateAttributeParams,
+  DeleteAttributeParams,
+} from "../adapters/DatabaseAdapter.js";
 import { logger } from "../shared/logging.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { isDatabaseAdapter } from "../utils/typeGuards.js";
@@ -23,26 +32,37 @@ const MIN_MAX_THRESHOLD = 1_000_000_000_000;
 // Extreme values that Appwrite may return, which should be treated as undefined
 const EXTREME_MIN_INTEGER = -9223372036854776000;
 const EXTREME_MAX_INTEGER = 9223372036854776000;
-const EXTREME_MIN_FLOAT = -1.7976931348623157e+308;
-const EXTREME_MAX_FLOAT = 1.7976931348623157e+308;
+const EXTREME_MIN_FLOAT = -1.7976931348623157e308;
+const EXTREME_MAX_FLOAT = 1.7976931348623157e308;
 
 /**
  * Type guard to check if an attribute has min/max properties
  */
-const hasMinMaxProperties = (attribute: Attribute): attribute is Attribute & { min?: number; max?: number } => {
-  return attribute.type === 'integer' || attribute.type === 'double' || attribute.type === 'float';
+const hasMinMaxProperties = (
+  attribute: Attribute
+): attribute is Attribute & { min?: number; max?: number } => {
+  return (
+    attribute.type === "integer" ||
+    attribute.type === "double" ||
+    attribute.type === "float"
+  );
 };
 
 /**
  * Normalizes min/max values for integer and float attributes
  * Sets values to undefined if they exceed the threshold or are extreme values from database
  */
-const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: number } => {
+const normalizeMinMaxValues = (
+  attribute: Attribute
+): { min?: number; max?: number } => {
   if (!hasMinMaxProperties(attribute)) {
-    logger.debug(`Attribute '${attribute.key}' does not have min/max properties`, {
-      type: attribute.type,
-      operation: 'normalizeMinMaxValues'
-    });
+    logger.debug(
+      `Attribute '${attribute.key}' does not have min/max properties`,
+      {
+        type: attribute.type,
+        operation: "normalizeMinMaxValues",
+      }
+    );
     return {};
   }
 
@@ -54,7 +74,7 @@ const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: numb
     type,
     originalMin: min,
     originalMax: max,
-    operation: 'normalizeMinMaxValues'
+    operation: "normalizeMinMaxValues",
   });
 
   // Handle min value
@@ -63,30 +83,49 @@ const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: numb
     const originalMin = normalizedMin;
 
     // Check if it exceeds threshold or is an extreme database value
-    if (type === 'integer') {
-      if (Math.abs(minValue) >= MIN_MAX_THRESHOLD || minValue === EXTREME_MIN_INTEGER) {
-        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
-          type,
-          originalValue: originalMin,
-          numericValue: minValue,
-          reason: Math.abs(minValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
-          threshold: MIN_MAX_THRESHOLD,
-          extremeValue: EXTREME_MIN_INTEGER,
-          operation: 'normalizeMinMaxValues'
-        });
+    if (type === "integer") {
+      if (
+        Math.abs(minValue) >= MIN_MAX_THRESHOLD ||
+        minValue === EXTREME_MIN_INTEGER
+      ) {
+        logger.debug(
+          `Min value normalized to undefined for attribute '${attribute.key}'`,
+          {
+            type,
+            originalValue: originalMin,
+            numericValue: minValue,
+            reason:
+              Math.abs(minValue) >= MIN_MAX_THRESHOLD
+                ? "exceeds_threshold"
+                : "extreme_database_value",
+            threshold: MIN_MAX_THRESHOLD,
+            extremeValue: EXTREME_MIN_INTEGER,
+            operation: "normalizeMinMaxValues",
+          }
+        );
         normalizedMin = undefined;
       }
-    } else { // float/double
-      if (Math.abs(minValue) >= MIN_MAX_THRESHOLD || minValue === EXTREME_MIN_FLOAT) {
-        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
-          type,
-          originalValue: originalMin,
-          numericValue: minValue,
-          reason: Math.abs(minValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
-          threshold: MIN_MAX_THRESHOLD,
-          extremeValue: EXTREME_MIN_FLOAT,
-          operation: 'normalizeMinMaxValues'
-        });
+    } else {
+      // float/double
+      if (
+        Math.abs(minValue) >= MIN_MAX_THRESHOLD ||
+        minValue === EXTREME_MIN_FLOAT
+      ) {
+        logger.debug(
+          `Min value normalized to undefined for attribute '${attribute.key}'`,
+          {
+            type,
+            originalValue: originalMin,
+            numericValue: minValue,
+            reason:
+              Math.abs(minValue) >= MIN_MAX_THRESHOLD
+                ? "exceeds_threshold"
+                : "extreme_database_value",
+            threshold: MIN_MAX_THRESHOLD,
+            extremeValue: EXTREME_MIN_FLOAT,
+            operation: "normalizeMinMaxValues",
+          }
+        );
         normalizedMin = undefined;
       }
     }
@@ -98,41 +137,63 @@ const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: numb
     const originalMax = normalizedMax;
 
     // Check if it exceeds threshold or is an extreme database value
-    if (type === 'integer') {
-      if (Math.abs(maxValue) >= MIN_MAX_THRESHOLD || maxValue === EXTREME_MAX_INTEGER) {
-        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
-          type,
-          originalValue: originalMax,
-          numericValue: maxValue,
-          reason: Math.abs(maxValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
-          threshold: MIN_MAX_THRESHOLD,
-          extremeValue: EXTREME_MAX_INTEGER,
-          operation: 'normalizeMinMaxValues'
-        });
+    if (type === "integer") {
+      if (
+        Math.abs(maxValue) >= MIN_MAX_THRESHOLD ||
+        maxValue === EXTREME_MAX_INTEGER
+      ) {
+        logger.debug(
+          `Max value normalized to undefined for attribute '${attribute.key}'`,
+          {
+            type,
+            originalValue: originalMax,
+            numericValue: maxValue,
+            reason:
+              Math.abs(maxValue) >= MIN_MAX_THRESHOLD
+                ? "exceeds_threshold"
+                : "extreme_database_value",
+            threshold: MIN_MAX_THRESHOLD,
+            extremeValue: EXTREME_MAX_INTEGER,
+            operation: "normalizeMinMaxValues",
+          }
+        );
         normalizedMax = undefined;
       }
-    } else { // float/double
-      if (Math.abs(maxValue) >= MIN_MAX_THRESHOLD || maxValue === EXTREME_MAX_FLOAT) {
-        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
-          type,
-          originalValue: originalMax,
-          numericValue: maxValue,
-          reason: Math.abs(maxValue) >= MIN_MAX_THRESHOLD ? 'exceeds_threshold' : 'extreme_database_value',
-          threshold: MIN_MAX_THRESHOLD,
-          extremeValue: EXTREME_MAX_FLOAT,
-          operation: 'normalizeMinMaxValues'
-        });
+    } else {
+      // float/double
+      if (
+        Math.abs(maxValue) >= MIN_MAX_THRESHOLD ||
+        maxValue === EXTREME_MAX_FLOAT
+      ) {
+        logger.debug(
+          `Max value normalized to undefined for attribute '${attribute.key}'`,
+          {
+            type,
+            originalValue: originalMax,
+            numericValue: maxValue,
+            reason:
+              Math.abs(maxValue) >= MIN_MAX_THRESHOLD
+                ? "exceeds_threshold"
+                : "extreme_database_value",
+            threshold: MIN_MAX_THRESHOLD,
+            extremeValue: EXTREME_MAX_FLOAT,
+            operation: "normalizeMinMaxValues",
+          }
+        );
         normalizedMax = undefined;
       }
     }
   }
 
   const result = { min: normalizedMin, max: normalizedMax };
-  logger.debug(`Min/max normalization complete for attribute '${attribute.key}'`, {
-    type,
-    result,
-    operation: 'normalizeMinMaxValues'
-  });
+  logger.debug(
+    `Min/max normalization complete for attribute '${attribute.key}'`,
+    {
+      type,
+      result,
+      operation: "normalizeMinMaxValues",
+    }
+  );
 
   return result;
 };
@@ -144,6 +205,11 @@ const normalizeMinMaxValues = (attribute: Attribute): { min?: number; max?: numb
 const normalizeAttributeForComparison = (attribute: Attribute): Attribute => {
   const normalized: any = { ...attribute };
 
+  // Ignore defaults on required attributes to prevent false positives
+  if (normalized.required === true && "xdefault" in normalized) {
+    delete normalized.xdefault;
+  }
+
   // Normalize min/max for numeric types
   if (hasMinMaxProperties(attribute)) {
     const { min, max } = normalizeMinMaxValues(attribute);
@@ -153,7 +219,10 @@ const normalizeAttributeForComparison = (attribute: Attribute): Attribute => {
 
   // Remove xdefault if null/undefined to ensure consistent comparison
   // Appwrite sets xdefault: null for required attributes, but config files omit it
-  if ('xdefault' in normalized && (normalized.xdefault === null || normalized.xdefault === undefined)) {
+  if (
+    "xdefault" in normalized &&
+    (normalized.xdefault === null || normalized.xdefault === undefined)
+  ) {
     delete normalized.xdefault;
   }
 
@@ -170,14 +239,14 @@ const createAttributeViaAdapter = async (
   attribute: Attribute
 ): Promise<void> => {
   const startTime = Date.now();
-  const adapterType = isDatabaseAdapter(db) ? 'adapter' : 'legacy';
+  const adapterType = isDatabaseAdapter(db) ? "adapter" : "legacy";
 
   logger.info(`Creating attribute '${attribute.key}' via ${adapterType}`, {
     type: attribute.type,
     dbId,
     collectionId,
     adapterType,
-    operation: 'createAttributeViaAdapter'
+    operation: "createAttributeViaAdapter",
   });
 
   if (isDatabaseAdapter(db)) {
@@ -190,42 +259,67 @@ const createAttributeViaAdapter = async (
       required: attribute.required || false,
       array: attribute.array || false,
       ...((attribute as any).size && { size: (attribute as any).size }),
-      ...((attribute as any).xdefault !== undefined && !attribute.required && { default: (attribute as any).xdefault }),
-      ...((attribute as any).encrypted && { encrypt: (attribute as any).encrypted }),
-      ...((attribute as any).min !== undefined && { min: (attribute as any).min }),
-      ...((attribute as any).max !== undefined && { max: (attribute as any).max }),
-      ...((attribute as any).elements && { elements: (attribute as any).elements }),
-      ...((attribute as any).relatedCollection && { relatedCollection: (attribute as any).relatedCollection }),
-      ...((attribute as any).relationType && { relationType: (attribute as any).relationType }),
-      ...((attribute as any).twoWay !== undefined && { twoWay: (attribute as any).twoWay }),
-      ...((attribute as any).onDelete && { onDelete: (attribute as any).onDelete }),
-      ...((attribute as any).twoWayKey && { twoWayKey: (attribute as any).twoWayKey })
+      ...((attribute as any).xdefault !== undefined &&
+        !attribute.required && { default: (attribute as any).xdefault }),
+      ...((attribute as any).encrypted && {
+        encrypt: (attribute as any).encrypted,
+      }),
+      ...((attribute as any).min !== undefined && {
+        min: (attribute as any).min,
+      }),
+      ...((attribute as any).max !== undefined && {
+        max: (attribute as any).max,
+      }),
+      ...((attribute as any).elements && {
+        elements: (attribute as any).elements,
+      }),
+      ...((attribute as any).relatedCollection && {
+        relatedCollection: (attribute as any).relatedCollection,
+      }),
+      ...((attribute as any).relationType && {
+        relationType: (attribute as any).relationType,
+      }),
+      ...((attribute as any).twoWay !== undefined && {
+        twoWay: (attribute as any).twoWay,
+      }),
+      ...((attribute as any).onDelete && {
+        onDelete: (attribute as any).onDelete,
+      }),
+      ...((attribute as any).twoWayKey && {
+        twoWayKey: (attribute as any).twoWayKey,
+      }),
     };
 
     logger.debug(`Adapter create parameters for '${attribute.key}'`, {
       params,
-      operation: 'createAttributeViaAdapter'
+      operation: "createAttributeViaAdapter",
     });
 
     await db.createAttribute(params);
 
     const duration = Date.now() - startTime;
-    logger.info(`Successfully created attribute '${attribute.key}' via adapter`, {
-      duration,
-      operation: 'createAttributeViaAdapter'
-    });
+    logger.info(
+      `Successfully created attribute '${attribute.key}' via adapter`,
+      {
+        duration,
+        operation: "createAttributeViaAdapter",
+      }
+    );
   } else {
     // Use legacy type-specific methods
     logger.debug(`Using legacy creation for attribute '${attribute.key}'`, {
-      operation: 'createAttributeViaAdapter'
+      operation: "createAttributeViaAdapter",
     });
     await createLegacyAttribute(db, dbId, collectionId, attribute);
 
     const duration = Date.now() - startTime;
-    logger.info(`Successfully created attribute '${attribute.key}' via legacy`, {
-      duration,
-      operation: 'createAttributeViaAdapter'
-    });
+    logger.info(
+      `Successfully created attribute '${attribute.key}' via legacy`,
+      {
+        duration,
+        operation: "createAttributeViaAdapter",
+      }
+    );
   }
 };
 
@@ -244,9 +338,23 @@ const updateAttributeViaAdapter = async (
       databaseId: dbId,
       tableId: collectionId,
       key: attribute.key,
+      type: attribute.type,
       required: attribute.required || false,
-      ...((attribute as any).xdefault !== undefined && !attribute.required && { default: (attribute as any).xdefault })
+      array: attribute.array || false,
+      size: (attribute as any).size,
+      min: (attribute as any).min,
+      max: (attribute as any).max,
+      encrypt: (attribute as any).encrypted ?? (attribute as any).encrypt,
+      elements: (attribute as any).elements,
+      relatedCollection: (attribute as any).relatedCollection,
+      relationType: (attribute as any).relationType,
+      twoWay: (attribute as any).twoWay,
+      twoWayKey: (attribute as any).twoWayKey,
+      onDelete: (attribute as any).onDelete
     };
+    if (!attribute.required && (attribute as any).xdefault !== undefined) {
+      params.default = (attribute as any).xdefault;
+    }
     await db.updateAttribute(params);
   } else {
     // Use legacy type-specific methods
@@ -264,7 +372,8 @@ const createLegacyAttribute = async (
   attribute: Attribute
 ): Promise<void> => {
   const startTime = Date.now();
-  const { min: normalizedMin, max: normalizedMax } = normalizeMinMaxValues(attribute);
+  const { min: normalizedMin, max: normalizedMax } =
+    normalizeMinMaxValues(attribute);
 
   logger.info(`Creating legacy attribute '${attribute.key}'`, {
     type: attribute.type,
@@ -272,7 +381,7 @@ const createLegacyAttribute = async (
     collectionId,
     normalizedMin,
     normalizedMax,
-    operation: 'createLegacyAttribute'
+    operation: "createLegacyAttribute",
   });
 
   switch (attribute.type) {
@@ -280,13 +389,16 @@ const createLegacyAttribute = async (
       const stringParams = {
         size: (attribute as any).size || 255,
         required: attribute.required || false,
-        defaultValue: (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        defaultValue:
+          (attribute as any).xdefault !== undefined && !attribute.required
+            ? (attribute as any).xdefault
+            : undefined,
         array: attribute.array || false,
-        encrypted: (attribute as any).encrypted
+        encrypted: (attribute as any).encrypted,
       };
       logger.debug(`Creating string attribute '${attribute.key}'`, {
         ...stringParams,
-        operation: 'createLegacyAttribute'
+        operation: "createLegacyAttribute",
       });
       await db.createStringAttribute(
         dbId,
@@ -302,14 +414,23 @@ const createLegacyAttribute = async (
     case "integer":
       const integerParams = {
         required: attribute.required || false,
-        min: normalizedMin !== undefined ? parseInt(String(normalizedMin)) : undefined,
-        max: normalizedMax !== undefined ? parseInt(String(normalizedMax)) : undefined,
-        defaultValue: (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
-        array: attribute.array || false
+        min:
+          normalizedMin !== undefined
+            ? parseInt(String(normalizedMin))
+            : undefined,
+        max:
+          normalizedMax !== undefined
+            ? parseInt(String(normalizedMax))
+            : undefined,
+        defaultValue:
+          (attribute as any).xdefault !== undefined && !attribute.required
+            ? (attribute as any).xdefault
+            : undefined,
+        array: attribute.array || false,
       };
       logger.debug(`Creating integer attribute '${attribute.key}'`, {
         ...integerParams,
-        operation: 'createLegacyAttribute'
+        operation: "createLegacyAttribute",
       });
       await db.createIntegerAttribute(
         dbId,
@@ -331,7 +452,9 @@ const createLegacyAttribute = async (
         attribute.required || false,
         normalizedMin !== undefined ? Number(normalizedMin) : undefined,
         normalizedMax !== undefined ? Number(normalizedMax) : undefined,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -341,7 +464,9 @@ const createLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -351,7 +476,9 @@ const createLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -361,7 +488,9 @@ const createLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -371,7 +500,9 @@ const createLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -381,7 +512,9 @@ const createLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -392,7 +525,9 @@ const createLegacyAttribute = async (
         attribute.key,
         (attribute as any).elements || [],
         attribute.required || false,
-        (attribute as any).xdefault !== undefined && !attribute.required ? (attribute as any).xdefault : undefined,
+        (attribute as any).xdefault !== undefined && !attribute.required
+          ? (attribute as any).xdefault
+          : undefined,
         attribute.array || false
       );
       break;
@@ -409,12 +544,29 @@ const createLegacyAttribute = async (
       );
       break;
     default:
-      const error = new Error(`Unsupported attribute type: ${(attribute as any).type}`);
-      logger.error(`Unsupported attribute type for '${(attribute as any).key}'`, {
-        type: (attribute as any).type,
-        supportedTypes: ['string', 'integer', 'double', 'float', 'boolean', 'datetime', 'email', 'ip', 'url', 'enum', 'relationship'],
-        operation: 'createLegacyAttribute'
-      });
+      const error = new Error(
+        `Unsupported attribute type: ${(attribute as any).type}`
+      );
+      logger.error(
+        `Unsupported attribute type for '${(attribute as any).key}'`,
+        {
+          type: (attribute as any).type,
+          supportedTypes: [
+            "string",
+            "integer",
+            "double",
+            "float",
+            "boolean",
+            "datetime",
+            "email",
+            "ip",
+            "url",
+            "enum",
+            "relationship",
+          ],
+          operation: "createLegacyAttribute",
+        }
+      );
       throw error;
   }
 
@@ -422,7 +574,7 @@ const createLegacyAttribute = async (
   logger.info(`Successfully created legacy attribute '${attribute.key}'`, {
     type: attribute.type,
     duration,
-    operation: 'createLegacyAttribute'
+    operation: "createLegacyAttribute",
   });
 };
 
@@ -435,7 +587,8 @@ const updateLegacyAttribute = async (
   collectionId: string,
   attribute: Attribute
 ): Promise<void> => {
-  const { min: normalizedMin, max: normalizedMax } = normalizeMinMaxValues(attribute);
+  const { min: normalizedMin, max: normalizedMax } =
+    normalizeMinMaxValues(attribute);
 
   switch (attribute.type) {
     case "string":
@@ -444,7 +597,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null,
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null,
         attribute.size
       );
       break;
@@ -454,9 +609,15 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null,
-        normalizedMin !== undefined ? parseInt(String(normalizedMin)) : undefined,
-        normalizedMax !== undefined ? parseInt(String(normalizedMax)) : undefined
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null,
+        normalizedMin !== undefined
+          ? parseInt(String(normalizedMin))
+          : undefined,
+        normalizedMax !== undefined
+          ? parseInt(String(normalizedMax))
+          : undefined
       );
       break;
     case "double":
@@ -468,7 +629,9 @@ const updateLegacyAttribute = async (
         attribute.required || false,
         normalizedMin !== undefined ? Number(normalizedMin) : undefined,
         normalizedMax !== undefined ? Number(normalizedMax) : undefined,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "boolean":
@@ -477,7 +640,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "datetime":
@@ -486,7 +651,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "email":
@@ -495,7 +662,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "ip":
@@ -504,7 +673,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "url":
@@ -513,7 +684,9 @@ const updateLegacyAttribute = async (
         collectionId,
         attribute.key,
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "enum":
@@ -523,7 +696,9 @@ const updateLegacyAttribute = async (
         attribute.key,
         (attribute as any).elements || [],
         attribute.required || false,
-        !attribute.required && (attribute as any).xdefault !== undefined ? (attribute as any).xdefault : null
+        !attribute.required && (attribute as any).xdefault !== undefined
+          ? (attribute as any).xdefault
+          : null
       );
       break;
     case "relationship":
@@ -535,7 +710,9 @@ const updateLegacyAttribute = async (
       );
       break;
     default:
-      throw new Error(`Unsupported attribute type for update: ${(attribute as any).type}`);
+      throw new Error(
+        `Unsupported attribute type for update: ${(attribute as any).type}`
+      );
   }
 };
 
@@ -573,7 +750,7 @@ const waitForAttributeAvailable = async (
     maxWaitTime,
     retryCount,
     maxRetries,
-    operation: 'waitForAttributeAvailable'
+    operation: "waitForAttributeAvailable",
   });
 
   // Calculate exponential backoff: 2s, 4s, 8s, 16s, 30s (capped at 30s)
@@ -603,12 +780,15 @@ const waitForAttributeAvailable = async (
         dbId,
         collectionId,
         waitTime: Date.now() - startTime,
-        operation: 'waitForAttributeAvailable'
+        operation: "waitForAttributeAvailable",
       };
 
       switch (attribute.status) {
         case "available":
-          logger.info(`Attribute '${attributeKey}' became available`, statusInfo);
+          logger.info(
+            `Attribute '${attributeKey}' became available`,
+            statusInfo
+          );
           return true;
 
         case "failed":
@@ -621,14 +801,20 @@ const waitForAttributeAvailable = async (
 
         case "processing":
           // Continue waiting
-          logger.debug(`Attribute '${attributeKey}' still processing`, statusInfo);
+          logger.debug(
+            `Attribute '${attributeKey}' still processing`,
+            statusInfo
+          );
           break;
 
         case "deleting":
           MessageFormatter.info(
             chalk.yellow(`Attribute '${attributeKey}' is being deleted`)
           );
-          logger.warn(`Attribute '${attributeKey}' is being deleted`, statusInfo);
+          logger.warn(
+            `Attribute '${attributeKey}' is being deleted`,
+            statusInfo
+          );
           break;
 
         default:
@@ -637,22 +823,28 @@ const waitForAttributeAvailable = async (
               `Unknown status '${attribute.status}' for attribute '${attributeKey}'`
             )
           );
-          logger.warn(`Unknown status for attribute '${attributeKey}'`, statusInfo);
+          logger.warn(
+            `Unknown status for attribute '${attributeKey}'`,
+            statusInfo
+          );
           break;
       }
 
       await delay(checkInterval);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      MessageFormatter.error(`Error checking attribute status: ${errorMessage}`);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      MessageFormatter.error(
+        `Error checking attribute status: ${errorMessage}`
+      );
 
-      logger.error('Error checking attribute status', {
+      logger.error("Error checking attribute status", {
         attributeKey,
         dbId,
         collectionId,
         error: errorMessage,
         waitTime: Date.now() - startTime,
-        operation: 'waitForAttributeAvailable'
+        operation: "waitForAttributeAvailable",
       });
 
       return false;
@@ -745,14 +937,16 @@ const deleteAndRecreateCollection = async (
     // Recreate the collection
     MessageFormatter.info(`🔄 Recreating collection '${collection.name}'`);
     const newCollection = isDatabaseAdapter(db)
-      ? (await db.createTable({
-          databaseId: dbId,
-          id: collection.$id,
-          name: collection.name,
-          permissions: collection.$permissions,
-          documentSecurity: collection.documentSecurity,
-          enabled: collection.enabled
-        })).data
+      ? (
+          await db.createTable({
+            databaseId: dbId,
+            id: collection.$id,
+            name: collection.name,
+            permissions: collection.$permissions,
+            documentSecurity: collection.documentSecurity,
+            enabled: collection.enabled,
+          })
+        ).data
       : await db.createCollection(
           dbId,
           collection.$id,
@@ -794,7 +988,14 @@ const getComparableFields = (type: string): string[] => {
       return [...baseFields, "elements"];
 
     case "relationship":
-      return [...baseFields, "relationType", "twoWay", "twoWayKey", "onDelete", "relatedCollection"];
+      return [
+        ...baseFields,
+        "relationType",
+        "twoWay",
+        "twoWayKey",
+        "onDelete",
+        "relatedCollection",
+      ];
 
     case "boolean":
     case "datetime":
@@ -806,9 +1007,21 @@ const getComparableFields = (type: string): string[] => {
     default:
       // Fallback to all fields for unknown types
       return [
-        "key", "type", "array", "encrypted", "required", "size",
-        "min", "max", "xdefault", "elements", "relationType",
-        "twoWay", "twoWayKey", "onDelete", "relatedCollection"
+        "key",
+        "type",
+        "array",
+        "encrypted",
+        "required",
+        "size",
+        "min",
+        "max",
+        "xdefault",
+        "elements",
+        "relationType",
+        "twoWay",
+        "twoWayKey",
+        "onDelete",
+        "relatedCollection",
       ];
   }
 };
@@ -823,10 +1036,18 @@ const attributesSame = (
 
   // Use type-specific field list to avoid false positives from irrelevant fields
   const attributesToCheck = getComparableFields(normalizedConfigAttr.type);
+  const fieldsToCheck = attributesToCheck.filter((attr) => {
+    if (attr !== "xdefault") {
+      return true;
+    }
+    const dbRequired = Boolean((normalizedDbAttr as any).required);
+    const configRequired = Boolean((normalizedConfigAttr as any).required);
+    return !(dbRequired || configRequired);
+  });
 
   const differences: string[] = [];
 
-  const result = attributesToCheck.every((attr) => {
+  const result = fieldsToCheck.every((attr) => {
     // Check if both objects have the attribute
     const dbHasAttr = attr in normalizedDbAttr;
     const configHasAttr = attr in normalizedConfigAttr;
@@ -834,7 +1055,8 @@ const attributesSame = (
     // If both have the attribute, compare values
     if (dbHasAttr && configHasAttr) {
       const dbValue = normalizedDbAttr[attr as keyof typeof normalizedDbAttr];
-      const configValue = normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
+      const configValue =
+        normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
 
       // Consider undefined and null as equivalent
       if (
@@ -854,8 +1076,14 @@ const attributesSame = (
       }
       // For numeric comparisons, compare numbers if both are numeric-like
       if (
-        (typeof dbValue === "number" || (typeof dbValue === "string" && dbValue !== "" && !isNaN(Number(dbValue)))) &&
-        (typeof configValue === "number" || (typeof configValue === "string" && configValue !== "" && !isNaN(Number(configValue))))
+        (typeof dbValue === "number" ||
+          (typeof dbValue === "string" &&
+            dbValue !== "" &&
+            !isNaN(Number(dbValue)))) &&
+        (typeof configValue === "number" ||
+          (typeof configValue === "string" &&
+            configValue !== "" &&
+            !isNaN(Number(configValue))))
       ) {
         const numMatch = Number(dbValue) === Number(configValue);
         if (!numMatch) {
@@ -870,14 +1098,22 @@ const attributesSame = (
           dbValue.length === configValue.length &&
           dbValue.every((val) => configValue.includes(val));
         if (!arrayMatch) {
-          differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(configValue)}`);
+          differences.push(
+            `${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(
+              configValue
+            )}`
+          );
         }
         return arrayMatch;
       }
 
       const match = dbValue === configValue;
       if (!match) {
-        differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(configValue)}`);
+        differences.push(
+          `${attr}: db=${JSON.stringify(dbValue)} config=${JSON.stringify(
+            configValue
+          )}`
+        );
       }
       return match;
     }
@@ -900,13 +1136,16 @@ const attributesSame = (
       }
       const match = dbValue === undefined || dbValue === null;
       if (!match) {
-        differences.push(`${attr}: db=${JSON.stringify(dbValue)} config=<missing>`);
+        differences.push(
+          `${attr}: db=${JSON.stringify(dbValue)} config=<missing>`
+        );
       }
       return match;
     }
 
     if (!dbHasAttr && configHasAttr) {
-      const configValue = normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
+      const configValue =
+        normalizedConfigAttr[attr as keyof typeof normalizedConfigAttr];
       // Consider default-false booleans as equal to missing in db
       if (typeof configValue === "boolean") {
         const match = configValue === false; // missing in db equals false in config
@@ -917,7 +1156,9 @@ const attributesSame = (
       }
       const match = configValue === undefined || configValue === null;
       if (!match) {
-        differences.push(`${attr}: db=<missing> config=${JSON.stringify(configValue)}`);
+        differences.push(
+          `${attr}: db=<missing> config=${JSON.stringify(configValue)}`
+        );
       }
       return match;
     }
@@ -927,23 +1168,16 @@ const attributesSame = (
     return false;
   });
 
-  // Log differences if any were found
-  if (differences.length > 0) {
-    logger.debug(`Attribute '${normalizedDbAttr.key}' comparison found differences:`, {
-      differences,
-      operation: 'attributesSame'
-    });
-  }
-
-  // Log differences if comparison failed (for debugging)
   if (!result && differences.length > 0) {
-    MessageFormatter.debug(
-      `Attribute '${configAttribute.key}' differences detected:`,
-      { prefix: "Attributes" }
+    logger.debug(
+      `Attribute mismatch detected for '${normalizedConfigAttr.key}'`,
+      {
+        differences,
+        dbAttribute: normalizedDbAttr,
+        configAttribute: normalizedConfigAttr,
+        operation: "attributesSame",
+      }
     );
-    differences.forEach(diff => {
-      MessageFormatter.debug(`  ${diff}`, { prefix: "Attributes" });
-    });
   }
 
   return result;
@@ -962,7 +1196,12 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 ): Promise<boolean> => {
   try {
     // First, try to create/update the attribute using existing logic
-    const result = await createOrUpdateAttribute(db, dbId, collection, attribute);
+    const result = await createOrUpdateAttribute(
+      db,
+      dbId,
+      collection,
+      attribute
+    );
 
     // If the attribute was queued (relationship dependency unresolved),
     // skip status polling and retry logic — the queue will handle it later.
@@ -977,7 +1216,9 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
     // If collection creation failed, return false to indicate failure
     if (result === "error") {
-      MessageFormatter.error(`Failed to create collection for attribute '${attribute.key}'`);
+      MessageFormatter.error(
+        `Failed to create collection for attribute '${attribute.key}'`
+      );
       return false;
     }
 
@@ -1007,7 +1248,11 @@ export const createOrUpdateAttributeWithStatusCheck = async (
       // Try to delete the specific stuck attribute instead of the entire collection
       try {
         if (isDatabaseAdapter(db)) {
-          await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attribute.key });
+          await db.deleteAttribute({
+            databaseId: dbId,
+            tableId: collection.$id,
+            key: attribute.key,
+          });
         } else {
           await db.deleteAttribute(dbId, collection.$id, attribute.key);
         }
@@ -1022,7 +1267,8 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
         // Get fresh collection data
         const freshCollection = isDatabaseAdapter(db)
-          ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data
+          ? (await db.getTable({ databaseId: dbId, tableId: collection.$id }))
+              .data
           : await db.getCollection(dbId, collection.$id);
 
         // Retry with the same collection (attribute should be gone now)
@@ -1051,8 +1297,9 @@ export const createOrUpdateAttributeWithStatusCheck = async (
 
           // Get fresh collection data
           const freshCollection = isDatabaseAdapter(db)
-          ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data
-          : await db.getCollection(dbId, collection.$id);
+            ? (await db.getTable({ databaseId: dbId, tableId: collection.$id }))
+                .data
+            : await db.getCollection(dbId, collection.$id);
 
           // Delete and recreate collection
           const newCollection = await deleteAndRecreateCollection(
@@ -1137,9 +1384,41 @@ export const createOrUpdateAttribute = async (
       (attr: any) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
-
   } catch (error) {
     foundAttribute = undefined;
+  }
+
+  // If attribute exists but type changed, delete it so we can recreate with new type
+  if (
+    foundAttribute &&
+    foundAttribute.type !== attribute.type
+  ) {
+    MessageFormatter.info(
+      chalk.yellow(
+        `Attribute '${attribute.key}' type changed from '${foundAttribute.type}' to '${attribute.type}'. Recreating attribute.`
+      )
+    );
+    try {
+      if (isDatabaseAdapter(db)) {
+        await db.deleteAttribute({
+          databaseId: dbId,
+          tableId: collection.$id,
+          key: attribute.key
+        });
+      } else {
+        await db.deleteAttribute(dbId, collection.$id, attribute.key);
+      }
+      // Remove from local collection metadata so downstream logic treats it as new
+      collection.attributes = collection.attributes.filter(
+        (attr: any) => attr.key !== attribute.key
+      );
+      foundAttribute = undefined;
+    } catch (deleteError) {
+      MessageFormatter.error(
+        `Failed to delete attribute '${attribute.key}' before recreation: ${deleteError}`
+      );
+      return "error";
+    }
   }
 
   if (
@@ -1168,7 +1447,11 @@ export const createOrUpdateAttribute = async (
     !attributesSame(foundAttribute, attribute)
   ) {
     if (isDatabaseAdapter(db)) {
-      await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attribute.key });
+      await db.deleteAttribute({
+        databaseId: dbId,
+        tableId: collection.$id,
+        key: attribute.key,
+      });
     } else {
       await db.deleteAttribute(dbId, collection.$id, attribute.key);
     }
@@ -1177,8 +1460,6 @@ export const createOrUpdateAttribute = async (
     );
     return "processed";
   }
-
-
 
   // Relationship attribute logic with adjustments
   let collectionFoundViaRelatedCollection: Models.Collection | undefined;
@@ -1190,7 +1471,12 @@ export const createOrUpdateAttribute = async (
     // First try treating relatedCollection as an ID directly
     try {
       const byIdCollection = isDatabaseAdapter(db)
-        ? (await db.getTable({ databaseId: dbId, tableId: finalAttribute.relatedCollection })).data
+        ? (
+            await db.getTable({
+              databaseId: dbId,
+              tableId: finalAttribute.relatedCollection,
+            })
+          ).data
         : await db.getCollection(dbId, finalAttribute.relatedCollection);
       collectionFoundViaRelatedCollection = byIdCollection;
       relatedCollectionId = byIdCollection.$id;
@@ -1200,13 +1486,21 @@ export const createOrUpdateAttribute = async (
       // Not an ID or not found — fall back to name-based resolution below
     }
 
-    if (!collectionFoundViaRelatedCollection && nameToIdMapping.has(finalAttribute.relatedCollection)) {
+    if (
+      !collectionFoundViaRelatedCollection &&
+      nameToIdMapping.has(finalAttribute.relatedCollection)
+    ) {
       relatedCollectionId = nameToIdMapping.get(
         finalAttribute.relatedCollection
       );
       try {
         collectionFoundViaRelatedCollection = isDatabaseAdapter(db)
-          ? (await db.getTable({ databaseId: dbId, tableId: relatedCollectionId! })).data
+          ? (
+              await db.getTable({
+                databaseId: dbId,
+                tableId: relatedCollectionId!,
+              })
+            ).data
           : await db.getCollection(dbId, relatedCollectionId!);
       } catch (e) {
         // MessageFormatter.info(
@@ -1216,8 +1510,13 @@ export const createOrUpdateAttribute = async (
       }
     } else if (!collectionFoundViaRelatedCollection) {
       const collectionsPulled = isDatabaseAdapter(db)
-        ? await db.listTables({ databaseId: dbId, queries: [Query.equal("name", finalAttribute.relatedCollection)] })
-        : await db.listCollections(dbId, [Query.equal("name", finalAttribute.relatedCollection)]);
+        ? await db.listTables({
+            databaseId: dbId,
+            queries: [Query.equal("name", finalAttribute.relatedCollection)],
+          })
+        : await db.listCollections(dbId, [
+            Query.equal("name", finalAttribute.relatedCollection),
+          ]);
       if (collectionsPulled.total && collectionsPulled.total > 0) {
         collectionFoundViaRelatedCollection = isDatabaseAdapter(db)
           ? (collectionsPulled as any).tables?.[0]
@@ -1257,13 +1556,17 @@ export const createOrUpdateAttribute = async (
       : db.getCollection(dbId, collection.$id));
   } catch (error) {
     // Collection doesn't exist - create it
-    if ((error as any).code === 404 ||
-        (error instanceof Error && (
-          error.message.includes('collection_not_found') ||
-          error.message.includes('Collection with the requested ID could not be found')
-        ))) {
-
-      MessageFormatter.info(`Collection '${collection.name}' doesn't exist, creating it first...`);
+    if (
+      (error as any).code === 404 ||
+      (error instanceof Error &&
+        (error.message.includes("collection_not_found") ||
+          error.message.includes(
+            "Collection with the requested ID could not be found"
+          )))
+    ) {
+      MessageFormatter.info(
+        `Collection '${collection.name}' doesn't exist, creating it first...`
+      );
 
       try {
         if (isDatabaseAdapter(db)) {
@@ -1273,7 +1576,7 @@ export const createOrUpdateAttribute = async (
             name: collection.name,
             permissions: collection.$permissions || [],
             documentSecurity: collection.documentSecurity ?? false,
-            enabled: collection.enabled ?? true
+            enabled: collection.enabled ?? true,
           });
         } else {
           await db.createCollection(
@@ -1291,7 +1594,9 @@ export const createOrUpdateAttribute = async (
       } catch (createError) {
         MessageFormatter.error(
           `Failed to create collection '${collection.name}'`,
-          createError instanceof Error ? createError : new Error(String(createError))
+          createError instanceof Error
+            ? createError
+            : new Error(String(createError))
         );
         return "error";
       }
@@ -1304,11 +1609,23 @@ export const createOrUpdateAttribute = async (
   // Use adapter-based attribute creation/update
   if (action === "create") {
     await tryAwaitWithRetry(
-      async () => await createAttributeViaAdapter(db, dbId, collection.$id, finalAttribute)
+      async () =>
+        await createAttributeViaAdapter(
+          db,
+          dbId,
+          collection.$id,
+          finalAttribute
+        )
     );
   } else {
     await tryAwaitWithRetry(
-      async () => await updateAttributeViaAdapter(db, dbId, collection.$id, finalAttribute)
+      async () =>
+        await updateAttributeViaAdapter(
+          db,
+          dbId,
+          collection.$id,
+          finalAttribute
+        )
     );
   }
   return "processed";
@@ -1324,7 +1641,6 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   attributes: Attribute[]
 ): Promise<boolean> => {
   const existingAttributes: Attribute[] =
-    // @ts-expect-error
     collection.attributes.map((attr) => parseAttribute(attr)) || [];
 
   const attributesToRemove = existingAttributes.filter(
@@ -1345,15 +1661,17 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         )
       );
       for (const index of indexesToRemove) {
-        await tryAwaitWithRetry(
-          async () => {
-            if (isDatabaseAdapter(db)) {
-              await db.deleteIndex({ databaseId: dbId, tableId: collection.$id, key: index.key });
-            } else {
-              await db.deleteIndex(dbId, collection.$id, index.key);
-            }
+        await tryAwaitWithRetry(async () => {
+          if (isDatabaseAdapter(db)) {
+            await db.deleteIndex({
+              databaseId: dbId,
+              tableId: collection.$id,
+              key: index.key,
+            });
+          } else {
+            await db.deleteIndex(dbId, collection.$id, index.key);
           }
-        );
+        });
         await delay(500); // Longer delay for deletions
       }
     }
@@ -1363,15 +1681,17 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
           `Removing attribute: ${attr.key} as it is no longer in the collection`
         )
       );
-      await tryAwaitWithRetry(
-        async () => {
-          if (isDatabaseAdapter(db)) {
-            await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attr.key });
-          } else {
-            await db.deleteAttribute(dbId, collection.$id, attr.key);
-          }
+      await tryAwaitWithRetry(async () => {
+        if (isDatabaseAdapter(db)) {
+          await db.deleteAttribute({
+            databaseId: dbId,
+            tableId: collection.$id,
+            key: attr.key,
+          });
+        } else {
+          await db.deleteAttribute(dbId, collection.$id, attr.key);
         }
-      );
+      });
       await delay(500); // Longer delay for deletions
     }
   }
@@ -1391,7 +1711,6 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   const existingAttributesMap = new Map<string, Attribute>();
   try {
     const parsedAttributes = currentCollection.attributes.map((attr) =>
-      // @ts-expect-error
       parseAttribute(attr)
     );
     parsedAttributes.forEach((attr) =>
@@ -1455,8 +1774,13 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
         // Get updated collection data for next iteration
         try {
           currentCollection = isDatabaseAdapter(db)
-      ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data as Models.Collection
-      : await db.getCollection(dbId, collection.$id);
+            ? ((
+                await db.getTable({ databaseId: dbId, tableId: collection.$id })
+              ).data as Models.Collection)
+            : await db.getCollection({
+                databaseId: dbId,
+                collectionId: collection.$id,
+              });
         } catch (error) {
           MessageFormatter.info(
             chalk.yellow(`Warning: Could not refresh collection data: ${error}`)
@@ -1479,15 +1803,18 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
     if (overallRetryCount < maxOverallRetries) {
       MessageFormatter.info(
-        chalk.yellow(`⏳ Retrying ${remainingAttributes.length} failed attributes...`)
+        chalk.yellow(
+          `⏳ Retrying ${remainingAttributes.length} failed attributes...`
+        )
       );
       await delay(5000);
 
       // Refresh collection data before retry
       try {
         currentCollection = isDatabaseAdapter(db)
-      ? (await db.getTable({ databaseId: dbId, tableId: collection.$id })).data as Models.Collection
-      : await db.getCollection(dbId, collection.$id);
+          ? ((await db.getTable({ databaseId: dbId, tableId: collection.$id }))
+              .data as Models.Collection)
+          : await db.getCollection(dbId, collection.$id);
       } catch (error) {
         // Silently continue if refresh fails
       }
@@ -1534,7 +1861,6 @@ export const createUpdateCollectionAttributes = async (
   );
 
   const existingAttributes: Attribute[] =
-    // @ts-expect-error
     collection.attributes.map((attr) => parseAttribute(attr)) || [];
 
   const attributesToRemove = existingAttributes.filter(
@@ -1554,15 +1880,17 @@ export const createUpdateCollectionAttributes = async (
         )
       );
       for (const index of indexesToRemove) {
-        await tryAwaitWithRetry(
-          async () => {
-            if (isDatabaseAdapter(db)) {
-              await db.deleteIndex({ databaseId: dbId, tableId: collection.$id, key: index.key });
-            } else {
-              await db.deleteIndex(dbId, collection.$id, index.key);
-            }
+        await tryAwaitWithRetry(async () => {
+          if (isDatabaseAdapter(db)) {
+            await db.deleteIndex({
+              databaseId: dbId,
+              tableId: collection.$id,
+              key: index.key,
+            });
+          } else {
+            await db.deleteIndex(dbId, collection.$id, index.key);
           }
-        );
+        });
         await delay(100);
       }
     }
@@ -1572,15 +1900,17 @@ export const createUpdateCollectionAttributes = async (
           `Removing attribute: ${attr.key} as it is no longer in the collection`
         )
       );
-      await tryAwaitWithRetry(
-        async () => {
-          if (isDatabaseAdapter(db)) {
-            await db.deleteAttribute({ databaseId: dbId, tableId: collection.$id, key: attr.key });
-          } else {
-            await db.deleteAttribute(dbId, collection.$id, attr.key);
-          }
+      await tryAwaitWithRetry(async () => {
+        if (isDatabaseAdapter(db)) {
+          await db.deleteAttribute({
+            databaseId: dbId,
+            tableId: collection.$id,
+            key: attr.key,
+          });
+        } else {
+          await db.deleteAttribute(dbId, collection.$id, attr.key);
         }
-      );
+      });
       await delay(50);
     }
   }
@@ -1598,7 +1928,10 @@ export const createUpdateCollectionAttributes = async (
     const results = await Promise.allSettled(attributePromises);
     results.forEach((result) => {
       if (result.status === "rejected") {
-        MessageFormatter.error("An attribute promise was rejected:", result.reason);
+        MessageFormatter.error(
+          "An attribute promise was rejected:",
+          result.reason
+        );
       }
     });
 

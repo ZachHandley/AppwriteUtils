@@ -49,6 +49,11 @@ const BaseTableSchemaCore = z.object({
     .default(false)
     .optional()
     .describe("Whether document security is enabled or not"),
+  rowSecurity: z
+    .boolean()
+    .default(false)
+    .optional()
+    .describe("Whether row-level security is enabled (TablesDB terminology)"),
   $createdAt: z.string(),
   $updatedAt: z.string(),
   $permissions: z

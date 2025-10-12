@@ -9,7 +9,11 @@ import {
   type YamlCollectionData,
   type YamlTerminologyConfig
 } from "./yamlConverter.js";
-import type { CollectionCreate } from "appwrite-utils";
+import {
+  CollectionCreateSchema,
+  type CollectionCreate,
+  type CollectionCreateInput
+} from "appwrite-utils";
 
 /**
  * Enhanced YAML loader with dual terminology support
@@ -149,7 +153,7 @@ export class YamlLoader {
     // Always normalize to ensure consistent attribute terminology
     const normalized = normalizeYamlData(yamlData);
 
-    return {
+    const collectionInput: CollectionCreateInput = {
       name: normalized.name,
       $id: normalized.id || normalized.name.toLowerCase().replace(/\s+/g, '_'),
       enabled: normalized.enabled !== false,
@@ -173,7 +177,9 @@ export class YamlLoader {
         twoWay: attr.twoWay,
         twoWayKey: attr.twoWayKey,
         onDelete: attr.onDelete as any,
-        side: attr.side as any
+        side: attr.side as any,
+        encrypt: (attr as any).encrypt,
+        format: (attr as any).format
       })) || [],
       indexes: normalized.indexes?.map(idx => ({
         key: idx.key,
@@ -183,6 +189,8 @@ export class YamlLoader {
       })) || [],
       importDefs: normalized.importDefs || []
     };
+
+    return CollectionCreateSchema.parse(collectionInput);
   }
 
   /**

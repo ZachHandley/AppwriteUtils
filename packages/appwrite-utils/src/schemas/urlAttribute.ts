@@ -1,24 +1,2 @@
-import { z } from "zod";
-
-export const urlAttributeSchema = z.object({
-  key: z.string().describe("The key of the attribute"),
-  type: z.literal("url").describe("The type of the attribute").default("url"),
-  error: z
-    .string()
-    .default("Invalid String Attribute Schema")
-    .optional()
-    .describe("The error message if the attribute is invalid"),
-  required: z
-    .boolean()
-    .default(false)
-    .optional()
-    .describe("Whether the attribute is required or not"),
-  array: z
-    .boolean()
-    .default(false)
-    .optional()
-    .describe("Whether the attribute is an array or not"),
-  xdefault: z.string().nullish().describe("The default value of the attribute"),
-});
-
-export type UrlAttribute = z.infer<typeof urlAttributeSchema>;
+export { urlAttributeSchema } from "./attribute.js";
+export type { UrlAttribute } from "./attribute.js";

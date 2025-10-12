@@ -1,6 +1,11 @@
 import path from "path";
 import fs from "fs";
-import { type CollectionCreate, type Collection } from "appwrite-utils";
+import {
+  CollectionCreateSchema,
+  type CollectionCreate,
+  type CollectionCreateInput,
+  type Collection
+} from "appwrite-utils";
 import { register } from "tsx/esm/api";
 import { pathToFileURL } from "node:url";
 import yaml from "js-yaml";
@@ -169,7 +174,7 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
     const parsedCollection = YamlCollectionSchema.parse(yamlData);
 
     // Convert YAML collection to CollectionCreate format
-    const collection: CollectionCreate = {
+    const collectionInput: CollectionCreateInput = {
       name: parsedCollection.name,
       $id: parsedCollection.id || parsedCollection.name.toLowerCase().replace(/\s+/g, '_'),
       documentSecurity: parsedCollection.documentSecurity,
@@ -194,7 +199,7 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
         twoWayKey: attr.twoWayKey,
         onDelete: attr.onDelete as any,
         side: attr.side as any,
-        encrypted: (attr as any).encrypt,
+        encrypt: (attr as any).encrypt,
         format: (attr as any).format
       })),
       indexes: parsedCollection.indexes.map(idx => ({
@@ -205,6 +210,8 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
       })),
       importDefs: parsedCollection.importDefs && Array.isArray(parsedCollection.importDefs) && parsedCollection.importDefs.length > 0 ? parsedCollection.importDefs : []
     };
+
+    const collection = CollectionCreateSchema.parse(collectionInput);
 
     return collection;
   } catch (error) {

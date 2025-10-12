@@ -164,12 +164,13 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async createTable(params: CreateTableParams): Promise<ApiResponse> {
     try {
+      const rowSecurity = params.rowSecurity ?? params.documentSecurity ?? false;
       const result = await this.tablesDB.createTable(
         params.databaseId,
         params.id, // tableId
         params.name,
         params.permissions || [],
-        params.documentSecurity ?? false,
+        rowSecurity,
         params.enabled ?? true
       );
       return {
@@ -187,12 +188,13 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateTable(params: UpdateTableParams): Promise<ApiResponse> {
     try {
+      const rowSecurity = params.rowSecurity ?? params.documentSecurity;
       const result = await this.tablesDB.updateTable(
         params.databaseId,
         params.id, // tableId
         params.name,
         params.permissions,
-        params.documentSecurity,
+        rowSecurity,
         params.enabled
       );
       return {
@@ -300,127 +302,142 @@ export class TablesDBAdapter extends BaseAdapter {
   // Attribute Operations
   async createAttribute(params: CreateAttributeParams): Promise<ApiResponse> {
     try {
-      // TablesDB uses type-specific attribute methods like the legacy SDK
+      // TablesDB exposes type-specific column methods
       let result;
+      const type = (params.type || "").toLowerCase();
+      const required = params.required ?? false;
+      const array = params.array ?? false;
+      const encrypt = params.encrypt ?? (params as any).encrypted ?? false;
+      const normalizedDefault =
+        params.default === null || params.default === undefined
+          ? undefined
+          : params.default;
+      const numberDefault =
+        typeof normalizedDefault === "number" ? normalizedDefault : undefined;
+      const stringDefault =
+        typeof normalizedDefault === "string" ? normalizedDefault : undefined;
+      const booleanDefault =
+        typeof normalizedDefault === "boolean" ? normalizedDefault : undefined;
 
-      switch (params.type.toLowerCase()) {
+      switch (type) {
         case 'string':
-          result = await this.tablesDB.createStringAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.size || 255,
-            params.required ?? false,
-            params.default,
-            params.array ?? false,
-            params.encrypt ?? false
-          );
+          result = await this.tablesDB.createStringColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            size: typeof params.size === "number" ? params.size : 255,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array,
+            encrypt
+          });
           break;
 
         case 'integer':
-          result = await this.tablesDB.createIntegerAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.min,
-            params.max,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createIntegerColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            min: params.min,
+            max: params.max,
+            xdefault: required ? undefined : numberDefault,
+            array
+          });
           break;
 
         case 'float':
         case 'double':
-          result = await this.tablesDB.createFloatAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.min,
-            params.max,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createFloatColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            min: params.min,
+            max: params.max,
+            xdefault: required ? undefined : numberDefault,
+            array
+          });
           break;
 
         case 'boolean':
-          result = await this.tablesDB.createBooleanAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createBooleanColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : booleanDefault,
+            array
+          });
           break;
 
         case 'datetime':
-          result = await this.tablesDB.createDatetimeAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createDatetimeColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array
+          });
           break;
 
         case 'email':
-          result = await this.tablesDB.createEmailAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createEmailColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array
+          });
           break;
 
         case 'enum':
-          result = await this.tablesDB.createEnumAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.elements || [],
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createEnumColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            elements: params.elements || [],
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array
+          });
           break;
 
         case 'ip':
-          result = await this.tablesDB.createIpAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createIpColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array
+          });
           break;
 
         case 'url':
-          result = await this.tablesDB.createUrlAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.tablesDB.createUrlColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            array
+          });
           break;
 
         case 'relationship':
-          result = await this.tablesDB.createRelationshipAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.relatedCollection || '',
-            params.type || 'oneToOne',
-            params.twoWay ?? false,
-            params.onDelete || 'restrict'
-          );
+          result = await this.tablesDB.createRelationshipColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            relatedTableId: params.relatedCollection || params.relatedTableId || "",
+            type: params.relationType || "oneToOne",
+            twoWay: params.twoWay ?? false,
+            key: params.key,
+            twoWayKey: params.twoWayKey,
+            onDelete: params.onDelete
+          });
           break;
 
         default:
@@ -442,15 +459,124 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse> {
     try {
-      // TablesDB uses type-specific update methods or generic updateAttribute with positional params
-      // Try type-specific first, fallback to generic
-      const result = await this.tablesDB.updateStringAttribute(
-        params.databaseId,
-        params.tableId,
-        params.key,
-        params.required ?? false,
-        params.default
-      );
+      const type = (params.type || "").toLowerCase();
+      const required = params.required ?? false;
+      const normalizedDefault =
+        params.default === null || params.default === undefined
+          ? undefined
+          : params.default;
+      const numberDefault =
+        typeof normalizedDefault === "number" ? normalizedDefault : undefined;
+      const stringDefault =
+        typeof normalizedDefault === "string" ? normalizedDefault : undefined;
+      const booleanDefault =
+        typeof normalizedDefault === "boolean" ? normalizedDefault : undefined;
+      let result;
+
+      switch (type) {
+        case 'string':
+          result = await this.tablesDB.updateStringColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault,
+            size: params.size
+          });
+          break;
+        case 'integer':
+          result = await this.tablesDB.updateIntegerColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : numberDefault,
+            min: params.min,
+            max: params.max
+          });
+          break;
+        case 'float':
+        case 'double':
+          result = await this.tablesDB.updateFloatColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : numberDefault,
+            min: params.min,
+            max: params.max
+          });
+          break;
+        case 'boolean':
+          result = await this.tablesDB.updateBooleanColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : booleanDefault
+          });
+          break;
+        case 'datetime':
+          result = await this.tablesDB.updateDatetimeColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault
+          });
+          break;
+        case 'email':
+          result = await this.tablesDB.updateEmailColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault
+          });
+          break;
+        case 'enum':
+          result = await this.tablesDB.updateEnumColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            elements: params.elements || [],
+            required,
+            xdefault: required ? undefined : stringDefault
+          });
+          break;
+        case 'ip':
+          result = await this.tablesDB.updateIpColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault
+          });
+          break;
+        case 'url':
+          result = await this.tablesDB.updateUrlColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            required,
+            xdefault: required ? undefined : stringDefault
+          });
+          break;
+        case 'relationship':
+          result = await this.tablesDB.updateRelationshipColumn({
+            databaseId: params.databaseId,
+            tableId: params.tableId,
+            key: params.key,
+            onDelete: params.onDelete
+          });
+          break;
+        default:
+          throw new AdapterError(
+            `Unsupported attribute type for update: ${params.type}`,
+            'UNSUPPORTED_ATTRIBUTE_TYPE'
+          );
+      }
+
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -463,7 +589,7 @@ export class TablesDBAdapter extends BaseAdapter {
 
   async deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteAttribute(
+      const result = await this.tablesDB.deleteColumn(
         params.databaseId,
         params.tableId,
         params.key

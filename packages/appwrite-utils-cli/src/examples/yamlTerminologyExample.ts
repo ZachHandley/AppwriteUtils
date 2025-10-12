@@ -21,7 +21,11 @@ import {
 import { createYamlLoader } from "../utils/yamlLoader.js";
 import { YamlImportIntegration } from "../migrations/yaml/YamlImportIntegration.js";
 import { createImportSchemas } from "../migrations/yaml/generateImportSchemas.js";
-import type { CollectionCreate } from "appwrite-utils";
+import {
+  CollectionCreateSchema,
+  type CollectionCreate,
+  type CollectionCreateInput
+} from "appwrite-utils";
 import fs from "fs";
 import path from "path";
 
@@ -271,7 +275,7 @@ export async function runYamlTerminologyExamples(outputDir: string): Promise<voi
 
   try {
     // Example collection for demonstrations
-    const exampleCollection: CollectionCreate = {
+    const exampleCollectionInput: CollectionCreateInput = {
       name: "Product",
       $id: "product",
       enabled: true,
@@ -308,6 +312,7 @@ export async function runYamlTerminologyExamples(outputDir: string): Promise<voi
       ],
       importDefs: []
     };
+    const exampleCollection = CollectionCreateSchema.parse(exampleCollectionInput);
 
     // Run examples
     await generateTemplateExamples(outputDir);
