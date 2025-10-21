@@ -8,6 +8,7 @@ export interface YamlCollectionData {
   name: string;
   id?: string;
   documentSecurity?: boolean;
+  rowSecurity?: boolean;
   enabled?: boolean;
   permissions?: Array<{
     permission: string;
@@ -86,9 +87,15 @@ export function collectionToYaml(
   const yamlData: YamlCollectionData = {
     name: collection.name,
     id: collection.$id,
-    documentSecurity: collection.documentSecurity,
     enabled: collection.enabled,
   };
+
+  // Use appropriate security field based on terminology
+  if (config.useTableTerminology) {
+    yamlData.rowSecurity = collection.documentSecurity;
+  } else {
+    yamlData.documentSecurity = collection.documentSecurity;
+  }
 
   // Convert permissions
   if (collection.$permissions && collection.$permissions.length > 0) {
@@ -240,6 +247,12 @@ export function normalizeYamlData(yamlData: YamlCollectionData): YamlCollectionD
     }));
   }
 
+  // Normalize security fields - prefer documentSecurity for consistency
+  if (yamlData.rowSecurity !== undefined && yamlData.documentSecurity === undefined) {
+    normalized.documentSecurity = yamlData.rowSecurity;
+    delete normalized.rowSecurity;
+  }
+
   return normalized;
 }
 
@@ -248,7 +261,8 @@ export function normalizeYamlData(yamlData: YamlCollectionData): YamlCollectionD
  */
 export function usesTableTerminology(yamlData: YamlCollectionData): boolean {
   return !!(yamlData.columns && yamlData.columns.length > 0) ||
-         !!(yamlData.indexes?.some(idx => !!(idx as any).columns));
+         !!(yamlData.indexes?.some(idx => !!(idx as any).columns)) ||
+         yamlData.rowSecurity !== undefined;
 }
 
 /**
@@ -277,6 +291,12 @@ export function convertTerminology(
         columns: idx.attributes,
         attributes: idx.attributes // Keep both for compatibility
       }));
+    }
+
+    // Convert security field
+    if (yamlData.documentSecurity !== undefined && yamlData.rowSecurity === undefined) {
+      converted.rowSecurity = yamlData.documentSecurity;
+      delete converted.documentSecurity;
     }
 
     return converted;
@@ -367,7 +387,6 @@ export function generateYamlTemplate(
   const template: YamlCollectionData = {
     name: entityName,
     id: entityName.toLowerCase().replace(/\s+/g, '_'),
-    documentSecurity: false,
     enabled: true,
     permissions: [
       {
@@ -389,6 +408,13 @@ export function generateYamlTemplate(
     ],
     importDefs: []
   };
+
+  // Use appropriate security field based on terminology
+  if (config.useTableTerminology) {
+    template.rowSecurity = false;
+  } else {
+    template.documentSecurity = false;
+  }
 
   // Assign fields with correct property name
   (template as any)[fieldsKey] = fieldsArray;

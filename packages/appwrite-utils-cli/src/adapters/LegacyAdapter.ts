@@ -7,6 +7,8 @@
  * older Appwrite instances.
  */
 
+import { Query } from "node-appwrite";
+import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
   type CreateRowParams,
@@ -586,32 +588,73 @@ export class LegacyAdapter extends BaseAdapter {
     throw new UnsupportedOperationError('bulkUpsertRows', 'legacy');
   }
   
-  async bulkDeleteRows(params: BulkDeleteRowsParams): Promise<ApiResponse> {
-    // Legacy doesn't support bulk operations, fallback to individual deletes
-    const results = [];
-    const errors = [];
-    
-    for (const rowId of params.rowIds) {
-      try {
-        await this.deleteRow({
-          databaseId: params.databaseId,
-          tableId: params.tableId,
-          id: rowId
-        });
-        results.push({ id: rowId, deleted: true });
-      } catch (error) {
-        errors.push({ 
-          rowId, 
-          error: error instanceof Error ? error.message : 'Unknown error' 
-        });
+async bulkDeleteRows(params: BulkDeleteRowsParams): Promise<ApiResponse> {
+    try {
+      let queries: string[];
+
+      // Wipe mode: use Query.limit for deleting without fetching
+      if (params.rowIds.length === 0) {
+        const batchSize = params.batchSize || 250;
+        queries = [Query.limit(batchSize)];
+      }
+      // Specific IDs mode: chunk into batches of 80-90 to stay within Appwrite limits
+      // (max 100 IDs per Query.equal, and queries must be < 4096 chars total)
+      else {
+        const ID_BATCH_SIZE = 85; // Safe batch size for Query.equal
+        const idBatches = chunk(params.rowIds, ID_BATCH_SIZE);
+        queries = idBatches.map(batch => Query.equal('$id', batch));
+      }
+
+      const result = await this.databases.deleteDocuments(
+        params.databaseId,
+        params.tableId, // Maps tableId to collectionId
+        queries
+      );
+
+      return {
+        data: result,
+        total: params.rowIds.length || (result as any).total || 0
+      };
+    } catch (error) {
+      // If deleteDocuments with queries fails, fall back to individual deletes
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check if the error indicates that deleteDocuments with queries is not supported
+      if (errorMessage.includes('not supported') || errorMessage.includes('invalid') || errorMessage.includes('queries')) {
+        // Fall back to individual deletions
+        const results = [];
+        const errors = [];
+
+        for (const rowId of params.rowIds) {
+          try {
+            await this.deleteRow({
+              databaseId: params.databaseId,
+              tableId: params.tableId,
+              id: rowId
+            });
+            results.push({ id: rowId, deleted: true });
+          } catch (individualError) {
+            errors.push({
+              rowId,
+              error: individualError instanceof Error ? individualError.message : 'Unknown error'
+            });
+          }
+        }
+
+        return {
+          data: results,
+          total: results.length,
+          errors: errors.length > 0 ? errors : undefined
+        };
+      } else {
+        // Re-throw the original error if it's not a support issue
+        throw new AdapterError(
+          `Failed to bulk delete rows (legacy): ${errorMessage}`,
+          'BULK_DELETE_ROWS_FAILED',
+          error instanceof Error ? error : undefined
+        );
       }
     }
-    
-    return {
-      data: results,
-      total: results.length,
-      errors: errors.length > 0 ? errors : undefined
-    };
   }
   
   // Metadata and Capabilities

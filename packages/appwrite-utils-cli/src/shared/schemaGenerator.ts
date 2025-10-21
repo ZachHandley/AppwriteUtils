@@ -143,13 +143,18 @@ export class SchemaGenerator {
         collectionsFolderPath,
         `${collection.name}.ts`
       );
+
+      // Determine if we're in tables mode for terminology
+      const isTablesMode = outputDir === "tables";
+      const securityField = isTablesMode ? "rowSecurity" : "documentSecurity";
+
       const collectionContent = `import { type CollectionCreate } from "appwrite-utils";
-  
+
   const ${collection.name}Config: Partial<CollectionCreate> = {
     name: "${collection.name}",
     $id: "${collection.$id}",
     enabled: ${collection.enabled},
-    documentSecurity: ${collection.documentSecurity},
+    ${securityField}: ${collection.documentSecurity},
     $permissions: [
       ${collection.$permissions
         .map(
@@ -163,22 +168,33 @@ export class SchemaGenerator {
         .map((attr) => {
           return `{ ${Object.entries(attr)
             .map(([key, value]) => {
+              // Handle table vs collection terminology for related fields
+              let outputKey = key;
+              let outputValue = value;
+
+              if (isTablesMode) {
+                // Convert collection terminology to table terminology
+                if (key === "relatedCollection") {
+                  outputKey = "relatedTable";
+                }
+              }
+
               // Check the type of the value and format it accordingly
-              if (typeof value === "string") {
+              if (typeof outputValue === "string") {
                 // If the value is a string, wrap it in quotes
-                return `${key}: "${value.replace(/"/g, '\\"')}"`; // Escape existing quotes in the string
-              } else if (Array.isArray(value)) {
+                return `${outputKey}: "${outputValue.replace(/"/g, '\\"')}"`; // Escape existing quotes in the string
+              } else if (Array.isArray(outputValue)) {
                 // If the value is an array, join it with commas
-                if (value.length > 0) {
-                  return `${key}: [${value
+                if (outputValue.length > 0) {
+                  return `${outputKey}: [${outputValue
                     .map((item) => `"${item}"`)
                     .join(", ")}]`;
                 } else {
-                  return `${key}: []`;
+                  return `${outputKey}: []`;
                 }
               } else {
                 // If the value is not a string (e.g., boolean or number), output it directly
-                return `${key}: ${value}`;
+                return `${outputKey}: ${outputValue}`;
               }
             })
             .join(", ")} }`;
@@ -188,12 +204,13 @@ export class SchemaGenerator {
     indexes: [
       ${(
         collection.indexes?.map((index) => {
-          // Map each attribute to ensure it is properly quoted
+          // Use appropriate terminology for index attributes/columns
+          const indexField = isTablesMode ? "columns" : "attributes";
           const formattedAttributes =
             index.attributes.map((attr) => `"${attr}"`).join(", ") ?? "";
           return `{ key: "${index.key}", type: "${
             index.type
-          }", attributes: [${formattedAttributes}], orders: [${
+          }", ${indexField}: [${formattedAttributes}], orders: [${
             index.orders
               ?.filter((order) => order !== null)
               .map((order) => `"${order}"`)
@@ -203,7 +220,7 @@ export class SchemaGenerator {
       ).join(",\n    ")}
     ]
   };
-  
+
   export default ${collection.name}Config;
   `;
       fs.writeFileSync(collectionFilePath, collectionContent, {

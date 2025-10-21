@@ -6,6 +6,8 @@
  * and returns Models.Row instead of Models.Document.
  */
 
+import { Query } from "node-appwrite";
+import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
   type DatabaseAdapter,
@@ -639,12 +641,32 @@ export class TablesDBAdapter extends BaseAdapter {
     }
   }
   
-  async bulkDeleteRows(params: BulkDeleteRowsParams): Promise<ApiResponse> {
+async bulkDeleteRows(params: BulkDeleteRowsParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.bulkDeleteRows(params);
+      let queries: string[];
+
+      // Wipe mode: use Query.limit for deleting without fetching
+      if (params.rowIds.length === 0) {
+        const batchSize = params.batchSize || 250;
+        queries = [Query.limit(batchSize)];
+      }
+      // Specific IDs mode: chunk into batches of 80-90 to stay within Appwrite limits
+      // (max 100 IDs per Query.equal, and queries must be < 4096 chars total)
+      else {
+        const ID_BATCH_SIZE = 85; // Safe batch size for Query.equal
+        const idBatches = chunk(params.rowIds, ID_BATCH_SIZE);
+        queries = idBatches.map(batch => Query.equal('$id', batch));
+      }
+
+      const result = await this.tablesDB.deleteRows({
+        databaseId: params.databaseId,
+        tableId: params.tableId,
+        queries: queries
+      });
+
       return {
         data: result,
-        total: params.rowIds.length
+        total: params.rowIds.length || (result as any).total || 0
       };
     } catch (error) {
       throw new AdapterError(

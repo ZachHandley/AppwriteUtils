@@ -524,6 +524,14 @@ export function generateTableSchema(): any {
   tableSchema.title = "Appwrite Table Definition";
   tableSchema.description = "YAML configuration for Appwrite table definitions (new TablesDB API)";
 
+  // Replace 'documentSecurity' with 'rowSecurity'
+  delete tableSchema.properties.documentSecurity;
+  tableSchema.properties.rowSecurity = {
+    "type": "boolean",
+    "description": "Enable row-level security",
+    "default": false
+  };
+
   // Replace 'attributes' with 'columns'
   delete tableSchema.properties.attributes;
   tableSchema.properties.columns = {
@@ -535,7 +543,8 @@ export function generateTableSchema(): any {
     "default": []
   };
 
-  // Update index definition to support both attributes and columns
+  // Update index definition to use columns instead of attributes
+  delete tableSchema.$defs.index.properties.attributes;
   tableSchema.$defs.index.properties.columns = {
     "type": "array",
     "items": { "type": "string" },
@@ -543,20 +552,29 @@ export function generateTableSchema(): any {
     "minItems": 1
   };
 
-  // Make index support either attributes or columns
-  tableSchema.$defs.index.oneOf = [
-    { "required": ["key", "type", "attributes"] },
-    { "required": ["key", "type", "columns"] }
-  ];
-  delete tableSchema.$defs.index.required;
+  // Update index required fields to use columns
+  const requiredIndex = tableSchema.$defs.index.required;
+  if (requiredIndex && requiredIndex.includes("attributes")) {
+    const attributesIndex = requiredIndex.indexOf("attributes");
+    requiredIndex[attributesIndex] = "columns";
+  }
 
   // Add column definition (similar to attribute but with table terminology)
   tableSchema.$defs.column = JSON.parse(JSON.stringify(tableSchema.$defs.attribute));
+
+  // Add encrypted property (table-specific feature)
+  tableSchema.$defs.column.properties.encrypted = {
+    "type": "boolean",
+    "description": "Whether the column should be encrypted",
+    "default": false
+  };
+
+  // Replace relatedCollection with relatedTable for table terminology
+  delete tableSchema.$defs.column.properties.relatedCollection;
   tableSchema.$defs.column.properties.relatedTable = {
     "type": "string",
     "description": "Related table for relationship columns"
   };
-  delete tableSchema.$defs.column.properties.relatedCollection;
 
   return tableSchema;
 }

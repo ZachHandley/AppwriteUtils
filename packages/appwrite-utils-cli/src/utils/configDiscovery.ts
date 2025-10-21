@@ -162,6 +162,53 @@ const YamlCollectionSchema = z.object({
 
 type YamlCollection = z.infer<typeof YamlCollectionSchema>;
 
+// YAML Table Schema - Supports table-specific terminology
+const YamlTableSchema = z.object({
+  name: z.string(),
+  id: z.string().optional(),
+  rowSecurity: z.boolean().default(false), // Tables use rowSecurity
+  enabled: z.boolean().default(true),
+  permissions: z.array(
+    z.object({
+      permission: z.string(),
+      target: z.string()
+    })
+  ).optional().default([]),
+  columns: z.array( // Tables use columns terminology
+    z.object({
+      key: z.string(),
+      type: z.string(),
+      size: z.number().optional(),
+      required: z.boolean().default(false),
+      array: z.boolean().optional(),
+      encrypted: z.boolean().optional(), // Tables support encrypted property
+      default: z.any().optional(),
+      min: z.number().optional(),
+      max: z.number().optional(),
+      elements: z.array(z.string()).optional(),
+      relatedTable: z.string().optional(), // Tables use relatedTable
+      relationType: z.string().optional(),
+      twoWay: z.boolean().optional(),
+      twoWayKey: z.string().optional(),
+      onDelete: z.string().optional(),
+      side: z.string().optional(),
+      encrypt: z.boolean().optional(),
+      format: z.string().optional()
+    })
+  ).optional().default([]),
+  indexes: z.array(
+    z.object({
+      key: z.string(),
+      type: z.string(),
+      columns: z.array(z.string()), // Tables use columns in indexes
+      orders: z.array(z.string()).optional()
+    })
+  ).optional().default([]),
+  importDefs: z.array(z.any()).optional().default([])
+});
+
+type YamlTable = z.infer<typeof YamlTableSchema>;
+
 /**
  * Loads a YAML collection file and converts it to CollectionCreate format
  * @param filePath Path to the YAML collection file
@@ -221,57 +268,54 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
 };
 
 /**
- * Loads a YAML table file and converts it to table format
+ * Loads a YAML table file and converts it to CollectionCreate format
  * @param filePath Path to the YAML table file
- * @returns Table object or null if loading fails
+ * @returns CollectionCreate object or null if loading fails
  */
-export const loadYamlTable = (filePath: string): any | null => {
+export const loadYamlTable = (filePath: string): CollectionCreate | null => {
   try {
     const fileContent = fs.readFileSync(filePath, "utf8");
     const yamlData = yaml.load(fileContent) as unknown;
 
-    // For now, use the collection schema as base and adapt for tables
-    const parsedTable = YamlCollectionSchema.parse(yamlData);
+    // Use the new table-specific schema
+    const parsedTable = YamlTableSchema.parse(yamlData);
 
-    // Convert YAML table to TableCreate format
-    const table: any = {
+    // Convert YAML table to CollectionCreate format (internal representation)
+    const table: CollectionCreate = {
       name: parsedTable.name,
-      tableId: (yamlData as any).tableId || parsedTable.id || parsedTable.name.toLowerCase().replace(/\s+/g, '_'),
-      documentSecurity: parsedTable.documentSecurity,
+      $id: (yamlData as any).tableId || parsedTable.id || parsedTable.name.toLowerCase().replace(/\s+/g, '_'),
+      documentSecurity: parsedTable.rowSecurity, // Convert rowSecurity to documentSecurity
       enabled: parsedTable.enabled,
       $permissions: parsedTable.permissions.map(p => ({
         permission: p.permission as any,
         target: p.target
       })),
-      attributes: parsedTable.attributes.map(attr => ({
-        key: attr.key,
-        type: attr.type as any,
-        size: attr.size,
-        required: attr.required,
-        array: attr.array,
-        xdefault: attr.default,
-        min: attr.min,
-        max: attr.max,
-        elements: attr.elements,
-        relatedCollection: attr.relatedCollection,
-        relationType: attr.relationType as any,
-        twoWay: attr.twoWay,
-        twoWayKey: attr.twoWayKey,
-        onDelete: attr.onDelete as any,
-        side: attr.side as any,
-        encrypted: (attr as any).encrypt,
-        format: (attr as any).format
+      attributes: parsedTable.columns.map(col => ({ // Convert columns to attributes
+        key: col.key,
+        type: col.type as any,
+        size: col.size,
+        required: col.required,
+        array: col.array,
+        xdefault: col.default,
+        min: col.min,
+        max: col.max,
+        elements: col.elements,
+        relatedCollection: col.relatedTable, // Convert relatedTable to relatedCollection
+        relationType: col.relationType as any,
+        twoWay: col.twoWay,
+        twoWayKey: col.twoWayKey,
+        onDelete: col.onDelete as any,
+        side: col.side as any,
+        encrypted: col.encrypted || col.encrypt, // Support both encrypted and encrypt
+        format: col.format
       })),
       indexes: parsedTable.indexes.map(idx => ({
         key: idx.key,
         type: idx.type as any,
-        attributes: idx.attributes,
+        attributes: idx.columns, // Convert columns to attributes
         orders: idx.orders as any
       })),
-      importDefs: parsedTable.importDefs,
-      databaseId: (yamlData as any).databaseId,
-      // Add backward compatibility field
-      $id: (yamlData as any).$id || parsedTable.id
+      importDefs: parsedTable.importDefs || []
     };
 
     return table;
@@ -353,7 +397,7 @@ export const discoverCollections = async (collectionsDir: string): Promise<Colle
  * Result of discovering tables from a directory
  */
 export interface TableDiscoveryResult {
-  tables: any[];
+  tables: CollectionCreate[];
   loadedNames: Set<string>;
   conflicts: Array<{ name: string; source1: string; source2: string }>;
 }
@@ -368,7 +412,7 @@ export const discoverTables = async (
   tablesDir: string,
   existingNames: Set<string> = new Set()
 ): Promise<TableDiscoveryResult> => {
-  const tables: any[] = [];
+  const tables: CollectionCreate[] = [];
   const loadedNames = new Set<string>();
   const conflicts: Array<{ name: string; source1: string; source2: string }> = [];
 
@@ -387,7 +431,7 @@ export const discoverTables = async (
         continue;
       }
       const filePath = path.join(tablesDir, file);
-      let table: any | null = null;
+      let table: CollectionCreate | null = null;
 
       // Handle YAML tables
       if (file.endsWith('.yaml') || file.endsWith('.yml')) {
@@ -398,7 +442,7 @@ export const discoverTables = async (
       else if (file.endsWith('.ts')) {
         const fileUrl = pathToFileURL(filePath).href;
         const tableModule = (await import(fileUrl));
-        const importedTable: any = tableModule.default?.default || tableModule.default || tableModule;
+        const importedTable: CollectionCreate = tableModule.default?.default || tableModule.default || tableModule;
         if (importedTable) {
           table = importedTable;
           // Ensure importDefs are properly loaded
@@ -409,7 +453,7 @@ export const discoverTables = async (
       }
 
       if (table) {
-        const tableName = table.name || table.tableId || table.$id || file;
+        const tableName = table.name || (table as any).tableId || table.$id || file;
 
         // Check for naming conflicts with existing collections
         if (existingNames.has(tableName)) {
@@ -422,7 +466,7 @@ export const discoverTables = async (
         } else {
           loadedNames.add(tableName);
           // Mark as coming from tables directory
-          table._isFromTablesDir = true;
+          (table as any)._isFromTablesDir = true;
           tables.push(table);
         }
       }
@@ -474,7 +518,7 @@ export const discoverLegacyDirectory = async (
               ...collection,
               _isFromTablesDir: true,
               tableId: collection.$id || collection.name.toLowerCase().replace(/\s+/g, '_')
-            };
+            } as CollectionCreate;
             items.push(table);
           } else {
             items.push(collection);

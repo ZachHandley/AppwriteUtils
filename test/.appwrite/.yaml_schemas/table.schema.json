@@ -15,9 +15,9 @@
       "description": "Collection ID",
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
     },
-    "documentSecurity": {
+    "rowSecurity": {
       "type": "boolean",
-      "description": "Enable document-level security",
+      "description": "Enable row-level security for tables",
       "default": false
     },
     "enabled": {
@@ -274,6 +274,11 @@
         },
         "array": {
           "type": "boolean",
+          "default": false
+        },
+        "encrypted": {
+          "type": "boolean",
+          "description": "Enable encryption for string columns",
           "default": false
         },
         "default": {

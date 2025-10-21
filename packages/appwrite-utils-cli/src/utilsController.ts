@@ -72,6 +72,7 @@ import { configureLogging, updateLogger, logger } from "./shared/logging.js";
 import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
 import { SchemaGenerator } from "./shared/schemaGenerator.js";
 import { findYamlConfig } from "./config/yamlConfig.js";
+import { createImportSchemas } from "./migrations/yaml/generateImportSchemas.js";
 import {
   validateCollectionsTablesConfig,
   reportValidationResults,
@@ -80,6 +81,7 @@ import {
 } from "./config/configValidation.js";
 import { ConfigManager } from "./config/ConfigManager.js";
 import { ClientFactory } from "./utils/ClientFactory.js";
+import type { DatabaseSelection, BucketSelection } from "./shared/selectionDialogs.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -339,6 +341,26 @@ export class UtilsController {
       Query.equal("$id", ids),
     ]);
     return dbs.databases;
+  }
+
+  async fetchAllBuckets(): Promise<{ buckets: Models.Bucket[] }> {
+    await this.init();
+    if (!this.storage) {
+      MessageFormatter.warning("Storage not initialized - buckets will be empty", { prefix: "Controller" });
+      return { buckets: [] };
+    }
+
+    try {
+      const result = await this.storage.listBuckets([
+        Query.limit(1000) // Increase limit to get all buckets
+      ]);
+
+      MessageFormatter.success(`Found ${result.buckets.length} buckets`, { prefix: "Controller" });
+      return result;
+    } catch (error: any) {
+      MessageFormatter.error(`Failed to fetch buckets: ${error.message || error}`, error instanceof Error ? error : undefined, { prefix: "Controller" });
+      return { buckets: [] };
+    }
   }
 
   async wipeOtherDatabases(databasesToKeep: Models.Database[]) {
@@ -636,7 +658,9 @@ export class UtilsController {
 
   async synchronizeConfigurations(
     databases?: Models.Database[],
-    config?: AppwriteConfig
+    config?: AppwriteConfig,
+    databaseSelections?: DatabaseSelection[],
+    bucketSelections?: BucketSelection[]
   ) {
     await this.init();
     if (!this.storage) {
@@ -652,21 +676,109 @@ export class UtilsController {
       MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
+
+    // If selections are provided, filter the databases accordingly
+    let filteredDatabases = databases;
+    if (databaseSelections && databaseSelections.length > 0) {
+      // Convert selections to Models.Database format
+      filteredDatabases = [];
+      const allDatabases = databases ? databases : await fetchAllDatabases(this.database!);
+
+      for (const selection of databaseSelections) {
+        const database = allDatabases.find(db => db.$id === selection.databaseId);
+        if (database) {
+          filteredDatabases.push(database);
+        } else {
+          MessageFormatter.warning(`Database with ID ${selection.databaseId} not found`, { prefix: "Controller" });
+        }
+      }
+
+      MessageFormatter.info(`Syncing ${filteredDatabases.length} selected databases out of ${allDatabases.length} available`, { prefix: "Controller" });
+    }
+
     const appwriteToX = new AppwriteToX(
       configToUse,
       this.appwriteFolderPath,
       this.storage
     );
-    await appwriteToX.toSchemas(databases);
-    
+    await appwriteToX.toSchemas(filteredDatabases);
+
     // Update the controller's config with the synchronized collections
     this.config = appwriteToX.updatedConfig;
-    
+
     // Write the updated config back to disk
     const generator = new SchemaGenerator(this.config, this.appwriteFolderPath);
     const yamlConfigPath = findYamlConfig(this.appwriteFolderPath);
     const isYamlProject = !!yamlConfigPath;
     await generator.updateConfig(this.config, isYamlProject);
+
+    // Regenerate JSON schemas to reflect any table terminology fixes
+    try {
+      MessageFormatter.progress("Regenerating JSON schemas...", { prefix: "Sync" });
+      await createImportSchemas(this.appwriteFolderPath);
+      MessageFormatter.success("JSON schemas regenerated successfully", { prefix: "Sync" });
+    } catch (error) {
+      // Log error but don't fail the sync process
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      MessageFormatter.warning(
+        `Failed to regenerate JSON schemas, but sync completed: ${errorMessage}`,
+        { prefix: "Sync" }
+      );
+      logger.warn("Schema regeneration failed during sync:", error);
+    }
+  }
+
+  async selectiveSync(
+    databaseSelections: DatabaseSelection[],
+    bucketSelections: BucketSelection[]
+  ): Promise<void> {
+    await this.init();
+    if (!this.database) {
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
+      return;
+    }
+
+    MessageFormatter.progress("Starting selective sync...", { prefix: "Controller" });
+
+    // Convert database selections to Models.Database format
+    const selectedDatabases: Models.Database[] = [];
+
+    for (const dbSelection of databaseSelections) {
+      // Get the full database object from the controller
+      const databases = await fetchAllDatabases(this.database);
+      const database = databases.find(db => db.$id === dbSelection.databaseId);
+
+      if (database) {
+        selectedDatabases.push(database);
+        MessageFormatter.info(`Selected database: ${database.name} (${database.$id})`, { prefix: "Controller" });
+
+        // Log selected tables for this database
+        if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
+          MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
+        }
+      } else {
+        MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found`, { prefix: "Controller" });
+      }
+    }
+
+    if (selectedDatabases.length === 0) {
+      MessageFormatter.warning("No valid databases selected for sync", { prefix: "Controller" });
+      return;
+    }
+
+    // Log bucket selections if provided
+    if (bucketSelections && bucketSelections.length > 0) {
+      MessageFormatter.info(`Selected ${bucketSelections.length} buckets:`, { prefix: "Controller" });
+      for (const bucketSelection of bucketSelections) {
+        const dbInfo = bucketSelection.databaseId ? ` (DB: ${bucketSelection.databaseId})` : '';
+        MessageFormatter.info(`  - ${bucketSelection.bucketName} (${bucketSelection.bucketId})${dbInfo}`, { prefix: "Controller" });
+      }
+    }
+
+    // Perform selective sync using the enhanced synchronizeConfigurations method
+    await this.synchronizeConfigurations(selectedDatabases, this.config, databaseSelections, bucketSelections);
+
+    MessageFormatter.success("Selective sync completed successfully!", { prefix: "Controller" });
   }
 
   async syncDb(

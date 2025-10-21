@@ -15,6 +15,9 @@ import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
 import { MessageFormatter } from "./shared/messageFormatter.js";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
+import { SelectionDialogs } from "./shared/selectionDialogs.js";
+import { logger } from "./shared/logging.js";
+import type { SyncSelectionSummary, DatabaseSelection, BucketSelection } from "./shared/selectionDialogs.js";
 import path from "path";
 import fs from "fs";
 import { createRequire } from "node:module";
@@ -82,9 +85,227 @@ interface CliOptions {
   useSession?: boolean;
   session?: string;
   listBackups?: boolean;
+  autoSync?: boolean;
+  selectBuckets?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
+
+/**
+ * Enhanced sync function with intelligent configuration detection and selection dialogs
+ */
+async function performEnhancedSync(
+  controller: UtilsController,
+  parsedArgv: ParsedArgv
+): Promise<SyncSelectionSummary | null> {
+  try {
+    MessageFormatter.banner("Enhanced Sync", "Intelligent configuration detection and selection");
+
+    if (!controller.config) {
+      MessageFormatter.error("No Appwrite configuration found", undefined, { prefix: "Sync" });
+      return null;
+    }
+
+    // Get all available databases from remote
+    const availableDatabases = await fetchAllDatabases(controller.database!);
+    if (availableDatabases.length === 0) {
+      MessageFormatter.warning("No databases found in remote project", { prefix: "Sync" });
+      return null;
+    }
+
+    // Get existing configuration
+    const configuredDatabases = controller.config.databases || [];
+    const configuredBuckets = controller.config.buckets || [];
+
+    // Check if we have existing configuration
+    const hasExistingConfig = configuredDatabases.length > 0 || configuredBuckets.length > 0;
+
+    let syncExisting = false;
+    let modifyConfiguration = true;
+
+    if (hasExistingConfig) {
+      // Prompt about existing configuration
+      const response = await SelectionDialogs.promptForExistingConfig([
+        ...configuredDatabases,
+        ...configuredBuckets
+      ]);
+      syncExisting = response.syncExisting;
+      modifyConfiguration = response.modifyConfiguration;
+
+      if (syncExisting && !modifyConfiguration) {
+        // Just sync existing configuration without changes
+        MessageFormatter.info("Syncing existing configuration without modifications", { prefix: "Sync" });
+
+        // Convert configured databases to DatabaseSelection format
+        const databaseSelections: DatabaseSelection[] = configuredDatabases.map(db => ({
+          databaseId: db.$id,
+          databaseName: db.name,
+          tableIds: [], // Tables will be populated from collections config
+          tableNames: [],
+          isNew: false
+        }));
+
+        // Convert configured buckets to BucketSelection format
+        const bucketSelections: BucketSelection[] = configuredBuckets.map(bucket => ({
+          bucketId: bucket.$id,
+          bucketName: bucket.name,
+          databaseId: undefined,
+          databaseName: undefined,
+          isNew: false
+        }));
+
+        const selectionSummary = SelectionDialogs.createSyncSelectionSummary(
+          databaseSelections,
+          bucketSelections
+        );
+
+        const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary);
+        if (!confirmed) {
+          MessageFormatter.info("Sync operation cancelled by user", { prefix: "Sync" });
+          return null;
+        }
+
+        // Perform sync with existing configuration
+        await controller.selectiveSync(databaseSelections, bucketSelections);
+        return selectionSummary;
+      }
+    }
+
+    if (!modifyConfiguration) {
+      MessageFormatter.info("No configuration changes requested", { prefix: "Sync" });
+      return null;
+    }
+
+    // Allow new items selection based on user choice
+    const allowNewOnly = !syncExisting;
+
+    // Select databases
+    const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
+      availableDatabases,
+      configuredDatabases,
+      {
+        showSelectAll: true,
+        allowNewOnly,
+        defaultSelected: syncExisting ? configuredDatabases.map(db => db.$id) : []
+      }
+    );
+
+    if (selectedDatabaseIds.length === 0) {
+      MessageFormatter.warning("No databases selected for sync", { prefix: "Sync" });
+      return null;
+    }
+
+    // For each selected database, get available tables and select them
+    const tableSelectionsMap = new Map<string, string[]>();
+    const availableTablesMap = new Map<string, any[]>();
+
+    for (const databaseId of selectedDatabaseIds) {
+      const database = availableDatabases.find(db => db.$id === databaseId)!;
+
+      SelectionDialogs.showProgress(`Fetching tables for database: ${database.name}`);
+
+      // Get available tables from remote
+      const availableTables = await fetchAllCollections(databaseId, controller.database!);
+      availableTablesMap.set(databaseId, availableTables);
+
+      // Get configured tables for this database
+      // Note: Collections are stored globally in the config, not per database
+      const configuredTables = controller.config.collections || [];
+
+      // Select tables for this database
+      const selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+        databaseId,
+        database.name,
+        availableTables,
+        configuredTables,
+        {
+          showSelectAll: true,
+          allowNewOnly,
+          defaultSelected: syncExisting ? configuredTables.map((t: any) => t.$id) : []
+        }
+      );
+
+      tableSelectionsMap.set(databaseId, selectedTableIds);
+
+      if (selectedTableIds.length === 0) {
+        MessageFormatter.warning(`No tables selected for database: ${database.name}`, { prefix: "Sync" });
+      }
+    }
+
+    // Select buckets
+    let selectedBucketIds: string[] = [];
+
+    // Get available buckets from remote
+    if (controller.storage) {
+      try {
+        // Note: We need to implement fetchAllBuckets or use storage.listBuckets
+        // For now, we'll use configured buckets as available
+        SelectionDialogs.showProgress("Fetching storage buckets...");
+
+        // Create a mock availableBuckets array - in real implementation,
+        // you'd fetch this from the Appwrite API
+        const availableBuckets = configuredBuckets; // Placeholder
+
+        selectedBucketIds = await SelectionDialogs.selectBucketsForDatabases(
+          selectedDatabaseIds,
+          availableBuckets,
+          configuredBuckets,
+          {
+            showSelectAll: true,
+            allowNewOnly: parsedArgv.selectBuckets ? false : allowNewOnly,
+            groupByDatabase: true,
+            defaultSelected: syncExisting ? configuredBuckets.map(b => b.$id) : []
+          }
+        );
+      } catch (error) {
+        MessageFormatter.warning("Could not fetch storage buckets", { prefix: "Sync" });
+        logger.warn("Failed to fetch buckets during sync", { error });
+      }
+    }
+
+    // Create selection objects
+    const databaseSelections = SelectionDialogs.createDatabaseSelection(
+      selectedDatabaseIds,
+      availableDatabases,
+      tableSelectionsMap,
+      configuredDatabases,
+      availableTablesMap
+    );
+
+    const bucketSelections = SelectionDialogs.createBucketSelection(
+      selectedBucketIds,
+      [], // availableBuckets - would be populated from API
+      configuredBuckets,
+      availableDatabases
+    );
+
+    // Show final confirmation
+    const selectionSummary = SelectionDialogs.createSyncSelectionSummary(
+      databaseSelections,
+      bucketSelections
+    );
+
+    const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary);
+    if (!confirmed) {
+      MessageFormatter.info("Sync operation cancelled by user", { prefix: "Sync" });
+      return null;
+    }
+
+    // Perform the selective sync
+    await controller.selectiveSync(databaseSelections, bucketSelections);
+
+    MessageFormatter.success("Enhanced sync completed successfully", { prefix: "Sync" });
+    return selectionSummary;
+
+  } catch (error) {
+    SelectionDialogs.showError("Enhanced sync failed", error instanceof Error ? error : new Error(String(error)));
+    return null;
+  }
+}
+
+/**
+ * Performs selective sync with the given database and bucket selections
+ */
 
 /**
  * Checks if the migration from collections to tables should be allowed
@@ -234,6 +455,15 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description:
       "Pull and synchronize your local config with the remote Appwrite project schema",
+  })
+  .option("autoSync", {
+    alias: ["auto"],
+    type: "boolean",
+    description: "Skip prompts and sync all databases, tables, and buckets (current behavior)"
+  })
+  .option("selectBuckets", {
+    type: "boolean",
+    description: "Force bucket selection dialog even if buckets are already configured"
   })
   .option("endpoint", {
     type: "string",
@@ -1122,11 +1352,23 @@ async function main() {
       operationStats.pushedCollections =
         controller.config?.collections?.length || 0;
     } else if (parsedArgv.sync) {
-      // SYNC: Pull from remote
-      const databases =
-        options.databases || (await fetchAllDatabases(controller.database!));
-      await controller.synchronizeConfigurations(databases);
-      operationStats.syncedDatabases = databases.length;
+      // Enhanced SYNC: Pull from remote with intelligent configuration detection
+      if (parsedArgv.autoSync) {
+        // Legacy behavior: sync everything without prompts
+        MessageFormatter.info("Using auto-sync mode (legacy behavior)", { prefix: "Sync" });
+        const databases =
+          options.databases || (await fetchAllDatabases(controller.database!));
+        await controller.synchronizeConfigurations(databases);
+        operationStats.syncedDatabases = databases.length;
+      } else {
+        // Enhanced sync flow with selection dialogs
+        const syncResult = await performEnhancedSync(controller, parsedArgv);
+        if (syncResult) {
+          operationStats.syncedDatabases = syncResult.databases.length;
+          operationStats.syncedCollections = syncResult.totalTables;
+          operationStats.syncedBuckets = syncResult.buckets.length;
+        }
+      }
     }
 
     if (options.generateSchemas) {

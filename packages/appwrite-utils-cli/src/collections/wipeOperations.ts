@@ -7,7 +7,7 @@ import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { ProgressManager } from "../shared/progressManager.js";
-import { isRetryableError, isBulkNotSupportedError, isCriticalError } from "../shared/errorUtils.js";
+import { isRetryableError, isCriticalError } from "../shared/errorUtils.js";
 import { delay } from "../utils/helperFunctions.js";
 import { chunk } from "es-toolkit";
 import pLimit from "p-limit";
@@ -239,8 +239,8 @@ export const wipeAllTables = async (
 };
 
 /**
- * Optimized streaming deletion of all rows from a table
- * Uses bulk deletion when available, falls back to optimized individual deletion
+ * Optimized deletion of all rows from a table using direct bulk deletion
+ * Uses Query.limit() to delete rows without fetching IDs first
  */
 export const wipeTableRows = async (
   adapter: DatabaseAdapter,
@@ -248,123 +248,78 @@ export const wipeTableRows = async (
   tableId: string
 ): Promise<void> => {
   try {
-    // Configuration for optimized deletion
-    const FETCH_BATCH_SIZE = 1000; // How many to fetch per query
-    const BULK_DELETE_BATCH_SIZE = 500; // How many to bulk delete at once
-    const INDIVIDUAL_DELETE_BATCH_SIZE = 200; // For fallback individual deletion
-    const MAX_CONCURRENT_OPERATIONS = 10; // Concurrent bulk/individual operations
+    // Check if bulk deletion is available
+    if (!adapter.bulkDeleteRows) {
+      MessageFormatter.error(
+        "Bulk deletion not available for this adapter - wipe operation not supported",
+        new Error("bulkDeleteRows not available"),
+        { prefix: "Wipe" }
+      );
+      throw new Error("Bulk deletion required for wipe operations");
+    }
 
+    const DELETE_BATCH_SIZE = 250; // How many rows to delete per batch
     let totalDeleted = 0;
-    let cursor: string | undefined;
     let hasMoreRows = true;
 
     MessageFormatter.info("Starting optimized table row deletion...", { prefix: "Wipe" });
 
-    // Create progress tracker (we'll update the total as we discover more rows)
     const progress = ProgressManager.create(
       `delete-${tableId}`,
-      1, // Start with 1, will update as we go
+      1, // Start with 1, will update as we discover more
       { title: "Deleting table rows" }
     );
 
     while (hasMoreRows) {
-      // Fetch next batch of rows
-      const queries = [Query.limit(FETCH_BATCH_SIZE)];
-      if (cursor) {
-        queries.push(Query.cursorAfter(cursor));
-      }
-
-      const response = await adapter.listRows({ databaseId, tableId, queries });
-      const rows: any[] = (response as any).rows || [];
-
-      if (rows.length === 0) {
-        hasMoreRows = false;
-        break;
-      }
-
-      // Update progress total as we discover more rows
-      if (rows.length === FETCH_BATCH_SIZE) {
-        // There might be more rows, update progress total
-        progress.setTotal(totalDeleted + rows.length + 1000); // Estimate more
-      }
-
-      MessageFormatter.progress(
-        `Processing batch: ${rows.length} rows (${totalDeleted + rows.length} total so far)`,
-        { prefix: "Wipe" }
-      );
-
-      // Try to use bulk deletion first, fall back to individual deletion
-      const rowIds = rows.map((row: any) => row.$id);
-
-      // Check if bulk deletion is available and try it first
-      if (adapter.bulkDeleteRows) {
-        try {
-          // Attempt bulk deletion (available in TablesDB)
-          await tryBulkDeletion(adapter, databaseId, tableId, rowIds, BULK_DELETE_BATCH_SIZE, MAX_CONCURRENT_OPERATIONS);
-          totalDeleted += rows.length;
-          progress.update(totalDeleted);
-        } catch (bulkError) {
-          // Enhanced error handling: categorize the error and decide on fallback strategy
-          const errorMessage = bulkError instanceof Error ? bulkError.message : String(bulkError);
-
-          if (isRetryableError(errorMessage)) {
-            MessageFormatter.progress(
-              `Bulk deletion encountered retryable error, retrying with individual deletion for ${rows.length} rows`,
-              { prefix: "Wipe" }
-            );
-          } else if (isBulkNotSupportedError(errorMessage)) {
-            MessageFormatter.progress(
-              `Bulk deletion not supported by server, switching to individual deletion for ${rows.length} rows`,
-              { prefix: "Wipe" }
-            );
-          } else {
-            MessageFormatter.progress(
-              `Bulk deletion failed (${errorMessage}), falling back to individual deletion for ${rows.length} rows`,
-              { prefix: "Wipe" }
-            );
-          }
-
-          await tryIndividualDeletion(
-            adapter,
+      try {
+        // Delete next batch using Query.limit() - no fetching needed!
+        const result = await tryAwaitWithRetry(async () =>
+          adapter.bulkDeleteRows!({
             databaseId,
             tableId,
-            rows,
-            INDIVIDUAL_DELETE_BATCH_SIZE,
-            MAX_CONCURRENT_OPERATIONS,
-            progress,
-            totalDeleted
-          );
-          totalDeleted += rows.length;
+            rowIds: [], // Empty array signals we want to use Query.limit instead
+            batchSize: DELETE_BATCH_SIZE
+          })
+        );
+
+        const deletedCount = (result as any).total || 0;
+
+        if (deletedCount === 0) {
+          hasMoreRows = false;
+          break;
         }
-      } else {
-        // Bulk deletion not available, use optimized individual deletion
+
+        totalDeleted += deletedCount;
+        progress.setTotal(totalDeleted + 100); // Estimate more rows exist
+        progress.update(totalDeleted);
+
         MessageFormatter.progress(
-          `Using individual deletion for ${rows.length} rows (bulk deletion not available)`,
+          `Deleted ${deletedCount} rows (${totalDeleted} total so far)`,
           { prefix: "Wipe" }
         );
 
-        await tryIndividualDeletion(
-          adapter,
-          databaseId,
-          tableId,
-          rows,
-          INDIVIDUAL_DELETE_BATCH_SIZE,
-          MAX_CONCURRENT_OPERATIONS,
-          progress,
-          totalDeleted
-        );
-        totalDeleted += rows.length;
-      }
+        // Small delay between batches to be respectful to the API
+        await delay(10);
 
-      // Set up cursor for next iteration
-      if (rows.length < FETCH_BATCH_SIZE) {
-        hasMoreRows = false;
-      } else {
-        cursor = rows[rows.length - 1].$id;
-      }
+      } catch (error: any) {
+        const errorMessage = error.message || String(error);
 
-      // Small delay between fetch cycles to be respectful to the API
-      await delay(10);
+        if (isCriticalError(errorMessage)) {
+          MessageFormatter.error(
+            `Critical error during bulk deletion: ${errorMessage}`,
+            error,
+            { prefix: "Wipe" }
+          );
+          throw error;
+        } else {
+          MessageFormatter.error(
+            `Error during deletion batch: ${errorMessage}`,
+            error,
+            { prefix: "Wipe" }
+          );
+          // Continue trying with next batch
+        }
+      }
     }
 
     // Update final progress total
@@ -389,113 +344,3 @@ export const wipeTableRows = async (
     throw error;
   }
 };
-
-/**
- * Helper function to attempt bulk deletion of row IDs
- */
-async function tryBulkDeletion(
-  adapter: DatabaseAdapter,
-  databaseId: string,
-  tableId: string,
-  rowIds: string[],
-  batchSize: number,
-  maxConcurrent: number
-): Promise<void> {
-  if (!adapter.bulkDeleteRows) {
-    throw new Error("Bulk deletion not available on this adapter");
-  }
-
-  const limit = pLimit(maxConcurrent);
-  const batches = chunk(rowIds, batchSize);
-
-  const deletePromises = batches.map((batch) =>
-    limit(async () => {
-      try {
-        await tryAwaitWithRetry(async () =>
-          adapter.bulkDeleteRows!({ databaseId, tableId, rowIds: batch })
-        );
-      } catch (error: any) {
-        const errorMessage = error.message || String(error);
-
-        // Enhanced error handling for bulk deletion
-        if (isCriticalError(errorMessage)) {
-          MessageFormatter.error(
-            `Critical error in bulk deletion batch: ${errorMessage}`,
-            error,
-            { prefix: "Wipe" }
-          );
-          throw error;
-        } else {
-          // For non-critical errors in bulk deletion, re-throw to trigger fallback
-          throw new Error(`Bulk deletion batch failed: ${errorMessage}`);
-        }
-      }
-    })
-  );
-
-  await Promise.all(deletePromises);
-}
-
-/**
- * Helper function for fallback individual deletion
- */
-async function tryIndividualDeletion(
-  adapter: DatabaseAdapter,
-  databaseId: string,
-  tableId: string,
-  rows: any[],
-  batchSize: number,
-  maxConcurrent: number,
-  progress: any,
-  baseDeleted: number
-): Promise<void> {
-  const limit = pLimit(maxConcurrent);
-  const batches = chunk(rows, batchSize);
-  let processedInBatch = 0;
-
-  const deletePromises = batches.map((batch) =>
-    limit(async () => {
-      const batchDeletePromises = batch.map(async (row: any) => {
-        try {
-          await tryAwaitWithRetry(async () =>
-            adapter.deleteRow({ databaseId, tableId, id: row.$id })
-          );
-        } catch (error: any) {
-          const errorMessage = error.message || String(error);
-
-          // Enhanced error handling for row deletion
-          if (errorMessage.includes("Row with the requested ID could not be found")) {
-            // Row already deleted, skip silently
-          } else if (isCriticalError(errorMessage)) {
-            // Critical error, log and rethrow to stop operation
-            MessageFormatter.error(
-              `Critical error deleting row ${row.$id}: ${errorMessage}`,
-              error,
-              { prefix: "Wipe" }
-            );
-            throw error;
-          } else if (isRetryableError(errorMessage)) {
-            // Retryable error, will be handled by tryAwaitWithRetry
-            MessageFormatter.progress(
-              `Retryable error for row ${row.$id}, will retry`,
-              { prefix: "Wipe" }
-            );
-          } else {
-            // Other non-critical errors, log but continue
-            MessageFormatter.error(
-              `Failed to delete row ${row.$id}: ${errorMessage}`,
-              error,
-              { prefix: "Wipe" }
-            );
-          }
-        }
-        processedInBatch++;
-        progress.update(baseDeleted + processedInBatch);
-      });
-
-      await Promise.all(batchDeletePromises);
-    })
-  );
-
-  await Promise.all(deletePromises);
-}

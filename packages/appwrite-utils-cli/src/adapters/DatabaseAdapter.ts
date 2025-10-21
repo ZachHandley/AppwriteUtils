@@ -88,7 +88,8 @@ export interface BulkUpsertRowsParams {
 export interface BulkDeleteRowsParams {
   databaseId: string;
   tableId: string;
-  rowIds: string[];
+  rowIds: string[]; // Empty array = wipe mode (use Query.limit), otherwise specific IDs to delete
+  batchSize?: number; // Optional batch size for wipe mode (default 250)
 }
 
 // Index operation parameters  
