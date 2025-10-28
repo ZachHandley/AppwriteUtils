@@ -345,27 +345,33 @@ export default appwriteConfig;
     this.relationshipMap = extractTwoWayRelationships(this.config);
   }
 
-  public generateSchemas(options: {
-    format?: "zod" | "json" | "both";
+  public async generateSchemas(options: {
+    format?: "zod" | "json" | "pydantic" | "both" | "all";
     verbose?: boolean;
-  } = {}): void {
-    const { format = "both", verbose = false } = options;
+    outputDir?: string;
+  } = {}): Promise<void> {
+    const { format = "both", verbose = false, outputDir } = options;
     
     if (!this.config.collections) {
       return;
     }
     
     // Create schemas directory using config setting
-    const outputDir = this.config.schemaConfig?.outputDirectory || "schemas";
-    const schemasPath = outputDir === "schemas"
-      ? resolveSchemaDir(this.appwriteFolderPath)
-      : path.join(this.appwriteFolderPath, outputDir);
+    const configuredDir = outputDir || this.config.schemaConfig?.outputDirectory || "schemas";
+    let schemasPath: string;
+    if (path.isAbsolute(configuredDir)) {
+      schemasPath = configuredDir;
+    } else if (configuredDir === "schemas") {
+      schemasPath = resolveSchemaDir(this.appwriteFolderPath);
+    } else {
+      schemasPath = path.join(this.appwriteFolderPath, configuredDir);
+    }
     if (!fs.existsSync(schemasPath)) {
       fs.mkdirSync(schemasPath, { recursive: true });
     }
     
     // Generate Zod schemas (TypeScript)
-    if (format === "zod" || format === "both") {
+    if (format === "zod" || format === "both" || format === "all") {
       this.config.collections.forEach((collection) => {
         const schemaString = this.createSchemaStringV4(
           collection.name,
@@ -381,13 +387,20 @@ export default appwriteConfig;
     }
 
     // Generate JSON schemas (all at once)
-    if (format === "json" || format === "both") {
+    if (format === "json" || format === "both" || format === "all") {
       const jsonSchemaGenerator = new JsonSchemaGenerator(this.config, this.appwriteFolderPath);
       jsonSchemaGenerator.generateJsonSchemas({
         outputFormat: format === "json" ? "json" : "both",
-        outputDirectory: outputDir,
+        outputDirectory: configuredDir,
         verbose: verbose
       });
+    }
+
+    // Generate Python Pydantic models
+    if (format === "pydantic" || format === "all") {
+      const mod = await import("./pydanticModelGenerator.js");
+      const pgen = new mod.PydanticModelGenerator(this.config, this.appwriteFolderPath);
+      pgen.generatePydanticModels({ baseOutputDirectory: schemasPath, verbose });
     }
 
     if (verbose) {

@@ -20,7 +20,7 @@ export function mapToCreateAttributeParams(
   const required = !!(attr as any).required;
   const array = !!(attr as any).array;
   const xdefault = (attr as any).xdefault;
-  const encrypt = (attr as any).encrypted ?? (attr as any).encrypt;
+  const encrypt = (attr as any).encrypt;
 
   // Numeric helpers
   const rawMin = ensureNumber((attr as any).min);
@@ -184,7 +184,7 @@ export function mapToUpdateAttributeParams(
   }
   setIfDefined("array", (attr as any).array);
   // encrypt only applies to string types
-  if (type === "string") setIfDefined("encrypt", (attr as any).encrypted ?? (attr as any).encrypt);
+  if (type === "string") setIfDefined("encrypt", (attr as any).encrypt);
 
   // Numeric normalization
   const toNum = (n: any) => (n === null || n === undefined ? undefined : (Number(n)));

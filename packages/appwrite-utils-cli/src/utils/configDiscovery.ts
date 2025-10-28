@@ -180,7 +180,7 @@ const YamlTableSchema = z.object({
       size: z.number().optional(),
       required: z.boolean().default(false),
       array: z.boolean().optional(),
-      encrypted: z.boolean().optional(), // Tables support encrypted property
+      encrypt: z.boolean().optional(), // Tables support encrypt property
       default: z.any().optional(),
       min: z.number().optional(),
       max: z.number().optional(),
@@ -191,7 +191,6 @@ const YamlTableSchema = z.object({
       twoWayKey: z.string().optional(),
       onDelete: z.string().optional(),
       side: z.string().optional(),
-      encrypt: z.boolean().optional(),
       format: z.string().optional()
     })
   ).optional().default([]),
@@ -305,7 +304,7 @@ export const loadYamlTable = (filePath: string): CollectionCreate | null => {
         twoWayKey: col.twoWayKey,
         onDelete: col.onDelete as any,
         side: col.side as any,
-        encrypted: col.encrypted || col.encrypt, // Support both encrypted and encrypt
+        encrypt: col.encrypt,
         format: col.format
       })),
       indexes: parsedTable.indexes.map(idx => ({

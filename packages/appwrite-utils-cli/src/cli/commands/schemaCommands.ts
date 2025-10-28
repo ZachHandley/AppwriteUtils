@@ -20,9 +20,11 @@ export const schemaCommands = {
         choices: [
           { name: "TypeScript (Zod) schemas", value: "zod" },
           { name: "JSON schemas", value: "json" },
-          { name: "Both TypeScript and JSON schemas", value: "both" },
+          { name: "Python (Pydantic) models", value: "pydantic" },
+          { name: "TypeScript + JSON", value: "both" },
+          { name: "All (Zod, JSON, Pydantic)", value: "all" },
         ],
-        default: "both",
+        default: "all",
       },
     ]);
 
@@ -33,9 +35,22 @@ export const schemaCommands = {
       return;
     }
 
+    // Prompt for schema output directory (optional override)
+    const defaultSchemaOut = path.join(configFolderPath, (cli as any).controller!.config?.schemaConfig?.outputDirectory || 'schemas');
+    const { schemaOutDir } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'schemaOutDir',
+        message: 'Output directory for schemas:',
+        default: defaultSchemaOut,
+        validate: (input: string) => input && input.trim().length > 0 ? true : 'Please provide an output directory',
+      }
+    ]);
+
     // Create SchemaGenerator with the correct base path and generate schemas
     const schemaGenerator = new SchemaGenerator((cli as any).controller!.config!, configFolderPath);
-    schemaGenerator.generateSchemas({ format: schemaType, verbose: true });
+    const outDirRel = path.isAbsolute(schemaOutDir) ? schemaOutDir : path.relative(configFolderPath, schemaOutDir);
+    await schemaGenerator.generateSchemas({ format: schemaType as any, verbose: true, outputDir: outDirRel });
 
     MessageFormatter.success("Schema generation completed", { prefix: "Schemas" });
   },

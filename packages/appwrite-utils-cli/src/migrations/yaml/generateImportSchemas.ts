@@ -562,8 +562,8 @@ export function generateTableSchema(): any {
   // Add column definition (similar to attribute but with table terminology)
   tableSchema.$defs.column = JSON.parse(JSON.stringify(tableSchema.$defs.attribute));
 
-  // Add encrypted property (table-specific feature)
-  tableSchema.$defs.column.properties.encrypted = {
+  // Add encrypt property (table-specific feature)
+  tableSchema.$defs.column.properties.encrypt = {
     "type": "boolean",
     "description": "Whether the column should be encrypted",
     "default": false

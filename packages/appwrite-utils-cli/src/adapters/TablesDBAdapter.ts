@@ -315,7 +315,7 @@ export class TablesDBAdapter extends BaseAdapter {
       const type = (params.type || "").toLowerCase();
       const required = params.required ?? false;
       const array = params.array ?? false;
-      const encrypt = params.encrypt ?? (params as any).encrypted ?? false;
+      const encrypt = params.encrypt ?? false;
       const normalizedDefault =
         params.default === null || params.default === undefined
           ? undefined

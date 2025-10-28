@@ -325,8 +325,8 @@ const createAttributeViaAdapter = async (
       ...((attribute as any).size && { size: (attribute as any).size }),
       ...((attribute as any).xdefault !== undefined &&
         !attribute.required && { default: (attribute as any).xdefault }),
-      ...((attribute as any).encrypted && {
-        encrypt: (attribute as any).encrypted,
+      ...((attribute as any).encrypt && {
+        encrypt: (attribute as any).encrypt,
       }),
       ...((attribute as any).min !== undefined && {
         min: (attribute as any).min,
@@ -408,7 +408,7 @@ const updateAttributeViaAdapter = async (
       size: (attribute as any).size,
       min: (attribute as any).min,
       max: (attribute as any).max,
-      encrypt: (attribute as any).encrypted ?? (attribute as any).encrypt,
+      encrypt: (attribute as any).encrypt,
       elements: (attribute as any).elements,
       relatedCollection: (attribute as any).relatedCollection,
       relationType: (attribute as any).relationType,
@@ -458,7 +458,7 @@ const createLegacyAttribute = async (
             ? (attribute as any).xdefault
             : undefined,
         array: attribute.array || false,
-        encrypted: (attribute as any).encrypted,
+        encrypt: (attribute as any).encrypt,
       };
       logger.debug(`Creating string attribute '${attribute.key}'`, {
         ...stringParams,
@@ -472,7 +472,7 @@ const createLegacyAttribute = async (
         stringParams.required,
         stringParams.defaultValue,
         stringParams.array,
-        stringParams.encrypted
+        stringParams.encrypt
       );
       break;
     case "integer":
@@ -1055,7 +1055,7 @@ const getComparableFields = (type: string): string[] => {
 
   switch (type) {
     case "string":
-      return [...baseFields, "size", "encrypted"];
+      return [...baseFields, "size", "encrypt"];
 
     case "integer":
     case "double":
@@ -1088,7 +1088,7 @@ const getComparableFields = (type: string): string[] => {
         "key",
         "type",
         "array",
-        "encrypted",
+        "encrypt",
         "required",
         "size",
         "min",

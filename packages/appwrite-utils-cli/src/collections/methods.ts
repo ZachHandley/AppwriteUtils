@@ -181,7 +181,7 @@ export const generateSchemas = async (
   appwriteFolderPath: string
 ): Promise<void> => {
   const schemaGenerator = new SchemaGenerator(config, appwriteFolderPath);
-  schemaGenerator.generateSchemas();
+  await schemaGenerator.generateSchemas();
 };
 
 export const createOrUpdateCollections = async (

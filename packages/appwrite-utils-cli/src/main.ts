@@ -87,6 +87,11 @@ interface CliOptions {
   listBackups?: boolean;
   autoSync?: boolean;
   selectBuckets?: boolean;
+  // New schema/constant CLI flags
+  generateSchemas?: boolean;
+  schemaFormat?: 'zod' | 'json' | 'pydantic' | 'both' | 'all';
+  schemaOutDir?: string;
+  constantsInclude?: string;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -572,6 +577,24 @@ const argv = yargs(hideBin(process.argv))
     description:
       "Output directory for generated constants files (default: config-folder/constants)",
     default: "auto",
+  })
+  .option("constantsInclude", {
+    type: "string",
+    description:
+      "Comma-separated categories to include: databases,collections,buckets,functions",
+  })
+  .option("generateSchemas", {
+    type: "boolean",
+    description: "Generate schemas/models without interactive prompts",
+  })
+  .option("schemaFormat", {
+    type: "string",
+    choices: ["zod", "json", "pydantic", "both", "all"],
+    description: "Schema format: zod, json, pydantic, both (zod+json), or all",
+  })
+  .option("schemaOutDir", {
+    type: "string",
+    description: "Output directory for generated schemas (absolute path respected)",
   })
   .option("migrateCollectionsToTables", {
     alias: ["migrate-collections"],

@@ -110,7 +110,7 @@ export const stringAttributeSchema = extendBase({
     .default(50)
     .describe("The max length or size of the attribute"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
-  encrypted: z
+  encrypt: z
     .boolean()
     .optional()
     .describe("Whether the attribute is encrypted or not"),
@@ -302,7 +302,7 @@ const attributeNormalizerSchema = z
     min: z.union([z.number(), z.string()]).optional(),
     max: z.union([z.number(), z.string()]).optional(),
     elements: z.array(z.string()).optional(),
-    encrypted: z.boolean().optional(),
+    encrypt: z.boolean().optional(),
     relatedCollection: z.string().optional(),
     relationType: z.string().optional(),
     twoWay: z.boolean().optional(),

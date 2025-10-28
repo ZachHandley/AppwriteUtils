@@ -36,7 +36,7 @@ Highlights:
 
 ### Development Tools
 - **Database Migrations**: Full migration control with progress tracking and operation summaries
-- **Schema Generation**: Generate TypeScript and JSON schemas from database configurations
+- **Schema Generation**: Generate TypeScript (Zod), JSON, and Python (Pydantic) schemas/models from database configurations
 - **Constants Generation**: Generate cross-language constants files (TypeScript, Python, PHP, Dart, JSON, Env) for database, collection, bucket, and function IDs
 - **Data Transfer**: Transfer data between databases, collections, and instances with real-time progress
 - **Configuration Sync**: Bidirectional synchronization between local YAML configs and Appwrite projects
@@ -226,6 +226,23 @@ This provides a professional guided experience with:
 - Smart confirmation dialogs for destructive operations
 - Operation summaries with detailed statistics
 - Real-time progress bars with ETA calculations
+
+### Generate Schemas (Zod / JSON / Pydantic)
+
+Interactive schema generation lets you pick the format and output directory:
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --it
+# Choose: Generate schemas
+# Select: TypeScript (Zod), JSON, Python (Pydantic), or All
+# Enter output directory (absolute path respected)
+```
+
+- Pydantic models use modern typing (str | None, list[str]) and alias mapping for Appwrite system fields:
+  - Base model (written as `base.py`) defines aliases for `$id`, `$createdAt`, `$updatedAt`, `$permissions`, `$databaseId`, `$collectionId`, `$sequence`.
+  - Each collection/table generates a model extending `BaseAppwriteModel`.
+  - Serialize with aliases via `model_dump(by_alias=True)` and validate from Appwrite docs via `model_validate(...)`.
+  - Output directory is selectable; files are written directly to your chosen path (no extra subfolder).
 
 ### Push (manual selection)
 
@@ -1102,3 +1119,15 @@ Rules:
 - `.fnconfig.yaml` definitions merge with central `.appwrite/config.yaml` functions; if the same `$id` exists in both, `.fnconfig.yaml` overrides
 
 Deployment uses the merged function set and resolves paths according to these rules.
+### Generate Constants
+
+Select which languages and which categories to generate (databases, collections/tables, buckets, functions):
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --it
+# Choose: Generate cross-language constants
+# Select languages (TS/JS/Python/PHP/Dart/JSON/Env)
+# Select categories to include
+```
+
+Constants are written to a configurable output directory under `.appwrite/` by default.

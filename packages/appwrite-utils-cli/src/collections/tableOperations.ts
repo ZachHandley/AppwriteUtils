@@ -115,7 +115,7 @@ export function normalizeAttributeToComparable(attr: Attribute): ComparableColum
 
   if (t === 'string') {
     base.size = (attr as any).size ?? 255;
-    base.encrypt = !!((attr as any).encrypted ?? (attr as any).encrypt);
+    base.encrypt = !!((attr as any).encrypt);
   }
   if (t === 'integer' || t === 'float' || t === 'double') {
     const min = toNumber((attr as any).min);
@@ -261,7 +261,7 @@ function compareColumnProperties(
   const getNewVal = (prop: string) => {
     const na = newAttribute as any;
     if (prop === 'default') return na.xdefault;
-    if (prop === 'encrypt') return na.encrypted ?? na.encrypt;
+    if (prop === 'encrypt') return na.encrypt;
     return na[prop];
   };
   const getOldVal = (prop: string) => {

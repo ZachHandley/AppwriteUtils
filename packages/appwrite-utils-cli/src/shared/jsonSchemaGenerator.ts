@@ -246,7 +246,9 @@ export class JsonSchemaGenerator {
     }
 
     // Create JSON schemas directory using provided outputDirectory
-    const jsonSchemasPath = path.join(this.appwriteFolderPath, outputDirectory);
+    const jsonSchemasPath = path.isAbsolute(outputDirectory)
+      ? outputDirectory
+      : path.join(this.appwriteFolderPath, outputDirectory);
     if (!fs.existsSync(jsonSchemasPath)) {
       fs.mkdirSync(jsonSchemasPath, { recursive: true });
     }

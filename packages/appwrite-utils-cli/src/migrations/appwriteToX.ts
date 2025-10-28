@@ -638,7 +638,7 @@ export class AppwriteToX {
       }
 
       MessageFormatter.info("Generating Zod schemas from synced collections...", { prefix: "Migration" });
-      generator.generateSchemas();
+      await generator.generateSchemas();
       MessageFormatter.success("Sync-from-Appwrite process completed successfully", { prefix: "Migration" });
     } catch (error) {
       MessageFormatter.error(

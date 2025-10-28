@@ -107,7 +107,7 @@ export interface YamlCollectionData {
     size?: number;
     required?: boolean;
     array?: boolean;
-    encrypted?: boolean;
+    encrypt?: boolean;
     default?: any;
     min?: number;
     max?: number;
@@ -126,7 +126,7 @@ export interface YamlCollectionData {
     size?: number;
     required?: boolean;
     array?: boolean;
-    encrypted?: boolean;
+    encrypt?: boolean;
     default?: any;
     min?: number;
     max?: number;
@@ -205,9 +205,9 @@ export function collectionToYaml(
       if (attr.required !== undefined) yamlAttr.required = attr.required;
       if (attr.array !== undefined) yamlAttr.array = attr.array;
 
-      // Always include encrypted field for string attributes (default to false)
+      // Always include encrypt field for string attributes (default to false)
       if (attr.type === 'string') {
-        yamlAttr.encrypted = ('encrypted' in attr && attr.encrypted === true) ? true : false;
+        yamlAttr.encrypt = ('encrypt' in attr && (attr as any).encrypt === true) ? true : false;
       }
 
       if ('xdefault' in attr && attr.xdefault !== undefined) yamlAttr.default = attr.xdefault;

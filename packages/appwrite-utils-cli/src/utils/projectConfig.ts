@@ -258,7 +258,7 @@ export function getCollectionsFromProject(projectConfig: AppwriteProjectConfig):
         array: col.array,
         size: col.size,
         default: col.default,
-        encrypted: col.encrypt,
+        encrypt: col.encrypt,
         unique: col.unique,
       })),
       indexes: table.indexes || [],
