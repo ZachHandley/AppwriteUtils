@@ -114,8 +114,55 @@ export const ensureDatabaseConfigBucketsExist = async (
     const database = config.databases?.find((d) => d.$id === db.$id);
     if (database?.bucket) {
       try {
-        await storage.getBucket(database.bucket.$id);
-        console.log(`Bucket ${database.bucket.$id} already exists.`);
+        const existing = await storage.getBucket(database.bucket.$id);
+        // Compare and update if needed
+        const desired = database.bucket;
+        // Build desired permissions via Permission helper
+        const permissions: string[] = [];
+        if (desired.permissions && desired.permissions.length > 0) {
+          for (const p of desired.permissions as any[]) {
+            switch (p.permission) {
+              case 'read': permissions.push(Permission.read(p.target)); break;
+              case 'create': permissions.push(Permission.create(p.target)); break;
+              case 'update': permissions.push(Permission.update(p.target)); break;
+              case 'delete': permissions.push(Permission.delete(p.target)); break;
+              case 'write': permissions.push(Permission.write(p.target)); break;
+              default: break;
+            }
+          }
+        }
+        const diff = (
+          existing.name !== desired.name ||
+          JSON.stringify(existing.$permissions || []) !== JSON.stringify(permissions) ||
+          !!existing.fileSecurity !== !!desired.fileSecurity ||
+          !!existing.enabled !== !!desired.enabled ||
+          (existing.maximumFileSize ?? undefined) !== (desired.maximumFileSize ?? undefined) ||
+          JSON.stringify(existing.allowedFileExtensions || []) !== JSON.stringify(desired.allowedFileExtensions || []) ||
+          String(existing.compression || 'none') !== String(desired.compression || 'none') ||
+          !!existing.encryption !== !!desired.encryption ||
+          !!existing.antivirus !== !!desired.antivirus
+        );
+        if (diff) {
+          try {
+            await storage.updateBucket(
+              desired.$id,
+              desired.name,
+              permissions,
+              desired.fileSecurity,
+              desired.enabled,
+              desired.maximumFileSize,
+              desired.allowedFileExtensions,
+              desired.compression as Compression,
+              desired.encryption,
+              desired.antivirus
+            );
+            MessageFormatter.info(`Updated bucket ${desired.$id} to match config`, { prefix: 'Buckets' });
+          } catch (updateErr) {
+            MessageFormatter.warning(`Failed to update bucket ${desired.$id}: ${updateErr instanceof Error ? updateErr.message : String(updateErr)}`, { prefix: 'Buckets' });
+          }
+        } else {
+          MessageFormatter.debug(`Bucket ${desired.$id} up-to-date`, undefined, { prefix: 'Buckets' });
+        }
       } catch (e) {
         const permissions: string[] = [];
         if (
@@ -158,12 +205,9 @@ export const ensureDatabaseConfigBucketsExist = async (
             database.bucket.encryption,
             database.bucket.antivirus
           );
-          console.log(`Bucket ${database.bucket.$id} created successfully.`);
+          MessageFormatter.success(`Bucket ${database.bucket.$id} created`, { prefix: 'Buckets' });
         } catch (createError) {
-          // console.error(
-          //   `Failed to create bucket ${database.bucket.$id}:`,
-          //   createError
-          // );
+          MessageFormatter.error(`Failed to create bucket ${database.bucket.$id}`, createError instanceof Error ? createError : new Error(String(createError)), { prefix: 'Buckets' });
         }
       }
     }

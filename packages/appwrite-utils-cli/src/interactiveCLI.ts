@@ -43,6 +43,7 @@ import { findYamlConfig } from "./config/yamlConfig.js";
 import { configCommands } from "./cli/commands/configCommands.js";
 import { databaseCommands } from "./cli/commands/databaseCommands.js";
 import { functionCommands } from "./cli/commands/functionCommands.js";
+import { storageCommands } from "./cli/commands/storageCommands.js";
 import { transferCommands } from "./cli/commands/transferCommands.js";
 import { schemaCommands } from "./cli/commands/schemaCommands.js";
 
@@ -68,6 +69,7 @@ enum CHOICES {
   IMPORT_DATA = "📥 Import data",
   RELOAD_CONFIG = "🔄 Reload configuration files",
   UPDATE_FUNCTION_SPEC = "⚙️ Update function specifications",
+  MANAGE_BUCKETS = "🪣 Manage storage buckets",
   EXIT = "👋 Exit",
 }
 
@@ -184,6 +186,9 @@ export class InteractiveCLI {
           await this.initControllerIfNeeded();
           await functionCommands.updateFunctionSpec(this);
           break;
+        case CHOICES.MANAGE_BUCKETS:
+          await this.manageBuckets();
+          break;
         case CHOICES.EXIT:
           MessageFormatter.success("Goodbye!");
           process.exit(0);
@@ -221,6 +226,31 @@ export class InteractiveCLI {
         await this.controller.init();
       }
       // If no directConfig provided, keep existing controller
+    }
+  }
+
+  private async manageBuckets(): Promise<void> {
+    await this.initControllerIfNeeded();
+    while (true) {
+      const { action } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'action',
+          message: chalk.blue('Bucket management'),
+          choices: [
+            { name: 'Create bucket', value: 'create' },
+            { name: 'Delete buckets', value: 'delete' },
+            { name: 'Back', value: 'back' },
+          ],
+        },
+      ]);
+
+      if (action === 'back') break;
+      if (action === 'create') {
+        await storageCommands.createBucket(this);
+      } else if (action === 'delete') {
+        await storageCommands.deleteBuckets(this);
+      }
     }
   }
 

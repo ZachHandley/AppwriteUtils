@@ -72,6 +72,22 @@ export const schemaCommands = {
       },
     ]);
 
+    // Prompt for which constants to include
+    const { includeWhat } = await inquirer.prompt([
+      {
+        type: 'checkbox',
+        name: 'includeWhat',
+        message: 'Select which constants to generate:',
+        choices: [
+          { name: 'Databases', value: 'databases', checked: true },
+          { name: 'Collections/Tables', value: 'collections', checked: true },
+          { name: 'Buckets', value: 'buckets', checked: true },
+          { name: 'Functions', value: 'functions', checked: true },
+        ],
+        validate: (input) => input.length > 0 ? true : 'Select at least one category',
+      }
+    ]);
+
     // Determine default output directory based on config location
     const configPath = (cli as any).controller!.getAppwriteFolderPath();
     const defaultOutputDir = configPath
@@ -98,8 +114,14 @@ export const schemaCommands = {
       const { ConstantsGenerator } = await import("../../utils/constantsGenerator.js");
       const generator = new ConstantsGenerator((cli as any).controller.config);
 
+      const include = {
+        databases: includeWhat.includes('databases'),
+        collections: includeWhat.includes('collections'),
+        buckets: includeWhat.includes('buckets'),
+        functions: includeWhat.includes('functions'),
+      };
       MessageFormatter.info(`Generating constants for: ${languages.join(", ")}`, { prefix: "Constants" });
-      await generator.generateFiles(languages, outputDir);
+      await generator.generateFiles(languages, outputDir, include);
 
       MessageFormatter.success(`Constants generated in ${outputDir}`, { prefix: "Constants" });
     } catch (error) {

@@ -138,11 +138,36 @@ export const functionCommands = {
       return;
     }
 
-    // Discover local .fnconfig.yaml functions and merge into controller config
+    // Offer choice of function config sources: central YAML, .fnconfig.yaml, or both
+    let sourceChoice: 'central' | 'fnconfig' | 'both' = 'both';
+    try {
+      const answer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'source',
+          message: 'Select function config source:',
+          choices: [
+            { name: 'config.yaml functions (central)', value: 'central' },
+            { name: '.fnconfig.yaml (discovered per-function)', value: 'fnconfig' },
+            { name: 'Both (merge; .fnconfig overrides)', value: 'both' },
+          ],
+          default: 'both'
+        }
+      ]);
+      sourceChoice = answer.source;
+    } catch {}
+
     try {
       const discovered = discoverFnConfigs((cli as any).currentDir);
-      const merged = mergeDiscoveredFunctions((cli as any).controller!.config!.functions || [], discovered);
-      (cli as any).controller!.config!.functions = merged as any;
+      const central = (cli as any).controller!.config!.functions || [];
+      if (sourceChoice === 'central') {
+        (cli as any).controller!.config!.functions = central as any;
+      } else if (sourceChoice === 'fnconfig') {
+        (cli as any).controller!.config!.functions = discovered as any;
+      } else {
+        const merged = mergeDiscoveredFunctions(central, discovered);
+        (cli as any).controller!.config!.functions = merged as any;
+      }
     } catch {}
 
     const functions = await (cli as any).selectFunctions(

@@ -328,6 +328,12 @@ export function createYamlValidationSchema(
               "default": false,
               "description": `Whether the ${useTables ? 'column' : 'attribute'} is an array`
             },
+            // Encryption flag for string types
+            "encrypt": {
+              "type": "boolean",
+              "default": false,
+              "description": `Enable encryption for string ${useTables ? 'columns' : 'attributes'}`
+            },
             ...(useTables ? {
               "unique": {
                 "type": "boolean",

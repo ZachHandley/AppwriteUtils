@@ -89,8 +89,8 @@ export class ConstantsGenerator {
     return name.toLowerCase();
   }
 
-  generateTypeScript(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generateTypeScript(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
 
     return `// Auto-generated Appwrite constants
 // Generated on ${new Date().toISOString()}
@@ -125,8 +125,8 @@ export const ALL_FUNCTION_IDS = Object.values(FUNCTION_IDS);
 `;
   }
 
-  generateJavaScript(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generateJavaScript(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
 
     return `// Auto-generated Appwrite constants
 // Generated on ${new Date().toISOString()}
@@ -155,8 +155,8 @@ export const ALL_FUNCTION_IDS = Object.values(FUNCTION_IDS);
 `;
   }
 
-  generatePython(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generatePython(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
 
     return `# Auto-generated Appwrite constants
 # Generated on ${new Date().toISOString()}
@@ -196,8 +196,8 @@ ${Object.entries(functions).map(([key, value]) => `    "${this.toSnakeCase(key)}
 `;
   }
 
-  generatePHP(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generatePHP(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
 
     return `<?php
 // Auto-generated Appwrite constants
@@ -252,8 +252,8 @@ ${Object.entries(functions).map(([key, value]) => `        '${key}' => '${value}
 `;
   }
 
-  generateDart(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generateDart(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
 
     return `// Auto-generated Appwrite constants
 // Generated on ${new Date().toISOString()}
@@ -288,21 +288,22 @@ ${Object.entries(functions).map(([key, value]) => `  static String get ${this.to
 `;
   }
 
-  generateJSON(): string {
+  generateJSON(constantsOverride?: Constants): string {
+    const c = constantsOverride || this.constants;
     return JSON.stringify({
       meta: {
         generated: new Date().toISOString(),
         generator: "appwrite-utils-cli"
       },
-      databases: this.constants.databases,
-      collections: this.constants.collections,
-      buckets: this.constants.buckets,
-      functions: this.constants.functions
+      databases: c.databases,
+      collections: c.collections,
+      buckets: c.buckets,
+      functions: c.functions
     }, null, 2);
   }
 
-  generateEnv(): string {
-    const { databases, collections, buckets, functions } = this.constants;
+  generateEnv(constantsOverride?: Constants): string {
+    const { databases, collections, buckets, functions } = constantsOverride || this.constants;
     
     const lines = [
       "# Auto-generated Appwrite constants",
@@ -324,17 +325,33 @@ ${Object.entries(functions).map(([key, value]) => `  static String get ${this.to
     return lines.join('\n');
   }
 
-  async generateFiles(languages: SupportedLanguage[], outputDir: string): Promise<void> {
+  async generateFiles(
+    languages: SupportedLanguage[],
+    outputDir: string,
+    include?: { databases?: boolean; collections?: boolean; buckets?: boolean; functions?: boolean }
+  ): Promise<void> {
     await fs.mkdir(outputDir, { recursive: true });
 
+    const filterConstants = (): Constants => {
+      if (!include) return this.constants;
+      return {
+        databases: include.databases === false ? {} : this.constants.databases,
+        collections: include.collections === false ? {} : this.constants.collections,
+        buckets: include.buckets === false ? {} : this.constants.buckets,
+        functions: include.functions === false ? {} : this.constants.functions,
+      };
+    };
+
+    const subset = filterConstants();
+
     const generators = {
-      typescript: () => ({ content: this.generateTypeScript(), filename: "appwrite-constants.ts" }),
-      javascript: () => ({ content: this.generateJavaScript(), filename: "appwrite-constants.js" }),
-      python: () => ({ content: this.generatePython(), filename: "appwrite_constants.py" }),
-      php: () => ({ content: this.generatePHP(), filename: "AppwriteConstants.php" }),
-      dart: () => ({ content: this.generateDart(), filename: "appwrite_constants.dart" }),
-      json: () => ({ content: this.generateJSON(), filename: "appwrite-constants.json" }),
-      env: () => ({ content: this.generateEnv(), filename: ".env.appwrite" })
+      typescript: () => ({ content: this.generateTypeScript(subset), filename: "appwrite-constants.ts" }),
+      javascript: () => ({ content: this.generateJavaScript(subset), filename: "appwrite-constants.js" }),
+      python: () => ({ content: this.generatePython(subset), filename: "appwrite_constants.py" }),
+      php: () => ({ content: this.generatePHP(subset), filename: "AppwriteConstants.php" }),
+      dart: () => ({ content: this.generateDart(subset), filename: "appwrite_constants.dart" }),
+      json: () => ({ content: this.generateJSON(subset), filename: "appwrite-constants.json" }),
+      env: () => ({ content: this.generateEnv(subset), filename: ".env.appwrite" })
     };
 
     for (const language of languages) {
