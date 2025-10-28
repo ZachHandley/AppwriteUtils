@@ -10,22 +10,17 @@ import {
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { getAppwriteClient } from "../utils/helperFunctions.js";
-import {
-  createOrUpdateAttribute,
-  createUpdateCollectionAttributes,
-  createUpdateCollectionAttributesWithStatusCheck,
-} from "../collections/attributes.js";
+// Legacy attribute helpers retained only for local-to-local flows if needed
 import { parseAttribute } from "appwrite-utils";
 import chalk from "chalk";
 import { fetchAllCollections } from "../collections/methods.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
 import { ProgressManager } from "../shared/progressManager.js";
-import {
-  createOrUpdateIndex,
-  createOrUpdateIndexes,
-  createOrUpdateIndexesWithStatusCheck,
-} from "../collections/indexes.js";
-import { getClient } from "../utils/getClientFromConfig.js";
+import { getClient, getAdapter } from "../utils/getClientFromConfig.js";
+import { diffTableColumns } from "../collections/tableOperations.js";
+import { mapToCreateAttributeParams } from "../shared/attributeMapper.js";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;
@@ -331,73 +326,81 @@ export const transferDatabaseLocalToLocal = async (
         );
       }
 
-      // Handle attributes with enhanced status checking
-      MessageFormatter.info(
-        `Creating attributes for collection ${collection.name} with enhanced monitoring...`,
-        { prefix: "Transfer" }
-      );
-
-      const allAttributes = collection.attributes.map((attr) =>
-        parseAttribute(attr as any)
-      );
-      const attributeSuccess =
-        await createUpdateCollectionAttributesWithStatusCheck(
-          localDb,
-          targetDbId,
-          targetCollection,
-          allAttributes
-        );
-
-      if (!attributeSuccess) {
-        MessageFormatter.error(
-          `Failed to create all attributes for collection ${collection.name}, skipping to next collection`,
-          undefined,
-          { prefix: "Transfer" }
-        );
-        continue;
+      // Create attributes via local adapter (wrap the existing client)
+      const localAdapter: DatabaseAdapter = new LegacyAdapter((localDb as any).client);
+      MessageFormatter.info(`Creating attributes for ${collection.name} via adapter...`, { prefix: 'Transfer' });
+      const uniformAttrs = collection.attributes.map((attr) => parseAttribute(attr as any));
+      const nonRel = uniformAttrs.filter((a: any) => a.type !== 'relationship');
+      for (const attr of nonRel) {
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetCollection.$id });
+        await localAdapter.createAttribute(params);
+        await new Promise((r) => setTimeout(r, 150));
       }
 
-      MessageFormatter.success(
-        `All attributes created successfully for collection ${collection.name}`,
-        { prefix: "Transfer" }
-      );
+      // Wait for attributes to become available
+      for (const attr of nonRel) {
+        const maxWait = 60000; const start = Date.now();
+        let lastStatus = '';
+        while (Date.now() - start < maxWait) {
+          try {
+            const tableRes = await localAdapter.getTable({ databaseId: targetDbId, tableId: targetCollection.$id });
+            const attrs = (tableRes as any).attributes || (tableRes as any).columns || [];
+            const found = attrs.find((a: any) => a.key === attr.key);
+            if (found) {
+              if (found.status === 'available') break;
+              if (found.status === 'failed' || found.status === 'stuck') {
+                throw new Error(found.error || `Attribute ${attr.key} failed`);
+              }
+              lastStatus = found.status;
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          } catch {
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+        if (Date.now() - start >= maxWait) {
+          MessageFormatter.warning(`Attribute ${attr.key} did not become available within 60s (last: ${lastStatus})`, { prefix: 'Transfer' });
+        }
+      }
 
-      // Handle indexes
-      const existingIndexes = await tryAwaitWithRetry(
-        async () => await localDb.listIndexes(targetDbId, targetCollection.$id)
-      );
+      // Relationship attributes
+      const rels = uniformAttrs.filter((a: any) => a.type === 'relationship');
+      for (const attr of rels) {
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetCollection.$id });
+        await localAdapter.createAttribute(params);
+        await new Promise((r) => setTimeout(r, 150));
+      }
 
-      for (const index of collection.indexes) {
-        const existingIndex = existingIndexes.indexes.find(
-          (idx) => idx.key === index.key
-        );
-
-        if (!existingIndex) {
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateIndex(
-              targetDbId,
-              localDb,
-              targetCollection.$id,
-              index as any
-            )
-          );
-          MessageFormatter.success(
-            `Index ${index.key} created`,
-            { prefix: "Transfer" }
-          );
-        } else {
-          MessageFormatter.info(
-            `Index ${index.key} exists, checking for updates...`,
-            { prefix: "Transfer" }
-          );
-          await tryAwaitWithRetry(async () =>
-            createOrUpdateIndex(
-              targetDbId,
-              localDb,
-              targetCollection.$id,
-              index as any
-            )
-          );
+      // Handle indexes via adapter (create or update)
+      for (const idx of collection.indexes) {
+        try {
+          await localAdapter.createIndex({
+            databaseId: targetDbId,
+            tableId: targetCollection.$id,
+            key: (idx as any).key,
+            type: (idx as any).type,
+            attributes: (idx as any).attributes,
+            orders: (idx as any).orders || []
+          });
+          await new Promise((r) => setTimeout(r, 150));
+          MessageFormatter.success(`Index ${(idx as any).key} created`, { prefix: 'Transfer' });
+        } catch (e) {
+          // Try update path by deleting and recreating if necessary
+          try {
+            await localAdapter.deleteIndex({ databaseId: targetDbId, tableId: targetCollection.$id, key: (idx as any).key });
+            await localAdapter.createIndex({
+              databaseId: targetDbId,
+              tableId: targetCollection.$id,
+              key: (idx as any).key,
+              type: (idx as any).type,
+              attributes: (idx as any).attributes,
+              orders: (idx as any).orders || []
+            });
+            await new Promise((r) => setTimeout(r, 150));
+            MessageFormatter.info(`Index ${(idx as any).key} recreated`, { prefix: 'Transfer' });
+          } catch (e2) {
+            MessageFormatter.error(`Failed to ensure index ${(idx as any).key}`, e2 instanceof Error ? e2 : new Error(String(e2)), { prefix: 'Transfer' });
+          }
         }
       }
 
@@ -500,35 +503,53 @@ export const transferDatabaseLocalToRemote = async (
         );
       }
 
-      // Handle attributes with enhanced status checking
-      MessageFormatter.info(
-        `Creating attributes for collection ${collection.name} with enhanced monitoring...`,
-        { prefix: "Transfer" }
-      );
+      // Create/Update attributes via adapter (prefer adapter for remote)
+      const { adapter: remoteAdapter } = await getAdapter(endpoint, projectId, apiKey, 'auto');
+      MessageFormatter.info(`Creating attributes for ${collection.name} via adapter...`, { prefix: 'Transfer' });
+      const uniformAttrs = collection.attributes.map((attr) => parseAttribute(attr as any));
+      const nonRel = uniformAttrs.filter((a: any) => a.type !== 'relationship');
+      if (nonRel.length > 0) {
+        const tableInfo = await (remoteAdapter as DatabaseAdapter).getTable({ databaseId: toDbId, tableId: collection.$id });
+        const existingCols: any[] = (tableInfo as any).columns || (tableInfo as any).attributes || [];
+        const { toCreate, toUpdate } = diffTableColumns(existingCols, nonRel as any);
+        for (const a of toUpdate) { const p = mapToCreateAttributeParams(a as any, { databaseId: toDbId, tableId: collection.$id }); await (remoteAdapter as DatabaseAdapter).updateAttribute(p as any); await new Promise((r)=>setTimeout(r,150)); }
+        for (const a of toCreate) { const p = mapToCreateAttributeParams(a as any, { databaseId: toDbId, tableId: collection.$id }); await (remoteAdapter as DatabaseAdapter).createAttribute(p); await new Promise((r)=>setTimeout(r,150)); }
+      }
 
-      const attributesToCreate = collection.attributes.map((attr) =>
-        parseAttribute(attr as any)
-      );
+      // Wait for non-relationship attributes to become available
+      for (const attr of nonRel) {
+        const maxWait = 60000; const start = Date.now();
+        let lastStatus = '';
+        while (Date.now() - start < maxWait) {
+          try {
+            const tableRes = await (remoteAdapter as DatabaseAdapter).getTable({ databaseId: toDbId, tableId: collection.$id });
+            const attrs = (tableRes as any).attributes || (tableRes as any).columns || [];
+            const found = attrs.find((a: any) => a.key === attr.key);
+            if (found) {
+              if (found.status === 'available') break;
+              if (found.status === 'failed' || found.status === 'stuck') {
+                throw new Error(found.error || `Attribute ${attr.key} failed`);
+              }
+              lastStatus = found.status;
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          } catch {
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+        if (Date.now() - start >= maxWait) {
+          MessageFormatter.warning(`Attribute ${attr.key} did not become available within 60s (last: ${lastStatus})`, { prefix: 'Transfer' });
+        }
+      }
 
-      const attributesSuccess =
-        await createUpdateCollectionAttributesWithStatusCheck(
-          remoteDb,
-          toDbId,
-          targetCollection,
-          attributesToCreate
-        );
-
-      if (!attributesSuccess) {
-        MessageFormatter.warning(
-          `Failed to create some attributes for collection ${collection.name}`,
-          { prefix: "Transfer" }
-        );
-        // Continue with the transfer even if some attributes failed
-      } else {
-        MessageFormatter.success(
-          `All attributes created successfully for collection ${collection.name}`,
-          { prefix: "Transfer" }
-        );
+      // Relationship attributes
+      const rels = uniformAttrs.filter((a: any) => a.type === 'relationship');
+      if (rels.length > 0) {
+        const tableInfo2 = await (remoteAdapter as DatabaseAdapter).getTable({ databaseId: toDbId, tableId: collection.$id });
+        const existingCols2: any[] = (tableInfo2 as any).columns || (tableInfo2 as any).attributes || [];
+        const { toCreate: rCreate, toUpdate: rUpdate } = diffTableColumns(existingCols2, rels as any);
+        for (const a of rUpdate) { const p = mapToCreateAttributeParams(a as any, { databaseId: toDbId, tableId: collection.$id }); await (remoteAdapter as DatabaseAdapter).updateAttribute(p as any); await new Promise((r)=>setTimeout(r,150)); }
+        for (const a of rCreate) { const p = mapToCreateAttributeParams(a as any, { databaseId: toDbId, tableId: collection.$id }); await (remoteAdapter as DatabaseAdapter).createAttribute(p); await new Promise((r)=>setTimeout(r,150)); }
       }
 
       // Handle indexes with enhanced status checking
@@ -537,25 +558,21 @@ export const transferDatabaseLocalToRemote = async (
         { prefix: "Transfer" }
       );
 
-      const indexesSuccess = await createOrUpdateIndexesWithStatusCheck(
-        toDbId,
-        remoteDb,
-        targetCollection.$id,
-        targetCollection,
-        collection.indexes as any
-      );
-
-      if (!indexesSuccess) {
-        MessageFormatter.warning(
-          `Failed to create some indexes for collection ${collection.name}`,
-          { prefix: "Transfer" }
-        );
-        // Continue with the transfer even if some indexes failed
-      } else {
-        MessageFormatter.success(
-          `All indexes created successfully for collection ${collection.name}`,
-          { prefix: "Transfer" }
-        );
+      // Create indexes via adapter
+      for (const idx of (collection.indexes as any[]) || []) {
+        try {
+          await (remoteAdapter as DatabaseAdapter).createIndex({
+            databaseId: toDbId,
+            tableId: collection.$id,
+            key: idx.key,
+            type: idx.type,
+            attributes: idx.attributes,
+            orders: idx.orders || []
+          });
+          await new Promise((r) => setTimeout(r, 150));
+        } catch (e) {
+          MessageFormatter.error(`Failed to create index ${idx.key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Transfer' });
+        }
       }
 
       // Transfer documents

@@ -4,7 +4,9 @@
 
 `appwrite-utils` is a comprehensive TypeScript library designed to streamline the development process for Appwrite projects. This library provides a suite of utilities and helper functions that facilitate data manipulation, schema management, YAML configuration validation, and seamless integration with Appwrite services. Whether you're managing data migrations, schema updates, or building custom tools on top of the CLI architecture, `appwrite-utils` provides the foundation for professional Appwrite development.
 
-**Version 1.6.1**: Internal improvements for better code organization and maintainability.
+Highlights:
+- Dual-terminology schemas for Collections and TablesDB
+- Multi-database targeting via `databaseId` or `databaseIds`
 
 ## Features
 
@@ -535,3 +537,20 @@ const config = { name: "Users", attributes: [...] };
 - **0.2.6**: Added `tryAwaitWithRetry` which retries failed API calls up to 5 times
 - **0.2.3**: Added OpenAPI descriptions to AuthUserSchema for better schema generation
 - **0.1.21**: Changed `ID.unique()` to `ulid()` for random ID generation, refactored schema files
+### Multi-Database Targeting
+
+Tables and collections support both a single `databaseId` and multiple `databaseIds` for targeting multiple databases (e.g., dev/staging/main) with the same definition:
+
+```ts
+import { TableCreateSchema } from 'appwrite-utils';
+
+const table = TableCreateSchema.parse({
+  name: 'Analytics',
+  databaseIds: ['dev', 'staging', 'main'],
+  attributes: [
+    { key: 'timestamp', type: 'datetime', required: true },
+    { key: 'totalUsers', type: 'integer' }
+  ],
+  indexes: [{ key: 'ts_idx', type: 'key', attributes: ['timestamp'] }]
+});
+```

@@ -248,7 +248,8 @@ export class SelectionDialogs {
         name,
         value: database.$id,
         short: database.name,
-        checked: defaultSelected.includes(database.$id) || (!allowNewOnly && isConfigured)
+        // Do not preselect anything unless explicitly provided
+        checked: defaultSelected.includes(database.$id)
       });
     });
 
@@ -331,7 +332,8 @@ export class SelectionDialogs {
         name,
         value: table.$id,
         short: table.name,
-        checked: defaultSelected.includes(table.$id) || (!allowNewOnly && isConfigured)
+        // Do not preselect anything unless explicitly provided
+        checked: defaultSelected.includes(table.$id)
       });
     });
 
@@ -440,7 +442,8 @@ export class SelectionDialogs {
               name: `  ${name}`,
               value: bucket.$id,
               short: bucket.name,
-              checked: defaultSelected.includes(bucket.$id) || (!allowNewOnly && isConfigured)
+              // Do not preselect anything unless explicitly provided
+              checked: defaultSelected.includes(bucket.$id)
             });
           });
         }
@@ -484,7 +487,8 @@ export class SelectionDialogs {
           name,
           value: bucket.$id,
           short: bucket.name,
-          checked: defaultSelected.includes(bucket.$id) || (!allowNewOnly && isConfigured)
+          // Do not preselect anything unless explicitly provided
+          checked: defaultSelected.includes(bucket.$id)
         });
       });
     }

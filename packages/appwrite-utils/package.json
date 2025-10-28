@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils",
   "module": "dist/index.js",
-  "version": "1.6.2",
+  "version": "1.6.4",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/decimal.js": "^7.4.3",
     "@types/yargs": "^17.0.33"
   },
   "peerDependencies": {
@@ -30,6 +31,7 @@
   "dependencies": {
     "@types/luxon": "^3.6.2",
     "appwrite": "^21.2.1",
+    "decimal.js": "^10.6.0",
     "luxon": "^3.6.1",
     "yargs": "^17.7.2",
     "zod": "^4.0.0"

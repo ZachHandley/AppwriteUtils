@@ -23,8 +23,7 @@ import { YamlImportIntegration } from "../migrations/yaml/YamlImportIntegration.
 import { createImportSchemas } from "../migrations/yaml/generateImportSchemas.js";
 import {
   CollectionCreateSchema,
-  type CollectionCreate,
-  type CollectionCreateInput
+  type CollectionCreate
 } from "appwrite-utils";
 import fs from "fs";
 import path from "path";
@@ -275,7 +274,7 @@ export async function runYamlTerminologyExamples(outputDir: string): Promise<voi
 
   try {
     // Example collection for demonstrations
-    const exampleCollectionInput: CollectionCreateInput = {
+    const exampleCollectionInput: CollectionCreate = {
       name: "Product",
       $id: "product",
       enabled: true,
@@ -290,7 +289,7 @@ export async function runYamlTerminologyExamples(outputDir: string): Promise<voi
         },
         {
           key: "price",
-          type: "float",
+          type: "double",
           required: true,
           min: 0
         },
@@ -300,7 +299,8 @@ export async function runYamlTerminologyExamples(outputDir: string): Promise<voi
           relationType: "manyToOne",
           relatedCollection: "Categories",
           twoWay: false,
-          onDelete: "setNull"
+          onDelete: "setNull",
+          required: false
         }
       ],
       indexes: [

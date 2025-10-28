@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Decimal } from "decimal.js";
 
 const MIN_MAX_THRESHOLD = 1_000_000_000_000;
 const EXTREME_MIN_INTEGER = -9223372036854776000;
@@ -13,9 +14,25 @@ const normalizeNumericBoundary = (
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (Math.abs(value) >= MIN_MAX_THRESHOLD || value === extreme) {
-    return undefined;
+
+  // Use Decimal.js for precise comparison with extreme values
+  try {
+    const valueDecimal = new Decimal(value.toString());
+    const extremeDecimal = new Decimal(extreme.toString());
+    const thresholdDecimal = new Decimal(MIN_MAX_THRESHOLD.toString());
+
+    // Check if value equals extreme value or exceeds threshold
+    if (valueDecimal.equals(extremeDecimal) || valueDecimal.abs().greaterThanOrEqualTo(thresholdDecimal)) {
+      return undefined;
+    }
+  } catch (error) {
+    // Fallback to original logic if Decimal.js fails
+    console.warn(`Failed to compare numeric boundary with Decimal.js, falling back to Number comparison:`, error);
+    if (Math.abs(value) >= MIN_MAX_THRESHOLD || value === extreme) {
+      return undefined;
+    }
   }
+
   return value;
 };
 
@@ -76,6 +93,8 @@ export const baseAttributeSchema = z.object({
  */
 const extendBase = <T extends z.ZodRawShape>(shape: T) =>
   baseAttributeSchema.omit({ error: true }).extend({
+    // Keep `error` optional without a default so it doesn't
+    // become required in the discriminated union's output type.
     error: z
       .string()
       .optional()
@@ -85,11 +104,6 @@ const extendBase = <T extends z.ZodRawShape>(shape: T) =>
 
 export const stringAttributeSchema = extendBase({
   type: z.literal("string").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   size: z
     .number()
     .optional()
@@ -104,11 +118,6 @@ export const stringAttributeSchema = extendBase({
 
 export const integerAttributeSchema = extendBase({
   type: z.literal("integer").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   min: z
     .number()
     .optional()
@@ -143,39 +152,24 @@ export const integerAttributeSchema = extendBase({
   return normalized;
 });
 
-const baseFloatDoubleSchema = extendBase({
+export const doubleAttributeSchema = extendBase({
+  type: z.literal("double").describe("The type of the attribute"),
   min: z.number().optional().describe("The minimum value of the attribute"),
   max: z.number().optional().describe("The maximum value of the attribute"),
   xdefault: z.number().nullish().describe("The default value of the attribute"),
 });
 
-export const doubleAttributeSchema = baseFloatDoubleSchema.extend({
-  type: z.literal("double").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid Numeric Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
-});
-
-export const floatAttributeSchema = baseFloatDoubleSchema.extend({
+export const floatAttributeSchema = extendBase({
   type: z
     .literal("float")
     .describe("The type of the attribute (backwards compatibility)"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid Numeric Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
+  min: z.number().optional().describe("The minimum value of the attribute"),
+  max: z.number().optional().describe("The maximum value of the attribute"),
+  xdefault: z.number().nullish().describe("The default value of the attribute"),
 });
 
 export const booleanAttributeSchema = extendBase({
   type: z.literal("boolean").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   xdefault: z
     .boolean()
     .nullish()
@@ -184,51 +178,26 @@ export const booleanAttributeSchema = extendBase({
 
 export const datetimeAttributeSchema = extendBase({
   type: z.literal("datetime").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
 });
 
 export const emailAttributeSchema = extendBase({
   type: z.literal("email").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
 });
 
 export const ipAttributeSchema = extendBase({
   type: z.literal("ip").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
 });
 
 export const urlAttributeSchema = extendBase({
   type: z.literal("url").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   xdefault: z.string().nullish().describe("The default value of the attribute"),
 });
 
 export const enumAttributeSchema = extendBase({
   type: z.literal("enum").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   elements: z
     .array(z.string())
     .default([])
@@ -238,11 +207,6 @@ export const enumAttributeSchema = extendBase({
 
 export const relationshipAttributeSchema = extendBase({
   type: z.literal("relationship").describe("The type of the attribute"),
-  error: z
-    .string()
-    .optional()
-    .default("Invalid String Attribute Schema")
-    .describe("The error message if the attribute is invalid"),
   relatedCollection: z
     .string()
     .describe("The collection ID of the related collection"),
@@ -402,6 +366,31 @@ const attributeNormalizerSchema = z
       if (value === undefined || value === null) {
         return undefined;
       }
+
+      // Handle string values that might be too large for Number()
+      if (typeof value === 'string') {
+        try {
+          const decimal = new Decimal(value);
+          // Check if the decimal is within safe JavaScript number range
+          if (decimal.abs().greaterThan(Number.MAX_SAFE_INTEGER)) {
+            // For values larger than MAX_SAFE_INTEGER, keep as string to preserve precision
+            // But return undefined if it's an extreme database value
+            const numValue = decimal.toNumber();
+            if (Math.abs(numValue) >= MIN_MAX_THRESHOLD) {
+              return undefined;
+            }
+            // For other large values, we still need to return a number for the schema
+            // but log a warning about potential precision loss
+            console.warn(`Large number value '${value}' may lose precision when converted to JavaScript number`);
+            return numValue;
+          }
+          return decimal.toNumber();
+        } catch (error) {
+          // If Decimal parsing fails, fall back to Number()
+          console.warn(`Failed to parse large number value '${value}' with Decimal.js:`, error);
+        }
+      }
+
       const numeric = Number(value);
       return Number.isNaN(numeric) ? undefined : numeric;
     };
@@ -467,9 +456,8 @@ const attributeNormalizerSchema = z
       normalized.status = "available";
     }
 
-    if (normalized.error === undefined || normalized.error === null) {
-      normalized.error = "Invalid Attribute Schema";
-    }
+    // Don't force set error here - let individual schemas handle defaults
+    // This prevents TypeScript conflicts where error appears required
 
     if (normalized.array === undefined || normalized.array === null) {
       normalized.array = false;
@@ -498,3 +486,5 @@ export const attributesSchema = z.array(attributeSchema);
 
 export type Attribute = z.infer<typeof attributeSchema>;
 export type Attributes = z.infer<typeof attributesSchema>;
+export type Column = Attribute; // Alias for clarity in TablesDB
+export type Columns = Attributes; // Alias for clarity in TablesDB

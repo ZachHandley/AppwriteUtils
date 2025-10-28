@@ -4,7 +4,12 @@
 
 `appwrite-utils-cli` is a powerful, YAML-first command-line interface tool designed for Appwrite developers who need to manage database migrations, schema generation, data import, and comprehensive project management. Built on a modular architecture with enhanced performance, this CLI tool facilitates complex tasks like setting up databases, running migrations, generating schemas, and managing backups efficiently.
 
-**Version 1.6.1**: Major refactoring for improved code organization - extracted operations into focused modules, standardized logging across the codebase, and added utility libraries for better maintainability.
+Highlights:
+- Adapter-first database orchestration (no legacy attribute fall-through)
+- Safe diff-based updates for attributes and indexes (no duplicate creations)
+- Manual push selections (no auto-push of all DBs)
+- Multi-database targeting per table/collection via `databaseIds`
+- Per-function configuration via `.fnconfig.yaml` (discovered anywhere in repo)
 
 ## Features
 
@@ -18,7 +23,7 @@
 ### Dual API Support (Collections & TablesDB)
 - **Collections API**: Traditional Appwrite database operations with document-based terminology
 - **TablesDB API**: New high-performance table API with column-based terminology
-- **Automatic Detection**: Smart API mode detection based on configuration and available packages
+- **Automatic Detection**: Smart API mode detection (fetch-based detection; no extra packages required)
 - **Seamless Migration**: Zero-downtime migration between Collections and TablesDB APIs
 - **Terminology Flexibility**: Support for both `collections/documents/attributes` and `tables/rows/columns`
 
@@ -59,24 +64,7 @@ npx --package=appwrite-utils-cli@latest appwrite-migrate [options]
 
 ### API Mode Detection
 
-The CLI automatically detects which API to use based on:
-
-1. **Package Detection**: Checks for `node-appwrite-tablesdb` package installation
-2. **Configuration**: Detects `collections` vs `tables` in YAML configuration
-3. **Environment**: Falls back to Collections API if TablesDB is not available
-
-### Installing TablesDB Support
-
-To enable TablesDB functionality, install the TablesDB package alongside the CLI:
-
-```bash
-# For global CLI usage
-npm install -g node-appwrite-tablesdb
-
-# For project-specific usage
-npm install node-appwrite-tablesdb
-npx --package=appwrite-utils-cli@latest --package=node-appwrite-tablesdb@latest appwrite-migrate --it
-```
+The CLI automatically selects Collections or TablesDB using fetch-based server detection (health/version and endpoint probes). No additional SDK packages are required.
 
 ### Configuration Comparison
 
@@ -238,6 +226,33 @@ This provides a professional guided experience with:
 - Smart confirmation dialogs for destructive operations
 - Operation summaries with detailed statistics
 - Real-time progress bars with ETA calculations
+
+### Push (manual selection)
+
+Pushing local schema is now an explicit, manual selection flow to avoid unintended changes:
+
+```bash
+npx appwrite-utils-cli appwrite-migrate --push
+```
+
+- Select databases from the remote project (no default auto-selection)
+- Select tables/collections to push per selected database
+- Summary confirmation is shown before applying changes
+
+Flags:
+- `--dbIds=id1,id2` pre-selects databases by ID (skips DB prompt)
+- `--collectionIds=c1,c2` pre-selects tables/collections by ID for the selected DB(s)
+
+Eligibility per DB:
+- A table/collection is considered eligible for a database if:
+  - `databaseIds` includes the database ID, or
+  - `databaseId` equals the database ID, or
+  - neither field is set (eligible everywhere)
+
+Attribute/Index behavior:
+- Attributes and indexes are compared and only created/updated when changed
+- Unchanged definitions are skipped
+- Status is monitored until available (with sensible timeouts)
 
 ### Non-Interactive Mode
 
@@ -1045,3 +1060,45 @@ npx appwrite-utils-cli appwrite-migrate --generateConstants --constantsLanguages
 - 0.0.22: Converted all import processes except `postImportActions` and Relationship Resolution to the local data import, so it should be much faster.
 - 0.0.6: Added `setTargetFieldFromOtherCollectionDocumentsByMatchingField` for the below, but setting a different field than the field you matched. The names are long, but at least you know what's going on lmao.
 - 0.0.5: Added `setFieldFromOtherCollectionDocuments` to set an array of ID's for instance from another collection as a `postImportAction`
+## Multi-Database Targeting
+
+You can target the same table/collection to multiple databases by adding `databaseIds` to the definition:
+
+```ts
+// Example: table.ts
+export default {
+  name: 'Analytics',
+  databaseIds: ['dev', 'staging', 'main'],
+  attributes: [
+    { key: 'timestamp', type: 'datetime', required: true },
+    { key: 'totalUsers', type: 'integer' }
+  ],
+  indexes: [{ key: 'ts_idx', type: 'key', attributes: ['timestamp'] }]
+};
+```
+
+During push, this table will appear under each selected database whose ID matches `databaseIds`.
+
+## Per-Function Configuration (.fnconfig.yaml)
+
+You can define functions in per-directory YAML files named `.fnconfig.yaml` (or `.fnconfig.yml`), discovered anywhere under your git repository root:
+
+```yaml
+# ./functions/reporting/.fnconfig.yaml
+id: reporting
+name: Reporting
+runtime: node-22.0
+execute: ["any"]
+events: []
+dirPath: ./  # defaults to the directory containing this file
+commands: npm install
+entrypoint: index.js
+```
+
+Rules:
+- If `dirPath` starts with `~`, it expands to your home directory
+- Relative `dirPath` resolves against the `.fnconfig.yaml` directory
+- Absolute `dirPath` is used as-is
+- `.fnconfig.yaml` definitions merge with central `.appwrite/config.yaml` functions; if the same `$id` exists in both, `.fnconfig.yaml` overrides
+
+Deployment uses the merged function set and resolves paths according to these rules.

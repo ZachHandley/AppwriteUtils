@@ -184,9 +184,9 @@ async function performEnhancedSync(
       availableDatabases,
       configuredDatabases,
       {
-        showSelectAll: true,
+        showSelectAll: false,
         allowNewOnly,
-        defaultSelected: syncExisting ? configuredDatabases.map(db => db.$id) : []
+        defaultSelected: []
       }
     );
 
@@ -219,9 +219,9 @@ async function performEnhancedSync(
         availableTables,
         configuredTables,
         {
-          showSelectAll: true,
+          showSelectAll: false,
           allowNewOnly,
-          defaultSelected: syncExisting ? configuredTables.map((t: any) => t.$id) : []
+          defaultSelected: []
         }
       );
 
@@ -251,10 +251,10 @@ async function performEnhancedSync(
           availableBuckets,
           configuredBuckets,
           {
-            showSelectAll: true,
+            showSelectAll: false,
             allowNewOnly: parsedArgv.selectBuckets ? false : allowNewOnly,
             groupByDatabase: true,
-            defaultSelected: syncExisting ? configuredBuckets.map(b => b.$id) : []
+            defaultSelected: []
           }
         );
       } catch (error) {
@@ -1342,15 +1342,101 @@ async function main() {
     }
 
     if (parsedArgv.push) {
-      // PUSH: Use LOCAL config collections only (pass empty array to use config.collections)
-      const databases =
-        options.databases || (await fetchAllDatabases(controller.database!));
+      await controller.init();
+      if (!controller.database || !controller.config) {
+        MessageFormatter.error("Database or config not initialized", undefined, { prefix: "Push" });
+        return;
+      }
 
-      // Pass empty array - syncDb will use config.collections (local schema)
-      await controller.syncDb(databases, []);
-      operationStats.pushedDatabases = databases.length;
-      operationStats.pushedCollections =
-        controller.config?.collections?.length || 0;
+      // Fetch available DBs
+      const availableDatabases = await fetchAllDatabases(controller.database);
+      if (availableDatabases.length === 0) {
+        MessageFormatter.warning("No databases found in remote project", { prefix: "Push" });
+        return;
+      }
+
+      // Determine selected DBs
+      let selectedDbIds: string[] = [];
+      if (parsedArgv.dbIds) {
+        selectedDbIds = parsedArgv.dbIds.split(/[,\s]+/).filter(Boolean);
+      } else {
+        selectedDbIds = await SelectionDialogs.selectDatabases(
+          availableDatabases,
+          controller.config.databases || [],
+          { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
+        );
+      }
+
+      if (selectedDbIds.length === 0) {
+        MessageFormatter.warning("No databases selected for push", { prefix: "Push" });
+        return;
+      }
+
+      // Build DatabaseSelection[] with tableIds per DB
+      const databaseSelections: DatabaseSelection[] = [];
+      const allConfigItems = controller.config.collections || controller.config.tables || [];
+
+      for (const dbId of selectedDbIds) {
+        const db = availableDatabases.find(d => d.$id === dbId);
+        if (!db) continue;
+
+        // Filter config items eligible for this DB according to databaseId/databaseIds rule
+        const eligibleConfigItems = (allConfigItems as any[]).filter(item => {
+          const one = item.databaseId as string | undefined;
+          const many = item.databaseIds as string[] | undefined;
+          if (Array.isArray(many) && many.length > 0) return many.includes(dbId);
+          if (one) return one === dbId;
+          return true; // eligible everywhere if unspecified
+        });
+
+        // Fetch available tables from remote for selection context
+        const availableTables = await fetchAllCollections(dbId, controller.database);
+
+        // Determine selected table IDs
+        let selectedTableIds: string[] = [];
+        if (parsedArgv.collectionIds) {
+          const ids = parsedArgv.collectionIds.split(/[,\s]+/).filter(Boolean);
+          // Only allow IDs that are in eligible config items
+          const eligibleIds = new Set(eligibleConfigItems.map((c: any) => c.$id || c.id));
+          selectedTableIds = ids.filter(id => eligibleIds.has(id));
+        } else {
+          selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+            dbId,
+            db.name,
+            availableTables,
+            eligibleConfigItems,
+            { showSelectAll: false, allowNewOnly: true, defaultSelected: [] }
+          );
+        }
+
+        databaseSelections.push({
+          databaseId: db.$id,
+          databaseName: db.name,
+          tableIds: selectedTableIds,
+          tableNames: [],
+          isNew: false,
+        });
+      }
+
+      if (databaseSelections.every(sel => sel.tableIds.length === 0)) {
+        MessageFormatter.warning("No tables/collections selected for push", { prefix: "Push" });
+        return;
+      }
+
+      const pushSummary: Record<string, string | number | string[]> = {
+        databases: databaseSelections.length,
+        collections: databaseSelections.reduce((sum, s) => sum + s.tableIds.length, 0),
+        details: databaseSelections.map(s => `${s.databaseId}: ${s.tableIds.length} items`),
+      };
+      const confirmed = await ConfirmationDialogs.showOperationSummary('Push', pushSummary, { confirmationRequired: true });
+      if (!confirmed) {
+        MessageFormatter.info("Push operation cancelled", { prefix: "Push" });
+        return;
+      }
+
+      await controller.selectivePush(databaseSelections, []);
+      operationStats.pushedDatabases = databaseSelections.length;
+      operationStats.pushedCollections = databaseSelections.reduce((sum, s) => sum + s.tableIds.length, 0);
     } else if (parsedArgv.sync) {
       // Enhanced SYNC: Pull from remote with intelligent configuration detection
       if (parsedArgv.autoSync) {

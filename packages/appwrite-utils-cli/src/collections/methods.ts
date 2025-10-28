@@ -17,8 +17,7 @@ import {
   markCollectionProcessed
 } from "../shared/operationQueue.js";
 import { logger } from "../shared/logging.js";
-import { createUpdateCollectionAttributesWithStatusCheck } from "./attributes.js";
-import { createOrUpdateIndexesWithStatusCheck } from "./indexes.js";
+// Legacy attribute/index helpers removed in favor of unified adapter path
 import { SchemaGenerator } from "../shared/schemaGenerator.js";
 import {
   isNull,
@@ -30,6 +29,8 @@ import {
 import { delay, tryAwaitWithRetry } from "../utils/helperFunctions.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { isLegacyDatabases } from "../utils/typeGuards.js";
+import { mapToCreateAttributeParams, mapToUpdateAttributeParams } from "../shared/attributeMapper.js";
+import { diffTableColumns, isIndexEqualToIndex, diffColumnsDetailed, executeColumnOperations } from "./tableOperations.js";
 
 // Re-export wipe operations
 export {
@@ -193,192 +194,15 @@ export const createOrUpdateCollections = async (
   // Clear processing state at the start of a new operation
   clearProcessingState();
 
-  // If API mode is tablesdb, route to adapter-based implementation
-  try {
-    const { adapter, apiMode } = await getAdapterFromConfig(config);
-    if (apiMode === 'tablesdb') {
-      await createOrUpdateCollectionsViaAdapter(adapter, databaseId, config, deletedCollections, selectedCollections);
-      return;
-    }
-  } catch {
-    // Fallback to legacy path below
-  }
-  const collectionsToProcess =
-    selectedCollections.length > 0 ? selectedCollections : config.collections;
-  if (!collectionsToProcess) {
-    return;
-  }
-  const usedIds = new Set();
-
-  MessageFormatter.info(`Processing ${collectionsToProcess.length} collections with intelligent state management`, { prefix: "Collections" });
-
-  for (const collection of collectionsToProcess) {
-    const { attributes, indexes, ...collectionData } = collection;
-
-    // Check if this collection has already been processed in this session
-    if (collectionData.$id && isCollectionProcessed(collectionData.$id)) {
-      MessageFormatter.info(`Collection '${collectionData.name}' already processed, skipping`, { prefix: "Collections" });
-      continue;
-    }
-
-    // Prepare permissions for the collection
-    const permissions: string[] = [];
-    if (collection.$permissions && collection.$permissions.length > 0) {
-      for (const permission of collection.$permissions) {
-        if (typeof permission === "string") {
-          permissions.push(permission);
-        } else {
-          switch (permission.permission) {
-            case "read":
-              permissions.push(Permission.read(permission.target));
-              break;
-            case "create":
-              permissions.push(Permission.create(permission.target));
-              break;
-            case "update":
-              permissions.push(Permission.update(permission.target));
-              break;
-            case "delete":
-              permissions.push(Permission.delete(permission.target));
-              break;
-            case "write":
-              permissions.push(Permission.write(permission.target));
-              break;
-            default:
-              MessageFormatter.warning(`Unknown permission: ${permission.permission}`, { prefix: "Collections" });
-              break;
-          }
-        }
-      }
-    }
-
-    // Check if the collection already exists by name
-    let collectionsFound = await tryAwaitWithRetry(
-      async () =>
-        await database.listCollections(databaseId, [
-          Query.equal("name", collectionData.name),
-        ])
-    );
-
-    let collectionToUse =
-      collectionsFound.total > 0 ? collectionsFound.collections[0] : null;
-
-    // Determine the correct ID for the collection
-    let collectionId: string;
-    if (!collectionToUse) {
-      MessageFormatter.info(`Creating collection: ${collectionData.name}`, { prefix: "Collections" });
-      let foundColl = deletedCollections?.find(
-        (coll) =>
-          coll.collectionName.toLowerCase().trim().replace(" ", "") ===
-          collectionData.name.toLowerCase().trim().replace(" ", "")
-      );
-
-      if (collectionData.$id) {
-        collectionId = collectionData.$id;
-      } else if (foundColl && !usedIds.has(foundColl.collectionId)) {
-        collectionId = foundColl.collectionId;
-      } else {
-        collectionId = ID.unique();
-      }
-
-      usedIds.add(collectionId);
-
-      // Create the collection with the determined ID
-      try {
-        collectionToUse = await tryAwaitWithRetry(
-          async () =>
-            await database.createCollection(
-              databaseId,
-              collectionId,
-              collectionData.name,
-              permissions,
-              collectionData.documentSecurity ?? false,
-              collectionData.enabled ?? true
-            )
-        );
-        collectionData.$id = collectionToUse!.$id;
-        nameToIdMapping.set(collectionData.name, collectionToUse!.$id);
-      } catch (error) {
-        MessageFormatter.error(
-          `Failed to create collection ${collectionData.name} with ID ${collectionId}`,
-          error instanceof Error ? error : new Error(String(error)),
-          { prefix: "Collections" }
-        );
-        continue;
-      }
-    } else {
-      MessageFormatter.info(`Collection ${collectionData.name} exists, updating it`, { prefix: "Collections" });
-      await tryAwaitWithRetry(
-        async () =>
-          await database.updateCollection(
-            databaseId,
-            collectionToUse!.$id,
-            collectionData.name,
-            permissions,
-            collectionData.documentSecurity ?? false,
-            collectionData.enabled ?? true
-          )
-      );
-      // Cache the existing collection ID
-      nameToIdMapping.set(collectionData.name, collectionToUse.$id);
-    }
-
-    // Add delay after creating/updating collection
-    await delay(250);
-
-    // Update attributes and indexes for the collection
-    MessageFormatter.progress("Creating Attributes", { prefix: "Collections" });
-    await createUpdateCollectionAttributesWithStatusCheck(
-      database,
-      databaseId,
-      collectionToUse!,
-      // @ts-expect-error
-      attributes
-    );
-
-    // Add delay after creating attributes
-    await delay(250);
-
-    // Prefer local config indexes, but fall back to collection's own indexes if no local config exists
-    const localCollectionConfig = config.collections?.find(
-      c => c.name === collectionData.name || c.$id === collectionData.$id
-    );
-    const indexesToUse = localCollectionConfig?.indexes ?? indexes ?? [];
-
-    MessageFormatter.progress("Creating Indexes", { prefix: "Collections" });
-    await createOrUpdateIndexesWithStatusCheck(
-      databaseId,
-      database,
-      collectionToUse!.$id,
-      collectionToUse!,
-      indexesToUse as Indexes
-    );
-
-    // Delete indexes that exist on server but not in local config
-    const { deleteObsoleteIndexes } = await import('../shared/indexManager.js');
-    await deleteObsoleteIndexes(
-      database,
-      databaseId,
-      collectionToUse!,
-      { indexes: indexesToUse } as any,
-      { verbose: true }
-    );
-
-    // Mark this collection as fully processed to prevent re-processing
-    markCollectionProcessed(collectionToUse!.$id, collectionData.name);
-
-    // Add delay after creating indexes
-    await delay(250);
-  }
-
-  // Process any remaining relationship attributes in the queue
-  // This surgical approach only processes specific attributes, not entire collections
-  if (queuedOperations.length > 0) {
-    MessageFormatter.info(`🔧 Processing ${queuedOperations.length} queued relationship attributes (surgical approach)`, { prefix: "Collections" });
-    await processQueue(database, databaseId);
-  } else {
-    MessageFormatter.info("✅ No queued relationship attributes to process", { prefix: "Collections" });
-  }
+  // Always use adapter path (LegacyAdapter translates when pre-1.8)
+  const { adapter } = await getAdapterFromConfig(config);
+  await createOrUpdateCollectionsViaAdapter(
+    adapter,
+    databaseId,
+    config,
+    deletedCollections,
+    selectedCollections
+  );
 };
 
 // New: Adapter-based implementation for TablesDB with state management
@@ -396,29 +220,15 @@ export const createOrUpdateCollectionsViaAdapter = async (
   const usedIds = new Set<string>();
   MessageFormatter.info(`Processing ${collectionsToProcess.length} tables via adapter with intelligent state management`, { prefix: "Tables" });
 
-  // Helper: create attributes through adapter
+  // Helpers for attribute operations through adapter
   const createAttr = async (tableId: string, attr: Attribute) => {
-    const base: any = {
-      databaseId,
-      tableId,
-      key: attr.key,
-      type: (attr as any).type,
-      size: (attr as any).size,
-      required: !!(attr as any).required,
-      default: (attr as any).xdefault,
-      array: !!(attr as any).array,
-      min: (attr as any).min,
-      max: (attr as any).max,
-      elements: (attr as any).elements,
-      encrypt: (attr as any).encrypted,
-      relatedCollection: (attr as any).relatedCollection,
-      relationType: (attr as any).relationType,
-      twoWay: (attr as any).twoWay,
-      twoWayKey: (attr as any).twoWayKey,
-      onDelete: (attr as any).onDelete,
-      side: (attr as any).side,
-    };
-    await adapter.createAttribute(base);
+    const params = mapToCreateAttributeParams(attr as any, { databaseId, tableId });
+    await adapter.createAttribute(params);
+    await delay(150);
+  };
+  const updateAttr = async (tableId: string, attr: Attribute) => {
+    const params = mapToUpdateAttributeParams(attr as any, { databaseId, tableId }) as any;
+    await adapter.updateAttribute(params);
     await delay(150);
   };
 
@@ -495,38 +305,78 @@ export const createOrUpdateCollectionsViaAdapter = async (
     // Add small delay after table create/update
     await delay(250);
 
-    // Create attributes: non-relationship first
+    // Create/Update attributes: non-relationship first using enhanced planning
     const nonRel = (attributes || []).filter((a: Attribute) => a.type !== 'relationship');
-    for (const attr of nonRel) {
-      await createAttr(tableId, attr as Attribute);
+    if (nonRel.length > 0) {
+      // Fetch existing columns once
+      const tableInfo = await adapter.getTable({ databaseId, tableId });
+      const existingCols: any[] = (tableInfo as any).data?.columns || (tableInfo as any).data?.attributes || [];
+
+      // Plan with icons
+      const plan = diffColumnsDetailed(nonRel as any, existingCols);
+      const plus = plan.toCreate.map((a: any) => a.key);
+      const plusminus = plan.toUpdate.map((u: any) => (u.attribute as any).key);
+      const minus = plan.toRecreate.map((r: any) => (r.newAttribute as any).key);
+      const skip = plan.unchanged;
+
+      const parts: string[] = [];
+      if (plus.length) parts.push(`➕  ${plus.length} (${plus.join(', ')})`);
+      if (plusminus.length) parts.push(`🔧  ${plusminus.length} (${plusminus.join(', ')})`);
+      if (minus.length) parts.push(`♻️  ${minus.length} (${minus.join(', ')})`);
+      if (skip.length) parts.push(`⏭️  ${skip.length}`);
+      MessageFormatter.info(`Plan → ${parts.join('  |  ') || 'no changes'}`, { prefix: 'Attributes' });
+
+      // Execute
+      const colResults = await executeColumnOperations(adapter, databaseId, tableId, plan);
+
+      if (colResults.success.length > 0) {
+        MessageFormatter.success(`Processed ${colResults.success.length} ops`, { prefix: 'Attributes' });
+      }
+      if (colResults.errors.length > 0) {
+        MessageFormatter.error(`${colResults.errors.length} attribute operations failed:`, undefined, { prefix: 'Attributes' });
+        for (const err of colResults.errors) {
+          MessageFormatter.error(`  ${err.column}: ${err.error}`, undefined, { prefix: 'Attributes' });
+        }
+      }
+      MessageFormatter.info(
+        `Summary → ➕  ${plan.toCreate.length}  |  🔧  ${plan.toUpdate.length}  |  ♻️  ${plan.toRecreate.length}  |  ⏭️  ${plan.unchanged.length}`,
+        { prefix: 'Attributes' }
+      );
     }
 
-    // Relationship attributes — resolve relatedCollection to ID
-    const rels = (attributes || []).filter((a: Attribute) => a.type === 'relationship');
-    for (const attr of rels as any[]) {
-      const relNameOrId = attr.relatedCollection as string | undefined;
-      if (!relNameOrId) continue;
-      let relId = nameToIdMapping.get(relNameOrId) || relNameOrId;
-
-      // If looks like a name (not ULID) and not in cache, try query by name
-      if (!nameToIdMapping.has(relNameOrId)) {
-        try {
-          const relList = await adapter.listTables({ databaseId, queries: [Query.equal('name', relNameOrId)] });
-          const relItems: any[] = (relList as any).tables || [];
-          if (relItems[0]?.$id) {
-            relId = relItems[0].$id;
-            nameToIdMapping.set(relNameOrId, relId);
-          }
-        } catch {}
+    // Relationship attributes — resolve relatedCollection to ID, then diff and create/update
+    const rels = (attributes || []).filter((a: Attribute) => a.type === 'relationship') as any[];
+    if (rels.length > 0) {
+      for (const attr of rels) {
+        const relNameOrId = attr.relatedCollection as string | undefined;
+        if (!relNameOrId) continue;
+        let relId = nameToIdMapping.get(relNameOrId) || relNameOrId;
+        if (!nameToIdMapping.has(relNameOrId)) {
+          try {
+            const relList = await adapter.listTables({ databaseId, queries: [Query.equal('name', relNameOrId)] });
+            const relItems: any[] = (relList as any).tables || [];
+            if (relItems[0]?.$id) {
+              relId = relItems[0].$id;
+              nameToIdMapping.set(relNameOrId, relId);
+            }
+          } catch {}
+        }
+        if (relId && typeof relId === 'string') attr.relatedCollection = relId;
       }
+      const tableInfo2 = await adapter.getTable({ databaseId, tableId });
+      const existingCols2: any[] = (tableInfo2 as any).data?.columns || (tableInfo2 as any).data?.attributes || [];
+      const { toCreate: relCreate, toUpdate: relUpdate, unchanged: relUnchanged } = diffTableColumns(existingCols2, rels as any);
 
-      if (relId && typeof relId === 'string') {
-        attr.relatedCollection = relId;
-        await createAttr(tableId, attr as Attribute);
-      } else {
-        // Defer if unresolved
-        relQueue.push({ tableId, attr: attr as Attribute });
+      // Relationship plan with icons
+      {
+        const parts: string[] = [];
+        if (relCreate.length) parts.push(`➕  ${relCreate.length} (${relCreate.map((a:any)=>a.key).join(', ')})`);
+        if (relUpdate.length) parts.push(`🔧  ${relUpdate.length} (${relUpdate.map((a:any)=>a.key).join(', ')})`);
+        if (relUnchanged.length) parts.push(`⏭️  ${relUnchanged.length}`);
+        MessageFormatter.info(`Plan → ${parts.join('  |  ') || 'no changes'}`, { prefix: 'Relationships' });
       }
+      for (const attr of relUpdate) { try { await updateAttr(tableId, attr as Attribute); } catch (e) { MessageFormatter.error(`Failed to update relationship ${(attr as any).key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Attributes' }); } }
+      for (const attr of relCreate) { try { await createAttr(tableId, attr as Attribute); } catch (e) { MessageFormatter.error(`Failed to create relationship ${(attr as any).key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Attributes' }); } }
     }
 
     // Wait for all attributes to become available before creating indexes
@@ -544,7 +394,7 @@ export const createOrUpdateCollectionsViaAdapter = async (
         while (Date.now() - startTime < maxWait) {
           try {
             const tableData = await adapter.getTable({ databaseId, tableId });
-            const attrs = (tableData as any).attributes || [];
+            const attrs = (tableData as any).data?.columns || (tableData as any).data?.attributes || [];
             const attr = attrs.find((a: any) => a.key === attrKey);
 
             if (attr) {
@@ -580,20 +430,85 @@ export const createOrUpdateCollectionsViaAdapter = async (
       c => c.name === collectionData.name || c.$id === collectionData.$id
     );
     const idxs = (localTableConfig?.indexes ?? indexes ?? []) as any[];
-    for (const idx of idxs) {
-      try {
-        await adapter.createIndex({
-          databaseId,
-          tableId,
-          key: idx.key,
-          type: idx.type,
-          attributes: idx.attributes,
-          orders: idx.orders || []
-        });
-        await delay(150);
-      } catch (e) {
-        MessageFormatter.error(`Failed to create index ${idx.key}`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Indexes' });
+    // Compare with existing indexes and create/update accordingly with status checks
+    try {
+      const existingIdxRes = await adapter.listIndexes({ databaseId, tableId });
+      const existingIdx: any[] = (existingIdxRes as any).data || (existingIdxRes as any).indexes || [];
+      MessageFormatter.debug(`Existing index keys: ${existingIdx.map((i:any)=>i.key).join(', ')}`, undefined, { prefix: 'Indexes' });
+      // Show a concise plan with icons before executing
+      const idxPlanPlus: string[] = [];
+      const idxPlanPlusMinus: string[] = [];
+      const idxPlanSkip: string[] = [];
+      for (const idx of idxs) {
+        const found = existingIdx.find((i: any) => i.key === idx.key);
+        if (found) {
+          if (isIndexEqualToIndex(found, idx)) idxPlanSkip.push(idx.key);
+          else idxPlanPlusMinus.push(idx.key);
+        } else idxPlanPlus.push(idx.key);
       }
+      const planParts: string[] = [];
+      if (idxPlanPlus.length) planParts.push(`➕  ${idxPlanPlus.length} (${idxPlanPlus.join(', ')})`);
+      if (idxPlanPlusMinus.length) planParts.push(`🔧  ${idxPlanPlusMinus.length} (${idxPlanPlusMinus.join(', ')})`);
+      if (idxPlanSkip.length) planParts.push(`⏭️  ${idxPlanSkip.length}`);
+      MessageFormatter.info(`Plan → ${planParts.join('  |  ') || 'no changes'}`, { prefix: 'Indexes' });
+      const created: string[] = [];
+      const updated: string[] = [];
+      const skipped: string[] = [];
+      for (const idx of idxs) {
+        const found = existingIdx.find((i: any) => i.key === idx.key);
+        if (found) {
+          if (isIndexEqualToIndex(found, idx)) {
+            MessageFormatter.info(`Index ${idx.key} unchanged`, { prefix: 'Indexes' });
+            skipped.push(idx.key);
+          } else {
+            try { await adapter.deleteIndex({ databaseId, tableId, key: idx.key }); await delay(100); } catch {}
+            try {
+              await adapter.createIndex({ databaseId, tableId, key: idx.key, type: idx.type, attributes: idx.attributes, orders: idx.orders || [] });
+              updated.push(idx.key);
+            } catch (e: any) {
+              const msg = (e?.message || '').toString().toLowerCase();
+              if (msg.includes('already exists')) {
+                MessageFormatter.info(`Index ${idx.key} already exists after delete attempt, skipping`, { prefix: 'Indexes' });
+                skipped.push(idx.key);
+              } else {
+                throw e;
+              }
+            }
+          }
+        } else {
+          try {
+            await adapter.createIndex({ databaseId, tableId, key: idx.key, type: idx.type, attributes: idx.attributes, orders: idx.orders || [] });
+            created.push(idx.key);
+          } catch (e: any) {
+            const msg = (e?.message || '').toString().toLowerCase();
+            if (msg.includes('already exists')) {
+              MessageFormatter.info(`Index ${idx.key} already exists (create), skipping`, { prefix: 'Indexes' });
+              skipped.push(idx.key);
+            } else {
+              throw e;
+            }
+          }
+        }
+        // Wait for index availability
+        const maxWait = 60000; const start = Date.now(); let lastStatus = '';
+        while (Date.now() - start < maxWait) {
+          try {
+            const li = await adapter.listIndexes({ databaseId, tableId });
+            const list: any[] = (li as any).data || (li as any).indexes || [];
+            const cur = list.find((i: any) => i.key === idx.key);
+            if (cur) {
+              if (cur.status === 'available') break;
+              if (cur.status === 'failed' || cur.status === 'stuck') { throw new Error(cur.error || `Index ${idx.key} failed`); }
+              lastStatus = cur.status;
+            }
+            await delay(2000);
+          } catch { await delay(2000); }
+        }
+        await delay(150);
+      }
+      MessageFormatter.info(`Summary → ➕  ${created.length}  |  🔧  ${updated.length}  |  ⏭️  ${skipped.length}` , { prefix: 'Indexes' });
+    } catch (e) {
+      MessageFormatter.error(`Failed to list/create indexes`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Indexes' });
     }
 
     // Mark this table as fully processed to prevent re-processing

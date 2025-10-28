@@ -27,6 +27,7 @@ import {
 } from "./databases/setup.js";
 import {
   createOrUpdateCollections,
+  createOrUpdateCollectionsViaAdapter,
   wipeDatabase,
   generateSchemas,
   fetchAllCollections,
@@ -273,6 +274,13 @@ export class UtilsController {
     this.appwriteServer = client;
     this.adapter = adapter;
     this.config = config;
+
+    // Update config.apiMode from adapter if it's auto or not set
+    if (adapter && (!config.apiMode || config.apiMode === 'auto')) {
+      this.config.apiMode = adapter.getApiMode();
+      logger.debug(`Updated config.apiMode from adapter during init: ${this.config.apiMode}`, { prefix: "UtilsController" });
+    }
+
     this.database = new Databases(this.appwriteServer);
     this.storage = new Storage(this.appwriteServer);
     this.config.appwriteClient = this.appwriteServer;
@@ -280,7 +288,8 @@ export class UtilsController {
     // Log only on FIRST initialization to avoid spam
     if (!this.isInitialized) {
       const apiMode = adapter.getApiMode();
-      MessageFormatter.info(`Database adapter initialized (apiMode: ${apiMode})`, { prefix: "Adapter" });
+      const configApiMode = this.config.apiMode;
+      MessageFormatter.info(`Database adapter initialized (apiMode: ${apiMode}, config.apiMode: ${configApiMode})`, { prefix: "Adapter" });
       this.isInitialized = true;
     } else {
       logger.debug("Adapter reused from cache", { prefix: "UtilsController" });
@@ -609,13 +618,37 @@ export class UtilsController {
     await this.init();
     if (!this.database || !this.config)
       throw new Error("Database or config not initialized");
-    await createOrUpdateCollections(
-      this.database,
-      database.$id,
-      this.config,
-      deletedCollections,
-      collections
-    );
+
+    // Ensure apiMode is properly set from adapter
+    if (this.adapter && (!this.config.apiMode || this.config.apiMode === 'auto')) {
+      this.config.apiMode = this.adapter.getApiMode();
+      logger.debug(`Updated config.apiMode from adapter: ${this.config.apiMode}`, { prefix: "UtilsController" });
+    }
+
+    // Always prefer adapter path for unified behavior. LegacyAdapter internally translates when needed.
+    if (this.adapter) {
+      logger.debug("Using adapter for createOrUpdateCollections (unified path)", {
+        prefix: "UtilsController",
+        apiMode: this.adapter.getApiMode()
+      });
+      await createOrUpdateCollectionsViaAdapter(
+        this.adapter,
+        database.$id,
+        this.config,
+        deletedCollections,
+        collections
+      );
+    } else {
+      // Fallback if adapter is unavailable for some reason
+      logger.debug("Adapter unavailable, falling back to legacy Databases path", { prefix: "UtilsController" });
+      await createOrUpdateCollections(
+        this.database,
+        database.$id,
+        this.config,
+        deletedCollections,
+        collections
+      );
+    }
   }
 
   async generateSchemas() {

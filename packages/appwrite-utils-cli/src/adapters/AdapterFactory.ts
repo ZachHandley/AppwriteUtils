@@ -12,9 +12,9 @@ import type { DatabaseAdapter } from './DatabaseAdapter.js';
 import { TablesDBAdapter } from './TablesDBAdapter.js';
 import { LegacyAdapter } from './LegacyAdapter.js';
 import { logger } from '../shared/logging.js';
-import { getClientWithAuth } from '../utils/getClientFromConfig.js';
 import { isValidSessionCookie } from '../utils/sessionAuth.js';
 import { MessageFormatter } from '../shared/messageFormatter.js';
+import { Client } from 'node-appwrite';
 
 export interface AdapterFactoryConfig {
   appwriteEndpoint: string;
@@ -207,18 +207,8 @@ export class AdapterFactory {
     const startTime = Date.now();
 
     try {
-      logger.info('Loading TablesDB SDK', {
+      logger.info('Creating TablesDB adapter (static SDK imports)', {
         endpoint: config.appwriteEndpoint,
-        operation: 'createTablesDBAdapter'
-      });
-
-      // Dynamic import of TablesDB SDK
-      const importStartTime = Date.now();
-      const { Client, TablesDB } = await import('node-appwrite-tablesdb');
-      const importDuration = Date.now() - importStartTime;
-
-      logger.debug('TablesDB SDK import successful', {
-        importDuration,
         operation: 'createTablesDBAdapter'
       });
 
@@ -257,7 +247,6 @@ export class AdapterFactory {
       const totalDuration = Date.now() - startTime;
       logger.info('TablesDB adapter created successfully', {
         totalDuration,
-        importDuration,
         endpoint: config.appwriteEndpoint,
         operation: 'createTablesDBAdapter'
       });
@@ -291,18 +280,8 @@ export class AdapterFactory {
     const startTime = Date.now();
 
     try {
-      logger.info('Loading legacy Appwrite SDK', {
+      logger.info('Creating legacy adapter (static SDK imports)', {
         endpoint: config.appwriteEndpoint,
-        operation: 'createLegacyAdapter'
-      });
-
-      // Dynamic import of legacy SDK
-      const importStartTime = Date.now();
-      const { Client, Databases } = await import('node-appwrite');
-      const importDuration = Date.now() - importStartTime;
-
-      logger.debug('Legacy SDK import successful', {
-        importDuration,
         operation: 'createLegacyAdapter'
       });
 
@@ -341,7 +320,6 @@ export class AdapterFactory {
       const totalDuration = Date.now() - startTime;
       logger.info('Legacy adapter created successfully', {
         totalDuration,
-        importDuration,
         endpoint: config.appwriteEndpoint,
         operation: 'createLegacyAdapter'
       });

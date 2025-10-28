@@ -6,7 +6,7 @@
  * and returns Models.Row instead of Models.Document.
  */
 
-import { IndexType, Query, RelationshipType, type Models } from "node-appwrite";
+import { IndexType, Query, RelationMutate, RelationshipType, type Models } from "node-appwrite";
 import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
@@ -402,11 +402,18 @@ export class TablesDBAdapter extends BaseAdapter {
           break;
 
         case 'enum':
+          // Defensive: require non-empty elements
+          if (!Array.isArray((params as any).elements) || (params as any).elements.length === 0) {
+            throw new AdapterError(
+              `Enum '${params.key}' requires a non-empty 'elements' array`,
+              'CREATE_ENUM_ELEMENTS_REQUIRED'
+            );
+          }
           result = await this.tablesDB.createEnumColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            elements: params.elements || [],
+            elements: params.elements!,
             required: params.required ?? false,
             xdefault: params.default,
             array: params.array ?? false
@@ -497,7 +504,8 @@ export class TablesDBAdapter extends BaseAdapter {
             tableId: params.tableId,
             key: params.key,
             required: params.required !== undefined ? params.required : stringColumn.required,
-            xdefault: params.default !== undefined ? params.default : stringColumn.default
+            xdefault: params.default !== undefined ? params.default : stringColumn.default,
+            size: params.size !== undefined ? params.size : stringColumn.size,
           });
           break;
 
@@ -508,7 +516,10 @@ export class TablesDBAdapter extends BaseAdapter {
             tableId: params.tableId,
             key: params.key,
             required: params.required !== undefined ? params.required : integerColumn.required,
-            xdefault: params.default !== undefined ? params.default : integerColumn.default
+            xdefault: params.default !== undefined ? params.default : integerColumn.default,
+            // Only send min/max when explicitly provided to avoid resubmitting extreme values
+            ...(params.min !== undefined ? { min: params.min } : {}),
+            ...(params.max !== undefined ? { max: params.max } : {}),
           });
           break;
 
@@ -520,7 +531,9 @@ export class TablesDBAdapter extends BaseAdapter {
             tableId: params.tableId,
             key: params.key,
             required: params.required !== undefined ? params.required : floatColumn.required,
-            xdefault: params.default !== undefined ? params.default : floatColumn.default
+            xdefault: params.default !== undefined ? params.default : floatColumn.default,
+            ...(params.min !== undefined ? { min: params.min } : {}),
+            ...(params.max !== undefined ? { max: params.max } : {}),
           });
           break;
 
@@ -559,13 +572,17 @@ export class TablesDBAdapter extends BaseAdapter {
 
         case 'enum':
           const enumColumn = column as Models.ColumnEnum;
+          // Choose elements to send only when provided, otherwise preserve existing
+          const provided = (params as any).elements;
+          const existing = (enumColumn as any)?.elements;
+          const nextElements = (Array.isArray(provided) && provided.length > 0) ? provided : existing;
           result = await this.tablesDB.updateEnumColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
             required: params.required !== undefined ? params.required : enumColumn.required,
             xdefault: params.default !== undefined ? params.default : enumColumn.default,
-            elements: enumColumn.elements
+            elements: nextElements
           });
           break;
 
@@ -596,7 +613,8 @@ export class TablesDBAdapter extends BaseAdapter {
           result = await this.tablesDB.updateRelationshipColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
-            key: params.key
+            key: params.key,
+            onDelete: (params.onDelete !== undefined ? params.onDelete : relationshipColumn.onDelete) as RelationMutate,
           });
           break;
 

@@ -1,36 +1,17 @@
 import { z } from "zod";
+import { Models } from "appwrite";
 
-export const AuthUserSchema = z
-  .object({
-    $id: z
-      .string(),
-    $createdAt: z
-      .string(),
-    $updatedAt: z
-      .string(),
-    name: z.string().nullish(),
-    email: z
-      .string()
-      .nullish(),
-    phone: z
-      .string()
-      .nullish(),
-    prefs: z.record(z.string(), z.string()).optional().default({}),
-    labels: z
-      .array(z.string())
-      .optional()
-      .default([]),
-    password: z.string().optional(),
-  });
+export const AuthUserSchema = z.object<Models.User<Models.Preferences>>();
 
 export type AuthUser = z.infer<typeof AuthUserSchema>;
 
-export const AuthUserCreateSchema = AuthUserSchema.omit({
-  $id: true,
-})
-  .extend({
-    userId: z.string().optional(),
-    password: z.string().optional(),
-  });
+export const AuthUserCreateSchema = AuthUserSchema.pick({
+  email: true,
+  password: true,
+  name: true,
+  phone: true,
+  prefs: true,
+  labels: true,
+});
 
 export type AuthUserCreate = z.infer<typeof AuthUserCreateSchema>;

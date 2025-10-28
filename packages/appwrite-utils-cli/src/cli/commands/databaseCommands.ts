@@ -32,7 +32,7 @@ export const databaseCommands = {
       const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
         availableDatabases,
         configuredDatabases,
-        { showSelectAll: true, allowNewOnly: false }
+        { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
       );
 
       if (selectedDatabaseIds.length === 0) {
@@ -97,7 +97,7 @@ export const databaseCommands = {
               selectedDatabaseIds,
               availableBuckets,
               configuredBuckets,
-              { showSelectAll: true, groupByDatabase: true }
+              { showSelectAll: false, groupByDatabase: true, defaultSelected: [] }
             );
 
             if (selectedBucketIds.length > 0) {

@@ -136,19 +136,77 @@ const normalizeMinMaxValues = (
     }
   }
 
-  // Validate that min < max using Decimal.js for safe comparison
+  // Validate that min < max using multiple comparison methods for reliability
   if (normalizedMin !== undefined && normalizedMax !== undefined &&
       normalizedMin !== null && normalizedMax !== null) {
-    try {
-      const minDecimal = new Decimal(normalizedMin.toString());
-      const maxDecimal = new Decimal(normalizedMax.toString());
 
-      if (minDecimal.greaterThanOrEqualTo(maxDecimal)) {
-        // Log the validation error
-        logger.error(`Invalid min/max values for attribute '${attribute.key}': min (${normalizedMin}) must be less than max (${normalizedMax})`, {
+    logger.debug(`Validating min/max values for attribute '${attribute.key}'`, {
+      type,
+      normalizedMin,
+      normalizedMax,
+      normalizedMinType: typeof normalizedMin,
+      normalizedMaxType: typeof normalizedMax,
+      operation: 'normalizeMinMaxValues'
+    });
+
+    // Use multiple validation approaches to ensure reliability
+    let needsSwap = false;
+    let comparisonMethod = '';
+
+    try {
+      // Method 1: Direct number comparison (most reliable for normal numbers)
+      const minNum = Number(normalizedMin);
+      const maxNum = Number(normalizedMax);
+
+      if (!isNaN(minNum) && !isNaN(maxNum)) {
+        needsSwap = minNum >= maxNum;
+        comparisonMethod = 'direct_number_comparison';
+        logger.debug(`Direct number comparison: ${minNum} >= ${maxNum} = ${needsSwap}`, {
+          operation: 'normalizeMinMaxValues'
+        });
+      }
+
+      // Method 2: Fallback to string comparison for very large numbers
+      if (!needsSwap && (isNaN(minNum) || isNaN(maxNum) || Math.abs(minNum) > Number.MAX_SAFE_INTEGER || Math.abs(maxNum) > Number.MAX_SAFE_INTEGER)) {
+        const minStr = normalizedMin.toString();
+        const maxStr = normalizedMax.toString();
+
+        // Simple string length and lexicographical comparison for very large numbers
+        if (minStr.length !== maxStr.length) {
+          needsSwap = minStr.length > maxStr.length;
+        } else {
+          needsSwap = minStr >= maxStr;
+        }
+        comparisonMethod = 'string_comparison_fallback';
+        logger.debug(`String comparison fallback: '${minStr}' >= '${maxStr}' = ${needsSwap}`, {
+          operation: 'normalizeMinMaxValues'
+        });
+      }
+
+      // Method 3: Final validation using Decimal.js as last resort
+      if (!needsSwap && (typeof normalizedMin === 'string' || typeof normalizedMax === 'string')) {
+        try {
+          const minDecimal = new Decimal(normalizedMin.toString());
+          const maxDecimal = new Decimal(normalizedMax.toString());
+          needsSwap = minDecimal.greaterThanOrEqualTo(maxDecimal);
+          comparisonMethod = 'decimal_js_fallback';
+          logger.debug(`Decimal.js fallback: ${normalizedMin} >= ${normalizedMax} = ${needsSwap}`, {
+            operation: 'normalizeMinMaxValues'
+          });
+        } catch (decimalError) {
+          logger.warn(`Decimal.js comparison failed for attribute '${attribute.key}': ${decimalError instanceof Error ? decimalError.message : String(decimalError)}`, {
+            operation: 'normalizeMinMaxValues'
+          });
+        }
+      }
+
+      // Log final validation result
+      if (needsSwap) {
+        logger.error(`Invalid min/max values detected for attribute '${attribute.key}': min (${normalizedMin}) must be less than max (${normalizedMax})`, {
           type,
           min: normalizedMin,
           max: normalizedMax,
+          comparisonMethod,
           operation: 'normalizeMinMaxValues'
         });
 
@@ -159,15 +217,25 @@ const normalizeMinMaxValues = (
           originalMax: normalizedMax,
           newMin: normalizedMax,
           newMax: normalizedMin,
+          comparisonMethod,
           operation: 'normalizeMinMaxValues'
         });
 
         const temp = normalizedMin;
         normalizedMin = normalizedMax;
         normalizedMax = temp;
+      } else {
+        logger.debug(`Min/max validation passed for attribute '${attribute.key}'`, {
+          type,
+          min: normalizedMin,
+          max: normalizedMax,
+          comparisonMethod,
+          operation: 'normalizeMinMaxValues'
+        });
       }
+
     } catch (error) {
-      logger.error(`Error comparing min/max values for attribute '${attribute.key}'`, {
+      logger.error(`Critical error during min/max validation for attribute '${attribute.key}'`, {
         type,
         min: normalizedMin,
         max: normalizedMax,
@@ -175,7 +243,7 @@ const normalizeMinMaxValues = (
         operation: 'normalizeMinMaxValues'
       });
 
-      // If Decimal comparison fails, set both to undefined to avoid API errors
+      // If all comparison methods fail, set both to undefined to avoid API errors
       normalizedMin = undefined;
       normalizedMax = undefined;
     }
@@ -583,8 +651,17 @@ const updateLegacyAttribute = async (
   collectionId: string,
   attribute: Attribute
 ): Promise<void> => {
+  console.log(`DEBUG updateLegacyAttribute before normalizeMinMaxValues:`, {
+    key: attribute.key,
+    type: attribute.type,
+    min: (attribute as any).min,
+    max: (attribute as any).max
+  });
+
   const { min: normalizedMin, max: normalizedMax } =
     normalizeMinMaxValues(attribute);
+
+  
 
   switch (attribute.type) {
     case "string":
@@ -618,13 +695,18 @@ const updateLegacyAttribute = async (
       break;
     case "double":
     case "float":
+      const minParam = normalizedMin !== undefined ? Number(normalizedMin) : undefined;
+      const maxParam = normalizedMax !== undefined ? Number(normalizedMax) : undefined;
+
+      
+
       await db.updateFloatAttribute(
         dbId,
         collectionId,
         attribute.key,
         attribute.required || false,
-        normalizedMin !== undefined ? Number(normalizedMin) : undefined,
-        normalizedMax !== undefined ? Number(normalizedMax) : undefined,
+        minParam,
+        maxParam,
         !attribute.required && (attribute as any).xdefault !== undefined
           ? (attribute as any).xdefault
           : null
@@ -1432,10 +1514,38 @@ export const createOrUpdateAttribute = async (
     // MessageFormatter.info(
     //   `Updating attribute with same key ${attribute.key} but different values`
     // );
+
+    // DEBUG: Log before object merge to detect corruption
+    if ((attribute.key === 'conversationType' || attribute.key === 'messageStreakCount')) {
+      console.log(`[DEBUG] MERGE - key="${attribute.key}"`, {
+        found: {
+          elements: (foundAttribute as any)?.elements,
+          min: (foundAttribute as any)?.min,
+          max: (foundAttribute as any)?.max
+        },
+        desired: {
+          elements: (attribute as any)?.elements,
+          min: (attribute as any)?.min,
+          max: (attribute as any)?.max
+        }
+      });
+    }
+
     finalAttribute = {
       ...foundAttribute,
       ...attribute,
     };
+
+    // DEBUG: Log after object merge to detect corruption
+    if ((finalAttribute.key === 'conversationType' || finalAttribute.key === 'messageStreakCount')) {
+      console.log(`[DEBUG] AFTER_MERGE - key="${finalAttribute.key}"`, {
+        merged: {
+          elements: finalAttribute?.elements,
+          min: (finalAttribute as any)?.min,
+          max: (finalAttribute as any)?.max
+        }
+      });
+    }
     action = "update";
   } else if (
     !updateEnabled &&
@@ -1614,6 +1724,10 @@ export const createOrUpdateAttribute = async (
         )
     );
   } else {
+    console.log(`Updating attribute '${finalAttribute.key}'...`);
+    if (finalAttribute.type === "double" || finalAttribute.type === "integer") {
+      console.log("finalAttribute:", finalAttribute);
+    }
     await tryAwaitWithRetry(
       async () =>
         await updateAttributeViaAdapter(
@@ -1637,7 +1751,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   attributes: Attribute[]
 ): Promise<boolean> => {
   const existingAttributes: Attribute[] =
-    collection.attributes.map((attr) => parseAttribute(attr)) || [];
+    collection.attributes.map((attr) => parseAttribute(attr as any)) || [];
 
   const attributesToRemove = existingAttributes.filter(
     (attr) => !attributes.some((a) => a.key === attr.key)
@@ -1707,7 +1821,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   const existingAttributesMap = new Map<string, Attribute>();
   try {
     const parsedAttributes = currentCollection.attributes.map((attr) =>
-      parseAttribute(attr)
+      parseAttribute(attr as any)
     );
     parsedAttributes.forEach((attr) =>
       existingAttributesMap.set(attr.key, attr)
@@ -1857,7 +1971,7 @@ export const createUpdateCollectionAttributes = async (
   );
 
   const existingAttributes: Attribute[] =
-    collection.attributes.map((attr) => parseAttribute(attr)) || [];
+    collection.attributes.map((attr) => parseAttribute(attr as any)) || [];
 
   const attributesToRemove = existingAttributes.filter(
     (attr) => !attributes.some((a) => a.key === attr.key)

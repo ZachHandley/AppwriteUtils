@@ -14,6 +14,7 @@ import {
   listSpecifications,
 } from "../../functions/methods.js";
 import { deployLocalFunction } from "../../functions/deployments.js";
+import { discoverFnConfigs, mergeDiscoveredFunctions } from "../../functions/fnConfigDiscovery.js";
 import { addFunctionToYamlConfig, findYamlConfig } from "../../config/yamlConfig.js";
 import { RuntimeSchema, type AppwriteFunction, type Runtime, type Specification } from "appwrite-utils";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
@@ -137,6 +138,13 @@ export const functionCommands = {
       return;
     }
 
+    // Discover local .fnconfig.yaml functions and merge into controller config
+    try {
+      const discovered = discoverFnConfigs((cli as any).currentDir);
+      const merged = mergeDiscoveredFunctions((cli as any).controller!.config!.functions || [], discovered);
+      (cli as any).controller!.config!.functions = merged as any;
+    } catch {}
+
     const functions = await (cli as any).selectFunctions(
       "Select function(s) to deploy:",
       true,
@@ -177,18 +185,19 @@ export const functionCommands = {
       MessageFormatter.info(`  Appwrite folder: ${(cli as any).controller.getAppwriteFolderPath()}`, { prefix: "Functions" });
       MessageFormatter.info(`  Current working dir: ${process.cwd()}`, { prefix: "Functions" });
 
-      // Helper function to expand tilde in paths
-      const expandTildePath = (path: string): string => {
-        if (path.startsWith('~/')) {
-          return path.replace('~', os.homedir());
-        }
-        return path;
-      };
+      // Resolve config dirPath relative to central YAML if it's relative
+      const yamlConfigPath = findYamlConfig((cli as any).currentDir);
+      const yamlBaseDir = yamlConfigPath ? require('node:path').dirname(yamlConfigPath) : process.cwd();
+      const expandTildePath = (p: string): string => (p?.startsWith('~/') ? p.replace('~', os.homedir()) : p);
 
       // Check locations in priority order:
       const priorityLocations = [
         // 1. Config dirPath if specified (with tilde expansion)
-        functionConfig.dirPath ? expandTildePath(functionConfig.dirPath) : undefined,
+        functionConfig.dirPath
+          ? (require('node:path').isAbsolute(expandTildePath(functionConfig.dirPath))
+              ? expandTildePath(functionConfig.dirPath)
+              : require('node:path').resolve(yamlBaseDir, expandTildePath(functionConfig.dirPath)))
+          : undefined,
         // 2. Appwrite config folder/functions/name
         join(
           (cli as any).controller.getAppwriteFolderPath()!,

@@ -36,6 +36,9 @@ import pLimit from "p-limit";
 import chalk from "chalk";
 import { join } from "node:path";
 import fs from "node:fs";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { getAdapter } from "../utils/getClientFromConfig.js";
+import { mapToCreateAttributeParams } from "../shared/attributeMapper.js";
 
 export interface ComprehensiveTransferOptions {
   sourceEndpoint: string;
@@ -82,6 +85,8 @@ export class ComprehensiveTransfer {
   private startTime: number;
   private tempDir: string;
   private cachedMaxFileSize?: number; // Cache successful maximumFileSize for subsequent buckets
+  private sourceAdapter?: DatabaseAdapter;
+  private targetAdapter?: DatabaseAdapter;
 
   constructor(private options: ComprehensiveTransferOptions) {
     this.sourceClient = getClient(
@@ -131,6 +136,22 @@ export class ComprehensiveTransfer {
       MessageFormatter.info("Starting comprehensive transfer", {
         prefix: "Transfer",
       });
+
+      // Initialize adapters for unified API (TablesDB or legacy via adapter)
+      const source = await getAdapter(
+        this.options.sourceEndpoint,
+        this.options.sourceProject,
+        this.options.sourceKey,
+        'auto'
+      );
+      const target = await getAdapter(
+        this.options.targetEndpoint,
+        this.options.targetProject,
+        this.options.targetKey,
+        'auto'
+      );
+      this.sourceAdapter = source.adapter;
+      this.targetAdapter = target.adapter;
 
       if (this.options.dryRun) {
         MessageFormatter.info("DRY RUN MODE - No actual changes will be made", {
@@ -1411,17 +1432,63 @@ export class ComprehensiveTransfer {
     collection: Models.Collection,
     attributes: any[]
   ): Promise<boolean> {
-    // Import the enhanced attribute creation function
-    const { createUpdateCollectionAttributesWithStatusCheck } = await import(
-      "../collections/attributes.js"
-    );
+    if (!this.targetAdapter) {
+      throw new Error('Target adapter not initialized');
+    }
 
-    return await createUpdateCollectionAttributesWithStatusCheck(
-      databases,
-      dbId,
-      collection,
-      attributes
-    );
+    try {
+      // Create non-relationship attributes first
+      const nonRel = (attributes || []).filter((a: any) => a.type !== 'relationship');
+      for (const attr of nonRel) {
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: dbId, tableId: collection.$id });
+        await this.targetAdapter.createAttribute(params);
+        // Small delay between creations
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      // Wait for attributes to become available
+      for (const attr of nonRel) {
+        const maxWait = 60000; // 60s
+        const start = Date.now();
+        let lastStatus = '';
+        while (Date.now() - start < maxWait) {
+          try {
+            const tableRes = await this.targetAdapter.getTable({ databaseId: dbId, tableId: collection.$id });
+            const cols = (tableRes as any).attributes || (tableRes as any).columns || [];
+            const col = cols.find((c: any) => c.key === attr.key);
+            if (col) {
+              if (col.status === 'available') break;
+              if (col.status === 'failed' || col.status === 'stuck') {
+                throw new Error(col.error || `Attribute ${attr.key} failed`);
+              }
+              lastStatus = col.status;
+            }
+            await new Promise((r) => setTimeout(r, 2000));
+          } catch {
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+        if (Date.now() - start >= maxWait) {
+          MessageFormatter.warning(
+            `Attribute ${attr.key} did not become available within 60s (last status: ${lastStatus})`,
+            { prefix: 'Attributes' }
+          );
+        }
+      }
+
+      // Create relationship attributes
+      const rels = (attributes || []).filter((a: any) => a.type === 'relationship');
+      for (const attr of rels) {
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: dbId, tableId: collection.$id });
+        await this.targetAdapter.createAttribute(params);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      return true;
+    } catch (e) {
+      MessageFormatter.error('Failed creating attributes via adapter', e instanceof Error ? e : new Error(String(e)), { prefix: 'Attributes' });
+      return false;
+    }
   }
 
   /**
@@ -1434,18 +1501,27 @@ export class ComprehensiveTransfer {
     collection: Models.Collection,
     indexes: any[]
   ): Promise<boolean> {
-    // Import the enhanced index creation function
-    const { createOrUpdateIndexesWithStatusCheck } = await import(
-      "../collections/indexes.js"
-    );
+    if (!this.targetAdapter) {
+      throw new Error('Target adapter not initialized');
+    }
 
-    return await createOrUpdateIndexesWithStatusCheck(
-      dbId,
-      databases,
-      collectionId,
-      collection,
-      indexes
-    );
+    try {
+      for (const idx of indexes || []) {
+        await this.targetAdapter.createIndex({
+          databaseId: dbId,
+          tableId: collectionId,
+          key: idx.key,
+          type: idx.type,
+          attributes: idx.attributes,
+          orders: idx.orders || []
+        });
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return true;
+    } catch (e) {
+      MessageFormatter.error('Failed creating indexes via adapter', e instanceof Error ? e : new Error(String(e)), { prefix: 'Indexes' });
+      return false;
+    }
   }
 
   /**

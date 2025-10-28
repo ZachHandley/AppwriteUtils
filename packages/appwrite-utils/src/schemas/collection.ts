@@ -90,6 +90,10 @@ export const CollectionSchema = z.object({
     .string()
     .optional()
     .describe("The ID of the database the collection belongs to"),
+  databaseIds: z
+    .array(z.string())
+    .optional()
+    .describe("Optional list of database IDs this collection should be applied to (multi-environment support)"),
 });
 
 export const CollectionCreateSchema = CollectionSchema.omit({

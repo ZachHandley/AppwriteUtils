@@ -76,6 +76,10 @@ const BaseTableSchemaCore = z.object({
     .string()
     .optional()
     .describe("The ID of the database the table belongs to - optional for interactive CLI association"),
+  databaseIds: z
+    .array(z.string())
+    .optional()
+    .describe("Optional list of database IDs this table should be applied to (multi-environment support)"),
   // Allow $id for backward compatibility with collections
   $id: z
     .string()

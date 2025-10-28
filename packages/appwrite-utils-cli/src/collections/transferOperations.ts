@@ -7,20 +7,77 @@ import {
 import { tryAwaitWithRetry, delay, calculateExponentialBackoff } from "../utils/helperFunctions.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { chunk } from "es-toolkit";
+import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { isLegacyDatabases } from "../utils/typeGuards.js";
+import { getAdapter } from "../utils/getClientFromConfig.js";
 
 /**
  * Transfers all documents from one collection to another in a different database
  * within the same Appwrite Project
  */
 export const transferDocumentsBetweenDbsLocalToLocal = async (
-  db: Databases,
+  db: Databases | DatabaseAdapter,
   fromDbId: string,
   toDbId: string,
   fromCollId: string,
   toCollId: string
 ) => {
+  // Use adapter path when available for bulk operations
+  if (!isLegacyDatabases(db)) {
+    const adapter = db as DatabaseAdapter;
+
+    const pageSize = 1000;
+    let lastId: string | undefined;
+    let totalTransferred = 0;
+
+    while (true) {
+      const queries = [Query.limit(pageSize)];
+      if (lastId) queries.push(Query.cursorAfter(lastId));
+
+      const result = await adapter.listRows({ databaseId: fromDbId, tableId: fromCollId, queries });
+      const rows: any[] = (result as any).rows || (result as any).documents || [];
+      if (!rows.length) break;
+
+      // Prepare rows: strip system fields, keep $id and $permissions
+      const prepared = rows.map((doc) => {
+        const data: any = { ...doc };
+        delete data.$databaseId;
+        delete data.$collectionId;
+        delete data.$createdAt;
+        delete data.$updatedAt;
+        return data; // keep $id and $permissions for upsert
+      });
+
+      // Prefer bulk upsert, then bulk create, then individual
+      if (typeof (adapter as any).bulkUpsertRows === 'function' && adapter.supportsBulkOperations()) {
+        await (adapter as any).bulkUpsertRows({ databaseId: toDbId, tableId: toCollId, rows: prepared });
+      } else if (typeof (adapter as any).bulkCreateRows === 'function' && adapter.supportsBulkOperations()) {
+        await (adapter as any).bulkCreateRows({ databaseId: toDbId, tableId: toCollId, rows: prepared });
+      } else {
+        for (const row of prepared) {
+          const id = row.$id || ID.unique();
+          const permissions = row.$permissions || [];
+          const { $id, $permissions, ...data } = row;
+          await adapter.createRow({ databaseId: toDbId, tableId: toCollId, id, data, permissions });
+        }
+      }
+
+      totalTransferred += rows.length;
+      if (rows.length < pageSize) break;
+      lastId = rows[rows.length - 1].$id;
+    }
+
+    MessageFormatter.success(
+      `Transferred ${totalTransferred} rows from ${fromDbId}/${fromCollId} to ${toDbId}/${toCollId}`,
+      { prefix: "Transfer" }
+    );
+    return;
+  }
+
+  // Legacy path (Databases) – keep existing behavior
+  const legacyDb = db as Databases;
   let fromCollDocs = await tryAwaitWithRetry(async () =>
-    db.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
+    legacyDb.listDocuments(fromDbId, fromCollId, [Query.limit(50)])
   );
   let totalDocumentsTransferred = 0;
 
@@ -40,7 +97,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
       delete toCreateObject.$permissions;
       return tryAwaitWithRetry(
         async () =>
-          await db.createDocument(
+          await legacyDb.createDocument(
             toDbId,
             toCollId,
             doc.$id,
@@ -63,7 +120,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
       delete toCreateObject.$id;
       delete toCreateObject.$permissions;
       return tryAwaitWithRetry(async () =>
-        db.createDocument(
+        legacyDb.createDocument(
           toDbId,
           toCollId,
           doc.$id,
@@ -77,7 +134,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
     while (fromCollDocs.documents.length === 50) {
       fromCollDocs = await tryAwaitWithRetry(
         async () =>
-          await db.listDocuments(fromDbId, fromCollId, [
+          await legacyDb.listDocuments(fromDbId, fromCollId, [
             Query.limit(50),
             Query.cursorAfter(
               fromCollDocs.documents[fromCollDocs.documents.length - 1].$id
@@ -96,7 +153,7 @@ export const transferDocumentsBetweenDbsLocalToLocal = async (
         delete toCreateObject.$permissions;
         return tryAwaitWithRetry(
           async () =>
-            await db.createDocument(
+            await legacyDb.createDocument(
               toDbId,
               toCollId,
               doc.$id,
@@ -437,7 +494,7 @@ const transferDocumentBatchWithRetry = async (
 };
 
 export const transferDocumentsBetweenDbsLocalToRemote = async (
-  localDb: Databases,
+  localDb: Databases | DatabaseAdapter,
   endpoint: string,
   projectId: string,
   apiKey: string,
@@ -448,12 +505,9 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
 ) => {
   MessageFormatter.info(`Starting enhanced document transfer from ${fromCollId} to ${toCollId}...`, { prefix: "Transfer" });
 
-  const client = new Client()
-    .setEndpoint(endpoint)
-    .setProject(projectId)
-    .setKey(apiKey);
-
-  const remoteDb = new Databases(client);
+  // Prefer adapter for remote to enable bulk operations
+  const { adapter: remoteAdapter, client } = await getAdapter(endpoint, projectId, apiKey, 'auto');
+  const remoteDb = new Databases(client); // Legacy fallback for HTTP/individual
   let totalDocumentsProcessed = 0;
   let totalSuccessful = 0;
   let totalFailed = 0;
@@ -468,9 +522,15 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
       queries.push(Query.cursorAfter(lastDocumentId));
     }
 
-    const fromCollDocs = await tryAwaitWithRetry(async () =>
-      localDb.listDocuments(fromDbId, fromCollId, queries)
-    );
+    const fromCollDocs = await tryAwaitWithRetry(async () => {
+      if (isLegacyDatabases(localDb)) {
+        return localDb.listDocuments(fromDbId, fromCollId, queries);
+      } else {
+        const res = await (localDb as DatabaseAdapter).listRows({ databaseId: fromDbId, tableId: fromCollId, queries });
+        const rows = (res as any).rows || (res as any).documents || [];
+        return { documents: rows } as any;
+      }
+    });
 
     if (fromCollDocs.documents.length === 0) {
       hasMoreDocuments = false;
@@ -479,13 +539,27 @@ export const transferDocumentsBetweenDbsLocalToRemote = async (
 
     MessageFormatter.progress(`Fetched ${fromCollDocs.documents.length} documents, processing for transfer...`, { prefix: "Transfer" });
 
-    const { successful, failed } = await transferDocumentBatchWithRetry(
-      remoteDb,
-      client,
-      toDbId,
-      toCollId,
-      fromCollDocs.documents
-    );
+    // Prefer remote adapter bulk upsert if available
+    const prepared = fromCollDocs.documents.map((doc: any) => {
+      const data: any = { ...doc };
+      delete data.$databaseId; delete data.$collectionId; delete data.$createdAt; delete data.$updatedAt;
+      return data; // Keep $id and $permissions for upsert
+    });
+
+    let successful = 0; let failed = 0;
+    if (typeof (remoteAdapter as any).bulkUpsertRows === 'function' && remoteAdapter.supportsBulkOperations()) {
+      try {
+        await (remoteAdapter as any).bulkUpsertRows({ databaseId: toDbId, tableId: toCollId, rows: prepared });
+        successful = prepared.length;
+      } catch (e) {
+        MessageFormatter.warning('Remote adapter bulk upsert failed, falling back to HTTP/individual', { prefix: 'Transfer' });
+      }
+    }
+
+    if (successful === 0) {
+      const res = await transferDocumentBatchWithRetry(remoteDb, client, toDbId, toCollId, fromCollDocs.documents);
+      successful = res.successful; failed = res.failed;
+    }
 
     totalDocumentsProcessed += fromCollDocs.documents.length;
     totalSuccessful += successful;

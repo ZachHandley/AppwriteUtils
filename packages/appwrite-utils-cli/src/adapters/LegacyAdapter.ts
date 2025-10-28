@@ -542,8 +542,9 @@ export class LegacyAdapter extends BaseAdapter {
             key: params.key,
             required: params.required ?? integerAttr.required,
             xdefault: params.default !== undefined ? params.default : integerAttr.default,
-            min: integerAttr.min,
-            max: integerAttr.max
+            // Only include when explicitly provided to avoid resubmitting extreme values
+            ...(params.min !== undefined ? { min: params.min } : {}),
+            ...(params.max !== undefined ? { max: params.max } : {}),
           });
           break;
 
@@ -556,8 +557,8 @@ export class LegacyAdapter extends BaseAdapter {
             key: params.key,
             required: params.required ?? floatAttr.required,
             xdefault: params.default !== undefined ? params.default : floatAttr.default,
-            min: floatAttr.min,
-            max: floatAttr.max
+            ...(params.min !== undefined ? { min: params.min } : {}),
+            ...(params.max !== undefined ? { max: params.max } : {}),
           });
           break;
 
@@ -596,6 +597,7 @@ export class LegacyAdapter extends BaseAdapter {
 
         case 'enum':
           const enumAttr = existingAttr as Models.AttributeEnum;
+          console.log('Updating enum attribute with params:', params);
           result = await this.databases.updateEnumAttribute({
             databaseId: params.databaseId,
             collectionId: params.tableId,

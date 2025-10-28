@@ -12,6 +12,7 @@
 
 import { logger } from '../shared/logging.js';
 import { MessageFormatter } from '../shared/messageFormatter.js';
+import { Client, Databases, TablesDB, Query } from 'node-appwrite';
 
 export type ApiMode = 'legacy' | 'tablesdb';
 
@@ -62,199 +63,72 @@ export async function detectAppwriteVersion(
     };
   }
 
-  // STEP 2: Only proceed with endpoint probe if version >= 1.8.0 or version unknown
-  // Try primary detection method: TablesDB endpoint probe
+  // STEP 2: If version is unknown, use SDK probe (no fake HTTP endpoints)
   try {
-    logger.debug('Attempting TablesDB endpoint probe', {
+    logger.debug('Attempting SDK-based TablesDB probe', {
       endpoint: cleanEndpoint,
-      serverVersion: serverVersion || 'unknown',
       operation: 'detectAppwriteVersion'
     });
 
-    const probeStartTime = Date.now();
-    const tablesDbResult = await probeTablesDbEndpoint(cleanEndpoint, project, apiKey);
-    const probeDuration = Date.now() - probeStartTime;
+    const client = new Client().setEndpoint(cleanEndpoint).setProject(project);
+    if (apiKey && apiKey.trim().length > 0) client.setKey(apiKey);
 
-    if (tablesDbResult.apiMode === 'tablesdb') {
-      logger.info('TablesDB detected via endpoint probe', {
-        endpoint: cleanEndpoint,
-        detectionMethod: tablesDbResult.detectionMethod,
-        confidence: tablesDbResult.confidence,
-        probeDuration,
-        totalDuration: Date.now() - startTime,
-        operation: 'detectAppwriteVersion'
-      });
-      return tablesDbResult;
+    const databases = new Databases(client);
+    // Try to get a database id to probe tables listing
+    let dbId: string | undefined;
+    try {
+      const dbList: any = await databases.list([Query.limit(1)]);
+      dbId = dbList?.databases?.[0]?.$id || dbList?.databases?.[0]?.id || dbList?.[0]?.$id;
+    } catch (e) {
+      // Ignore, we'll still attempt a conservative probe
+      logger.debug('Databases.list probe failed or returned no items', { operation: 'detectAppwriteVersion' });
     }
+
+    const tables = new TablesDB(client);
+    if (dbId) {
+      // Probe listTables for the first database (limit 1)
+      await tables.listTables({ databaseId: dbId, queries: [Query.limit(1)] });
+    } else {
+      // No databases to probe; assume TablesDB available (cannot falsify-positively without a db)
+      logger.debug('No databases found to probe tables; assuming TablesDB if SDK available', { operation: 'detectAppwriteVersion' });
+    }
+
+    const result: VersionDetectionResult = {
+      apiMode: 'tablesdb',
+      detectionMethod: 'endpoint_probe', // repurpose label for SDK probe
+      confidence: 'medium',
+      serverVersion: serverVersion || undefined
+    };
+    logger.info('TablesDB detected via SDK probe', {
+      endpoint: cleanEndpoint,
+      result,
+      operation: 'detectAppwriteVersion'
+    });
+    return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    MessageFormatter.warning(`TablesDB endpoint probe failed: ${errorMessage}`, { prefix: "Version Detection" });
-    logger.warn('TablesDB endpoint probe failed', {
-      endpoint: cleanEndpoint,
-      error: errorMessage,
-      operation: 'detectAppwriteVersion'
-    });
-  }
-  
-  // Try secondary detection method: SDK feature detection
-  try {
-    logger.debug('Attempting SDK capability probe', {
-      endpoint: cleanEndpoint,
-      operation: 'detectAppwriteVersion'
-    });
-
-    const sdkProbeStartTime = Date.now();
-    const sdkResult = await probeSdkCapabilities();
-    const sdkProbeDuration = Date.now() - sdkProbeStartTime;
-
-    if (sdkResult.apiMode === 'tablesdb') {
-      logger.info('TablesDB detected via SDK capability probe', {
-        endpoint: cleanEndpoint,
-        detectionMethod: sdkResult.detectionMethod,
-        confidence: sdkResult.confidence,
-        sdkProbeDuration,
-        totalDuration: Date.now() - startTime,
-        operation: 'detectAppwriteVersion'
-      });
-      return sdkResult;
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    MessageFormatter.warning(`SDK capability probe failed: ${errorMessage}`, { prefix: "Version Detection" });
-    logger.warn('SDK capability probe failed', {
+    logger.warn('SDK TablesDB probe failed; defaulting conservatively', {
       endpoint: cleanEndpoint,
       error: errorMessage,
       operation: 'detectAppwriteVersion'
     });
   }
 
-  // Fallback to legacy mode
-  const fallbackResult = {
-    apiMode: 'legacy' as ApiMode,
-    detectionMethod: 'fallback' as const,
-    confidence: 'low' as const
+  // Final fallback: default to tablesdb for modern environments when version unknown
+  const fallbackResult: VersionDetectionResult = {
+    apiMode: 'tablesdb',
+    detectionMethod: 'fallback',
+    confidence: 'low',
+    serverVersion: serverVersion || undefined
   };
-
-  logger.info('Falling back to legacy mode', {
+  logger.info('Defaulting to TablesDB mode (fallback)', {
     endpoint: cleanEndpoint,
-    totalDuration: Date.now() - startTime,
     result: fallbackResult,
     operation: 'detectAppwriteVersion'
   });
-
   return fallbackResult;
 }
 
-/**
- * Test TablesDB endpoint availability - most reliable detection method
- */
-async function probeTablesDbEndpoint(
-  endpoint: string,
-  project: string,
-  apiKey: string
-): Promise<VersionDetectionResult> {
-  const startTime = Date.now();
-  const url = `${endpoint}/tablesdb/`;
-
-  logger.debug('Probing TablesDB endpoint', {
-    url,
-    project,
-    operation: 'probeTablesDbEndpoint'
-  });
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Appwrite-Project': project,
-      'X-Appwrite-Key': apiKey
-    },
-    // Short timeout for faster detection
-    signal: AbortSignal.timeout(5000)
-  });
-
-  const duration = Date.now() - startTime;
-
-  logger.debug('TablesDB endpoint response received', {
-    url,
-    status: response.status,
-    statusText: response.statusText,
-    duration,
-    operation: 'probeTablesDbEndpoint'
-  });
-
-  if (response.ok) {
-    // ONLY 200 OK means TablesDB available
-    // 404 means endpoint doesn't exist (server < 1.8.0)
-    const result = {
-      apiMode: 'tablesdb' as ApiMode,
-      detectionMethod: 'endpoint_probe' as const,
-      confidence: 'high' as const
-    };
-
-    logger.info('TablesDB endpoint probe successful', {
-      url,
-      status: response.status,
-      result,
-      duration,
-      operation: 'probeTablesDbEndpoint'
-    });
-
-    return result;
-  }
-
-  // 501 Not Implemented or other errors = no TablesDB support
-  const error = new Error(`TablesDB endpoint returned ${response.status}: ${response.statusText}`);
-  logger.debug('TablesDB endpoint probe failed', {
-    url,
-    status: response.status,
-    statusText: response.statusText,
-    duration,
-    operation: 'probeTablesDbEndpoint'
-  });
-  throw error;
-}
-
-/**
- * SDK capability detection as secondary method
- */
-async function probeSdkCapabilities(): Promise<VersionDetectionResult> {
-  try {
-    // Try to import TablesDB SDK
-    let TablesDBModule;
-    try {
-      TablesDBModule = await import('node-appwrite-tablesdb');
-    } catch (importError) {
-      // TablesDB SDK not available, will fall back to legacy
-    }
-    
-    if (TablesDBModule?.TablesDB) {
-      return {
-        apiMode: 'tablesdb',
-        detectionMethod: 'endpoint_probe',
-        confidence: 'medium'
-      };
-    }
-  } catch (error) {
-    // TablesDB SDK not available, assume legacy
-  }
-  
-  // Check for legacy SDK availability
-  try {
-    const { Databases } = await import('node-appwrite');
-    if (Databases) {
-      return {
-        apiMode: 'legacy',
-        detectionMethod: 'endpoint_probe',
-        confidence: 'medium'
-      };
-    }
-  } catch (error) {
-    throw new Error('No Appwrite SDK available');
-  }
-  
-  throw new Error('Unable to determine SDK capabilities');
-}
 
 /**
  * Cached version detection to avoid repeated API calls
@@ -381,35 +255,7 @@ export function isCloudAppwriteEndpoint(endpoint: string): boolean {
  * SDK feature detection as a fallback method
  * Attempts to dynamically import TablesDB to check availability
  */
-export async function detectSdkSupport(): Promise<{
-  tablesDbAvailable: boolean;
-  legacyAvailable: boolean;
-}> {
-  const result = {
-    tablesDbAvailable: false,
-    legacyAvailable: false
-  };
-  
-  // Test TablesDB SDK availability
-  try {
-    const tablesModule = await import('node-appwrite-tablesdb');
-    if (tablesModule) {
-      result.tablesDbAvailable = true;
-    }
-  } catch (error) {
-    // TablesDB SDK not available
-  }
-  
-  // Test legacy SDK availability  
-  try {
-    await import('node-appwrite');
-    result.legacyAvailable = true;
-  } catch (error) {
-    // Legacy SDK not available
-  }
-  
-  return result;
-}
+// Removed dynamic SDK capability checks to avoid confusion and side effects.
 
 /**
  * Clear version detection cache (useful for testing)

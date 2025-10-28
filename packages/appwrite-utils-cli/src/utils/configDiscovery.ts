@@ -3,7 +3,6 @@ import fs from "fs";
 import {
   CollectionCreateSchema,
   type CollectionCreate,
-  type CollectionCreateInput,
   type Collection
 } from "appwrite-utils";
 import { register } from "tsx/esm/api";
@@ -221,7 +220,7 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
     const parsedCollection = YamlCollectionSchema.parse(yamlData);
 
     // Convert YAML collection to CollectionCreate format
-    const collectionInput: CollectionCreateInput = {
+    const collectionInput: CollectionCreate = {
       name: parsedCollection.name,
       $id: parsedCollection.id || parsedCollection.name.toLowerCase().replace(/\s+/g, '_'),
       documentSecurity: parsedCollection.documentSecurity,

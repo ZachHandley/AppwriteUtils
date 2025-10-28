@@ -448,6 +448,9 @@ export class InteractiveCLI {
       MessageFormatter.info(`📊 ${tablesCount} tables available from tables/ folder`, { prefix: "Collections" });
     }
 
+    // Show current database context clearly before view mode selection
+    MessageFormatter.info(`DB: ${database.name}`, { prefix: "Collections" });
+
     // Ask user if they want to filter by database or show all
     const { filterChoice } = await inquirer.prompt([
       {

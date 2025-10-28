@@ -12,7 +12,6 @@ import {
 import {
   CollectionCreateSchema,
   type CollectionCreate,
-  type CollectionCreateInput
 } from "appwrite-utils";
 
 /**
@@ -153,7 +152,7 @@ export class YamlLoader {
     // Always normalize to ensure consistent attribute terminology
     const normalized = normalizeYamlData(yamlData);
 
-    const collectionInput: CollectionCreateInput = {
+    const collectionInput: CollectionCreate = {
       name: normalized.name,
       $id: normalized.id || normalized.name.toLowerCase().replace(/\s+/g, '_'),
       enabled: normalized.enabled !== false,
