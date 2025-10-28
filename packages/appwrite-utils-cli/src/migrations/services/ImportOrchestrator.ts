@@ -203,7 +203,7 @@ export class ImportOrchestrator {
         this.config.collections[index] = collectionConfig;
 
         // Find or create an import operation for the collection
-        const adapter = new LegacyAdapter(this.database);
+        const adapter = new LegacyAdapter(this.database.client);
         const collectionImportOperation = await findOrCreateOperation(
           adapter,
           dbId,
@@ -501,7 +501,7 @@ export class ImportOrchestrator {
     logger.info(`Importing collection: ${collection.name} (${collectionData.data.length} items)`);
 
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
-    const adapter = new LegacyAdapter(this.database);
+    const adapter = new LegacyAdapter(this.database.client);
     if (operationId) {
       await updateOperation(adapter, db.$id, operationId, { status: "in_progress" });
     }
@@ -638,7 +638,7 @@ export class ImportOrchestrator {
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
     if (operationId) {
       const updateData = total ? { status, total } : { status };
-      const adapter = new LegacyAdapter(this.database);
+      const adapter = new LegacyAdapter(this.database.client);
       await updateOperation(adapter, db.$id, operationId, updateData);
     }
   }

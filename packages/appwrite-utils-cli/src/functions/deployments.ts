@@ -16,30 +16,7 @@ import {
 } from "./methods.js";
 import ignore from "ignore";
 import { MessageFormatter } from "../shared/messageFormatter.js";
-
-const findFunctionDirectory = (
-  basePath: string,
-  functionName: string
-): string | undefined => {
-  const normalizedName = functionName.toLowerCase().replace(/\s+/g, "-");
-  const dirs = fs.readdirSync(basePath, { withFileTypes: true });
-
-  for (const dir of dirs) {
-    if (dir.isDirectory()) {
-      const fullPath = join(basePath, dir.name);
-      if (dir.name.toLowerCase() === normalizedName) {
-        return fullPath;
-      }
-
-      const nestedResult = findFunctionDirectory(fullPath, functionName);
-      if (nestedResult) {
-        return nestedResult;
-      }
-    }
-  }
-
-  return undefined;
-};
+import { resolveFunctionDirectory, validateFunctionDirectory } from './pathResolution.js';
 
 export const deployFunction = async (
   client: Client,
@@ -183,18 +160,16 @@ export const deployLocalFunction = async (
     functionExists = false;
   }
 
-  const resolvedPath =
-    functionPath ||
-    functionConfig.dirPath ||
-    findFunctionDirectory(process.cwd(), functionName) ||
-    join(
-      process.cwd(),
-      "functions",
-      functionName.toLowerCase().replace(/\s+/g, "-")
-    );
+  const configDirPath = process.cwd(); // TODO: This should be passed from caller
+  const resolvedPath = resolveFunctionDirectory(
+    functionName,
+    configDirPath,
+    functionConfig.dirPath,
+    functionPath
+  );
 
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`Function directory not found at ${resolvedPath}`);
+  if (!validateFunctionDirectory(resolvedPath)) {
+    throw new Error(`Function directory is invalid or missing required files: ${resolvedPath}`);
   }
 
   if (functionConfig.predeployCommands?.length) {

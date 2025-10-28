@@ -10,6 +10,7 @@ import {
   Compression,
   Query,
   Functions,
+  DatabaseType,
 } from "node-appwrite";
 import {
   PermissionToAppwritePermission,
@@ -232,10 +233,10 @@ export class InteractiveCLI {
     const configDatabases = this.getLocalDatabases();
     const allDatabases = [...databases, ...configDatabases]
       .reduce((acc, db) => {
-        // Local config takes precedence - if a database with same name exists, use local version
-        const existingIndex = acc.findIndex((d) => d.name === db.name);
+        // Local config takes precedence - if a database with same name or ID exists, use local version
+        const existingIndex = acc.findIndex((d) => d.name === db.name || d.$id === db.$id);
         if (existingIndex >= 0) {
-          if (configDatabases.some((cdb) => cdb.name === db.name)) {
+          if (configDatabases.some((cdb) => cdb.name === db.name || cdb.$id === db.$id)) {
             acc[existingIndex] = db; // Replace with local version
           }
         } else {
@@ -246,10 +247,10 @@ export class InteractiveCLI {
 
     const hasLocalAndRemote =
       allDatabases.some((db) =>
-        configDatabases.some((c) => c.name === db.name)
+        configDatabases.some((c) => c.name === db.name || c.$id === db.$id)
       ) &&
       allDatabases.some(
-        (db) => !configDatabases.some((c) => c.name === db.name)
+        (db) => !configDatabases.some((c) => c.name === db.name || c.$id === db.$id)
       );
 
     const choices = allDatabases
@@ -258,7 +259,7 @@ export class InteractiveCLI {
         name:
           db.name +
           (hasLocalAndRemote
-            ? configDatabases.some((c) => c.name === db.name)
+            ? configDatabases.some((c) => c.name === db.name || c.$id === db.$id)
               ? " (Local)"
               : " (Remote)"
             : ""),
@@ -311,7 +312,7 @@ export class InteractiveCLI {
     let allCollections = preferLocal
       ? remoteCollections.reduce(
           (acc, remoteCollection) => {
-            if (!acc.some((c) => c.name === remoteCollection.name)) {
+            if (!acc.some((c) => c.name === remoteCollection.name || c.$id === remoteCollection.$id)) {
               acc.push(remoteCollection);
             }
             return acc;
@@ -321,7 +322,7 @@ export class InteractiveCLI {
       : [
           ...remoteCollections,
           ...configCollections.filter(
-            (c) => !remoteCollections.some((rc) => rc.name === c.name)
+            (c) => !remoteCollections.some((rc) => rc.name === c.name || rc.$id === c.$id)
           ),
         ];
 
@@ -329,7 +330,7 @@ export class InteractiveCLI {
       // Show collections that EITHER exist in the remote database OR have matching local databaseId metadata
       allCollections = allCollections.filter((c: any) => {
         // Include if it exists remotely in this database
-        const existsInRemoteDb = remoteCollections.some((rc) => rc.name === c.name);
+        const existsInRemoteDb = remoteCollections.some((rc) => rc.name === c.name || rc.$id === c.$id);
 
         // Include if local metadata claims it belongs to this database
         const hasMatchingLocalMetadata = c.databaseId === database.$id;
@@ -345,10 +346,10 @@ export class InteractiveCLI {
 
     const hasLocalAndRemote =
       allCollections.some((coll) =>
-        configCollections.some((c) => c.name === coll.name)
+        configCollections.some((c) => c.name === coll.name || c.$id === coll.$id)
       ) &&
       allCollections.some(
-        (coll) => !configCollections.some((c) => c.name === coll.name)
+        (coll) => !configCollections.some((c) => c.name === coll.name || c.$id === coll.$id)
       );
 
     // Enhanced choice display with type indicators
@@ -365,7 +366,7 @@ export class InteractiveCLI {
         return a.name.localeCompare(b.name);
       })
       .map((collection) => {
-        const localCollection = configCollections.find((c) => c.name === collection.name);
+        const localCollection = configCollections.find((c) => c.name === collection.name || c.$id === collection.$id);
         const isLocal = !!localCollection;
         const isTable = localCollection?._isFromTablesDir || (collection as any)._isFromTablesDir || false;
         const sourceFolder = localCollection?._sourceFolder || (collection as any)._sourceFolder || 'collections';
@@ -629,7 +630,7 @@ export class InteractiveCLI {
     const allFunctions = [
       ...localFunctions,
       ...remoteFunctions.functions.filter(
-        (rf: any) => !localFunctions.some((lf) => lf.name === rf.name)
+        (rf: any) => !localFunctions.some((lf) => lf.name === rf.name || lf.$id === rf.$id)
       ),
     ];
 
@@ -640,7 +641,7 @@ export class InteractiveCLI {
         message,
         choices: allFunctions.map((f) => ({
           name: `${f.name} (${f.$id})${
-            localFunctions.some((lf) => lf.name === f.name)
+            localFunctions.some((lf) => lf.name === f.name || lf.$id === f.$id)
               ? " (Local)"
               : " (Remote)"
           }`,
@@ -980,7 +981,7 @@ export class InteractiveCLI {
       $updatedAt: DateTime.now().toISO(),
       name: db.name,
       enabled: true,
-      type: (db as any).type || "document",
+      type: "tablesdb" as DatabaseType,
     }));
   }
 

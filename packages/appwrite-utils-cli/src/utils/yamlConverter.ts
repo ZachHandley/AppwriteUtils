@@ -1,8 +1,95 @@
 import yaml from "js-yaml";
 import type { Collection, CollectionCreate } from "appwrite-utils";
+import { Decimal } from "decimal.js";
 
-// Threshold for treating min/max values as undefined (1 trillion)
-const MIN_MAX_THRESHOLD = 1_000_000_000_000;
+// Extreme values that Appwrite may return, which should be treated as undefined
+const EXTREME_MIN_INTEGER = -9223372036854776000;
+const EXTREME_MAX_INTEGER = 9223372036854776000;
+const EXTREME_MIN_FLOAT = -1.7976931348623157e+308;
+const EXTREME_MAX_FLOAT = 1.7976931348623157e+308;
+
+/**
+ * Type guard to check if an attribute has min/max properties
+ */
+const hasMinMaxProperties = (yamlAttr: any): boolean => {
+  return yamlAttr.type === 'integer' || yamlAttr.type === 'double' || yamlAttr.type === 'float';
+};
+
+/**
+ * Normalizes min/max values for integer and float attributes using Decimal.js for precision
+ * Validates that min < max and handles extreme database values
+ */
+const normalizeMinMaxValues = (yamlAttr: any): { min?: number; max?: number } => {
+  if (!hasMinMaxProperties(yamlAttr)) {
+    return {};
+  }
+
+  const { type, min, max, key } = yamlAttr;
+  let normalizedMin = min;
+  let normalizedMax = max;
+
+  // Handle min value - only filter out extreme database values
+  if (normalizedMin !== undefined && normalizedMin !== null) {
+    const minValue = Number(normalizedMin);
+    const originalMin = normalizedMin;
+
+    // Check if it's an extreme database value (but don't filter out large numbers)
+    if (type === 'integer') {
+      if (minValue === EXTREME_MIN_INTEGER) {
+        console.debug(`Min value normalized to undefined for attribute '${yamlAttr.key}': extreme database value`);
+        normalizedMin = undefined;
+      }
+    } else { // float/double
+      if (minValue === EXTREME_MIN_FLOAT) {
+        console.debug(`Min value normalized to undefined for attribute '${yamlAttr.key}': extreme database value`);
+        normalizedMin = undefined;
+      }
+    }
+  }
+
+  // Handle max value - only filter out extreme database values
+  if (normalizedMax !== undefined && normalizedMax !== null) {
+    const maxValue = Number(normalizedMax);
+    const originalMax = normalizedMax;
+
+    // Check if it's an extreme database value (but don't filter out large numbers)
+    if (type === 'integer') {
+      if (maxValue === EXTREME_MAX_INTEGER) {
+        console.debug(`Max value normalized to undefined for attribute '${yamlAttr.key}': extreme database value`);
+        normalizedMax = undefined;
+      }
+    } else { // float/double
+      if (maxValue === EXTREME_MAX_FLOAT) {
+        console.debug(`Max value normalized to undefined for attribute '${yamlAttr.key}': extreme database value`);
+        normalizedMax = undefined;
+      }
+    }
+  }
+
+  // Validate that min < max using Decimal.js for safe comparison
+  if (normalizedMin !== undefined && normalizedMax !== undefined &&
+      normalizedMin !== null && normalizedMax !== null) {
+    try {
+      const minDecimal = new Decimal(normalizedMin.toString());
+      const maxDecimal = new Decimal(normalizedMax.toString());
+
+      if (minDecimal.greaterThanOrEqualTo(maxDecimal)) {
+        // Swap values to ensure min < max (graceful handling)
+        console.warn(`Swapping min/max values for attribute '${yamlAttr.key}' to fix validation: min (${normalizedMin}) must be less than max (${normalizedMax})`);
+        const temp = normalizedMin;
+        normalizedMin = normalizedMax;
+        normalizedMax = temp;
+      }
+    } catch (error) {
+      console.error(`Error comparing min/max values for attribute '${yamlAttr.key}':`, error);
+      // If Decimal comparison fails, set both to undefined to avoid API errors
+      normalizedMin = undefined;
+      normalizedMax = undefined;
+    }
+  }
+
+  return { min: normalizedMin, max: normalizedMax };
+};
 
 export interface YamlCollectionData {
   name: string;
@@ -125,21 +212,11 @@ export function collectionToYaml(
 
       if ('xdefault' in attr && attr.xdefault !== undefined) yamlAttr.default = attr.xdefault;
 
-      // Normalize min/max values - filter out extreme database values
-      if ('min' in attr && attr.min !== undefined) {
-        const minValue = Number(attr.min);
-        // Only include min if it's within reasonable range (< 1 trillion)
-        if (Math.abs(minValue) < MIN_MAX_THRESHOLD) {
-          yamlAttr.min = attr.min;
-        }
-      }
-
-      if ('max' in attr && attr.max !== undefined) {
-        const maxValue = Number(attr.max);
-        // Only include max if it's within reasonable range (< 1 trillion)
-        if (Math.abs(maxValue) < MIN_MAX_THRESHOLD) {
-          yamlAttr.max = attr.max;
-        }
+      // Normalize min/max values using Decimal.js precision
+      if ('min' in attr || 'max' in attr) {
+        const { min, max } = normalizeMinMaxValues(attr);
+        if (min !== undefined) yamlAttr.min = min;
+        if (max !== undefined) yamlAttr.max = max;
       }
       if ('elements' in attr && attr.elements !== undefined) yamlAttr.elements = attr.elements;
       if ('relatedCollection' in attr && attr.relatedCollection !== undefined) yamlAttr.relatedCollection = attr.relatedCollection;

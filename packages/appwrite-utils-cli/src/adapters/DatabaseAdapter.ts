@@ -6,6 +6,7 @@
  * code uses TablesDB-style method signatures for consistency.
  */
 
+import type { Client } from "node-appwrite";
 import type { ApiMode } from "../utils/versionDetection.js";
 
 // Base parameter types using TablesDB terminology
@@ -231,10 +232,10 @@ export interface DatabaseAdapter {
  * Base adapter class with common functionality
  */
 export abstract class BaseAdapter implements DatabaseAdapter {
-  protected client: any;
+  protected client: Client;
   protected apiMode: ApiMode;
   
-  constructor(client: any, apiMode: ApiMode) {
+  constructor(client: Client, apiMode: ApiMode) {
     this.client = client;
     this.apiMode = apiMode;
   }

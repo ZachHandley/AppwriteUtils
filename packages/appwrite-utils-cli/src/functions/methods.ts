@@ -17,6 +17,7 @@ import {
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { expandTildePath, normalizeFunctionName } from "./pathResolution.js";
 
 /**
  * Validates and filters events array for Appwrite functions
@@ -72,7 +73,7 @@ export const downloadLatestFunctionDeployment = async (
   // Create function directory using provided basePath
   const functionDir = join(
     basePath,
-    functionInfo.name.toLowerCase().replace(/\s+/g, "-")
+    normalizeFunctionName(functionInfo.name)
   );
   await fs.promises.mkdir(functionDir, { recursive: true });
 
@@ -219,7 +220,8 @@ export const createFunctionTemplate = async (
   functionName: string,
   basePath: string = "./functions"
 ) => {
-  const functionPath = join(basePath, functionName);
+  const expandedBasePath = expandTildePath(basePath);
+  const functionPath = join(expandedBasePath, functionName);
   const currentFileUrl = import.meta.url;
   const currentDir = dirname(fileURLToPath(currentFileUrl));
   const templatesPath = join(currentDir, "templates", templateType);

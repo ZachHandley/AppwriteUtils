@@ -26,14 +26,13 @@ export const databaseCommands = {
       // Get local collections for selection
       const localCollections = (cli as any).getLocalCollections();
 
-      // Prompt about existing configuration
-      const { syncExisting, modifyConfiguration } = await SelectionDialogs.promptForExistingConfig(configuredDatabases);
+      // Push operations always use local configuration as source of truth
 
       // Select databases
       const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
         availableDatabases,
         configuredDatabases,
-        { showSelectAll: true, allowNewOnly: !syncExisting }
+        { showSelectAll: true, allowNewOnly: false }
       );
 
       if (selectedDatabaseIds.length === 0) {
@@ -54,7 +53,8 @@ export const databaseCommands = {
           (cli as any).controller!.database!,
           chalk.blue(`Select collections/tables to push to "${database.name}":`),
           true,  // multiSelect
-          true   // prefer local
+          true,  // prefer local
+          true   // shouldFilterByDatabase
         );
 
         // Map selected collections to table IDs
@@ -133,16 +133,16 @@ export const databaseCommands = {
         bucketSelections
       );
 
-      const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary);
+      const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary, 'push');
 
       if (!confirmed) {
-        MessageFormatter.info("Sync operation cancelled by user", { prefix: "Database" });
+        MessageFormatter.info("Push operation cancelled by user", { prefix: "Database" });
         return;
       }
 
-      // Perform selective sync using the controller
-      MessageFormatter.progress("Starting selective sync...", { prefix: "Database" });
-      await (cli as any).controller!.selectiveSync(databaseSelections, bucketSelections);
+      // Perform selective push using the controller
+      MessageFormatter.progress("Starting selective push...", { prefix: "Database" });
+      await (cli as any).controller!.selectivePush(databaseSelections, bucketSelections);
 
       MessageFormatter.success("\n✅ All database configurations pushed successfully!", { prefix: "Database" });
 

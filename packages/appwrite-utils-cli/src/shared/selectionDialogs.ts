@@ -520,8 +520,37 @@ export class SelectionDialogs {
   /**
    * Shows final confirmation dialog with sync selection summary
    */
-  static async confirmSyncSelection(selectionSummary: SyncSelectionSummary): Promise<boolean> {
-    MessageFormatter.banner("Sync Selection Summary", "Review your selections before proceeding");
+  static async confirmSyncSelection(
+    selectionSummary: SyncSelectionSummary,
+    operationType: 'push' | 'pull' | 'sync' = 'sync'
+  ): Promise<boolean> {
+    const labels = {
+      push: {
+        banner: "Push Selection Summary",
+        subtitle: "Review selections before pushing to Appwrite",
+        confirm: "Proceed with push operation?",
+        success: "Push operation confirmed.",
+        cancel: "Push operation cancelled."
+      },
+      pull: {
+        banner: "Pull Selection Summary",
+        subtitle: "Review selections before pulling from Appwrite",
+        confirm: "Proceed with pull operation?",
+        success: "Pull operation confirmed.",
+        cancel: "Pull operation cancelled."
+      },
+      sync: {
+        banner: "Sync Selection Summary",
+        subtitle: "Review your selections before proceeding",
+        confirm: "Proceed with sync operation?",
+        success: "Sync operation confirmed.",
+        cancel: "Sync operation cancelled."
+      }
+    };
+
+    const label = labels[operationType];
+
+    MessageFormatter.banner(label.banner, label.subtitle);
 
     // Database summary
     console.log(chalk.bold.cyan("\n📊 Databases:"));
@@ -563,20 +592,20 @@ export class SelectionDialogs {
     const { confirmed } = await inquirer.prompt([{
       type: 'confirm',
       name: 'confirmed',
-      message: chalk.green.bold('Proceed with sync operation?'),
+      message: chalk.green.bold(label.confirm),
       default: true
     }]);
 
     if (confirmed) {
-      MessageFormatter.success("Sync operation confirmed.", { skipLogging: true });
-      logger.info("Sync selection confirmed", {
+      MessageFormatter.success(label.success, { skipLogging: true });
+      logger.info(`${operationType} selection confirmed`, {
         databases: selectionSummary.totalDatabases,
         tables: selectionSummary.totalTables,
         buckets: selectionSummary.totalBuckets
       });
     } else {
-      MessageFormatter.warning("Sync operation cancelled.", { skipLogging: true });
-      logger.info("Sync selection cancelled by user");
+      MessageFormatter.warning(label.cancel, { skipLogging: true });
+      logger.info(`${operationType} selection cancelled by user`);
     }
 
     return confirmed;

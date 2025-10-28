@@ -16,18 +16,11 @@ import {
   calculateExponentialBackoff,
 } from "../utils/helperFunctions.js";
 import chalk from "chalk";
-import type {
-  DatabaseAdapter,
-  CreateAttributeParams,
-  UpdateAttributeParams,
-  DeleteAttributeParams,
-} from "../adapters/DatabaseAdapter.js";
+import { Decimal } from "decimal.js";
+import type { DatabaseAdapter, CreateAttributeParams, UpdateAttributeParams, DeleteAttributeParams } from "../adapters/DatabaseAdapter.js";
 import { logger } from "../shared/logging.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { isDatabaseAdapter } from "../utils/typeGuards.js";
-
-// Threshold for treating min/max values as undefined (1 trillion)
-const MIN_MAX_THRESHOLD = 1_000_000_000_000;
 
 // Extreme values that Appwrite may return, which should be treated as undefined
 const EXTREME_MIN_INTEGER = -9223372036854776000;
@@ -49,8 +42,8 @@ const hasMinMaxProperties = (
 };
 
 /**
- * Normalizes min/max values for integer and float attributes
- * Sets values to undefined if they exceed the threshold or are extreme values from database
+ * Normalizes min/max values for integer and float attributes using Decimal.js for precision
+ * Validates that min < max and handles extreme database values
  */
 const normalizeMinMaxValues = (
   attribute: Attribute
@@ -77,111 +70,114 @@ const normalizeMinMaxValues = (
     operation: "normalizeMinMaxValues",
   });
 
-  // Handle min value
+  // Handle min value - only filter out extreme database values
   if (normalizedMin !== undefined && normalizedMin !== null) {
     const minValue = Number(normalizedMin);
     const originalMin = normalizedMin;
 
-    // Check if it exceeds threshold or is an extreme database value
-    if (type === "integer") {
-      if (
-        Math.abs(minValue) >= MIN_MAX_THRESHOLD ||
-        minValue === EXTREME_MIN_INTEGER
-      ) {
-        logger.debug(
-          `Min value normalized to undefined for attribute '${attribute.key}'`,
-          {
-            type,
-            originalValue: originalMin,
-            numericValue: minValue,
-            reason:
-              Math.abs(minValue) >= MIN_MAX_THRESHOLD
-                ? "exceeds_threshold"
-                : "extreme_database_value",
-            threshold: MIN_MAX_THRESHOLD,
-            extremeValue: EXTREME_MIN_INTEGER,
-            operation: "normalizeMinMaxValues",
-          }
-        );
+    // Check if it's an extreme database value (but don't filter out large numbers)
+    if (type === 'integer') {
+      if (minValue === EXTREME_MIN_INTEGER) {
+        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMin,
+          numericValue: minValue,
+          reason: 'extreme_database_value',
+          extremeValue: EXTREME_MIN_INTEGER,
+          operation: 'normalizeMinMaxValues'
+        });
         normalizedMin = undefined;
       }
-    } else {
-      // float/double
-      if (
-        Math.abs(minValue) >= MIN_MAX_THRESHOLD ||
-        minValue === EXTREME_MIN_FLOAT
-      ) {
-        logger.debug(
-          `Min value normalized to undefined for attribute '${attribute.key}'`,
-          {
-            type,
-            originalValue: originalMin,
-            numericValue: minValue,
-            reason:
-              Math.abs(minValue) >= MIN_MAX_THRESHOLD
-                ? "exceeds_threshold"
-                : "extreme_database_value",
-            threshold: MIN_MAX_THRESHOLD,
-            extremeValue: EXTREME_MIN_FLOAT,
-            operation: "normalizeMinMaxValues",
-          }
-        );
+    } else { // float/double
+      if (minValue === EXTREME_MIN_FLOAT) {
+        logger.debug(`Min value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMin,
+          numericValue: minValue,
+          reason: 'extreme_database_value',
+          extremeValue: EXTREME_MIN_FLOAT,
+          operation: 'normalizeMinMaxValues'
+        });
         normalizedMin = undefined;
       }
     }
   }
 
-  // Handle max value
+  // Handle max value - only filter out extreme database values
   if (normalizedMax !== undefined && normalizedMax !== null) {
     const maxValue = Number(normalizedMax);
     const originalMax = normalizedMax;
 
-    // Check if it exceeds threshold or is an extreme database value
-    if (type === "integer") {
-      if (
-        Math.abs(maxValue) >= MIN_MAX_THRESHOLD ||
-        maxValue === EXTREME_MAX_INTEGER
-      ) {
-        logger.debug(
-          `Max value normalized to undefined for attribute '${attribute.key}'`,
-          {
-            type,
-            originalValue: originalMax,
-            numericValue: maxValue,
-            reason:
-              Math.abs(maxValue) >= MIN_MAX_THRESHOLD
-                ? "exceeds_threshold"
-                : "extreme_database_value",
-            threshold: MIN_MAX_THRESHOLD,
-            extremeValue: EXTREME_MAX_INTEGER,
-            operation: "normalizeMinMaxValues",
-          }
-        );
+    // Check if it's an extreme database value (but don't filter out large numbers)
+    if (type === 'integer') {
+      if (maxValue === EXTREME_MAX_INTEGER) {
+        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMax,
+          numericValue: maxValue,
+          reason: 'extreme_database_value',
+          extremeValue: EXTREME_MAX_INTEGER,
+          operation: 'normalizeMinMaxValues'
+        });
         normalizedMax = undefined;
       }
-    } else {
-      // float/double
-      if (
-        Math.abs(maxValue) >= MIN_MAX_THRESHOLD ||
-        maxValue === EXTREME_MAX_FLOAT
-      ) {
-        logger.debug(
-          `Max value normalized to undefined for attribute '${attribute.key}'`,
-          {
-            type,
-            originalValue: originalMax,
-            numericValue: maxValue,
-            reason:
-              Math.abs(maxValue) >= MIN_MAX_THRESHOLD
-                ? "exceeds_threshold"
-                : "extreme_database_value",
-            threshold: MIN_MAX_THRESHOLD,
-            extremeValue: EXTREME_MAX_FLOAT,
-            operation: "normalizeMinMaxValues",
-          }
-        );
+    } else { // float/double
+      if (maxValue === EXTREME_MAX_FLOAT) {
+        logger.debug(`Max value normalized to undefined for attribute '${attribute.key}'`, {
+          type,
+          originalValue: originalMax,
+          numericValue: maxValue,
+          reason: 'extreme_database_value',
+          extremeValue: EXTREME_MAX_FLOAT,
+          operation: 'normalizeMinMaxValues'
+        });
         normalizedMax = undefined;
       }
+    }
+  }
+
+  // Validate that min < max using Decimal.js for safe comparison
+  if (normalizedMin !== undefined && normalizedMax !== undefined &&
+      normalizedMin !== null && normalizedMax !== null) {
+    try {
+      const minDecimal = new Decimal(normalizedMin.toString());
+      const maxDecimal = new Decimal(normalizedMax.toString());
+
+      if (minDecimal.greaterThanOrEqualTo(maxDecimal)) {
+        // Log the validation error
+        logger.error(`Invalid min/max values for attribute '${attribute.key}': min (${normalizedMin}) must be less than max (${normalizedMax})`, {
+          type,
+          min: normalizedMin,
+          max: normalizedMax,
+          operation: 'normalizeMinMaxValues'
+        });
+
+        // Swap values to ensure min < max (graceful handling)
+        logger.warn(`Swapping min/max values for attribute '${attribute.key}' to fix validation`, {
+          type,
+          originalMin: normalizedMin,
+          originalMax: normalizedMax,
+          newMin: normalizedMax,
+          newMax: normalizedMin,
+          operation: 'normalizeMinMaxValues'
+        });
+
+        const temp = normalizedMin;
+        normalizedMin = normalizedMax;
+        normalizedMax = temp;
+      }
+    } catch (error) {
+      logger.error(`Error comparing min/max values for attribute '${attribute.key}'`, {
+        type,
+        min: normalizedMin,
+        max: normalizedMax,
+        error: error instanceof Error ? error.message : String(error),
+        operation: 'normalizeMinMaxValues'
+      });
+
+      // If Decimal comparison fails, set both to undefined to avoid API errors
+      normalizedMin = undefined;
+      normalizedMax = undefined;
     }
   }
 

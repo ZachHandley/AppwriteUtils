@@ -12,11 +12,10 @@ import {
   type Specification,
 } from "appwrite-utils";
 import {
-  loadConfig,
-  loadConfigWithPath,
   findAppwriteConfig,
   findFunctionsDir,
 } from "./utils/loadConfigs.js";
+import { normalizeFunctionName, validateFunctionDirectory } from './functions/pathResolution.js';
 import { UsersController } from "./users/methods.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
@@ -116,9 +115,33 @@ export class UtilsController {
       appwriteKey?: string;
     }
   ): UtilsController {
+    // Clear instance if currentUserDir has changed
+    if (UtilsController.instance &&
+        UtilsController.instance.currentUserDir !== currentUserDir) {
+      logger.debug(`Clearing singleton: currentUserDir changed from ${UtilsController.instance.currentUserDir} to ${currentUserDir}`, { prefix: "UtilsController" });
+      UtilsController.clearInstance();
+    }
+
+    // Clear instance if directConfig endpoint or project has changed
+    if (UtilsController.instance && directConfig) {
+      const existingConfig = UtilsController.instance.config;
+      if (existingConfig) {
+        const endpointChanged = directConfig.appwriteEndpoint &&
+          existingConfig.appwriteEndpoint !== directConfig.appwriteEndpoint;
+        const projectChanged = directConfig.appwriteProject &&
+          existingConfig.appwriteProject !== directConfig.appwriteProject;
+
+        if (endpointChanged || projectChanged) {
+          logger.debug("Clearing singleton: endpoint or project changed", { prefix: "UtilsController" });
+          UtilsController.clearInstance();
+        }
+      }
+    }
+
     if (!UtilsController.instance) {
       UtilsController.instance = new UtilsController(currentUserDir, directConfig);
     }
+
     return UtilsController.instance;
   }
 
@@ -426,10 +449,17 @@ export class UtilsController {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         const functionPath = path.join(functionsDir, entry.name);
-        // Match with config functions by name
+
+        // Validate it's a function directory
+        if (!validateFunctionDirectory(functionPath)) {
+          continue; // Skip invalid directories
+        }
+
+        // Match with config functions using normalized names
         if (this.config?.functions) {
+          const normalizedEntryName = normalizeFunctionName(entry.name);
           const matchingFunc = this.config.functions.find(
-            (f) => f.name.toLowerCase() === entry.name.toLowerCase()
+            (f) => normalizeFunctionName(f.name) === normalizedEntryName
           );
           if (matchingFunc) {
             functionDirMap.set(matchingFunc.name, functionPath);
@@ -591,28 +621,32 @@ export class UtilsController {
   async generateSchemas() {
     // Schema generation doesn't need Appwrite connection, just config
     if (!this.config) {
-      if (this.appwriteFolderPath && this.appwriteConfigPath) {
-        MessageFormatter.progress("Loading config from file...", { prefix: "Config" });
-        try {
-          const { config, actualConfigPath } = await loadConfigWithPath(
-            this.appwriteFolderPath,
-            { validate: false, strictMode: false, reportValidation: false }
-          );
-          this.config = config;
-          MessageFormatter.info(`Loaded config from: ${actualConfigPath}`, { prefix: "Config" });
-        } catch (error) {
-          MessageFormatter.error("Failed to load config from file", error instanceof Error ? error : undefined, { prefix: "Config" });
-          return;
+      MessageFormatter.progress("Loading config from ConfigManager...", { prefix: "Config" });
+      try {
+        const configManager = ConfigManager.getInstance();
+
+        // Load config if not already loaded
+        if (!configManager.hasConfig()) {
+          await configManager.loadConfig({
+            configDir: this.currentUserDir,
+            validate: false,
+            strictMode: false,
+          });
         }
-      } else {
-        MessageFormatter.error("No configuration available", undefined, { prefix: "Controller" });
+
+        this.config = configManager.getConfig();
+        MessageFormatter.info("Config loaded successfully from ConfigManager", { prefix: "Config" });
+      } catch (error) {
+        MessageFormatter.error("Failed to load config", error instanceof Error ? error : undefined, { prefix: "Config" });
         return;
       }
     }
+
     if (!this.appwriteFolderPath) {
       MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
       return;
     }
+
     await generateSchemas(this.config, this.appwriteFolderPath);
   }
 
@@ -728,7 +762,7 @@ export class UtilsController {
     }
   }
 
-  async selectiveSync(
+  async selectivePull(
     databaseSelections: DatabaseSelection[],
     bucketSelections: BucketSelection[]
   ): Promise<void> {
@@ -738,7 +772,7 @@ export class UtilsController {
       return;
     }
 
-    MessageFormatter.progress("Starting selective sync...", { prefix: "Controller" });
+    MessageFormatter.progress("Starting selective pull (Appwrite → local config)...", { prefix: "Controller" });
 
     // Convert database selections to Models.Database format
     const selectedDatabases: Models.Database[] = [];
@@ -762,7 +796,7 @@ export class UtilsController {
     }
 
     if (selectedDatabases.length === 0) {
-      MessageFormatter.warning("No valid databases selected for sync", { prefix: "Controller" });
+      MessageFormatter.warning("No valid databases selected for pull", { prefix: "Controller" });
       return;
     }
 
@@ -778,7 +812,106 @@ export class UtilsController {
     // Perform selective sync using the enhanced synchronizeConfigurations method
     await this.synchronizeConfigurations(selectedDatabases, this.config, databaseSelections, bucketSelections);
 
-    MessageFormatter.success("Selective sync completed successfully!", { prefix: "Controller" });
+    MessageFormatter.success("Selective pull completed successfully! Remote config pulled to local.", { prefix: "Controller" });
+  }
+
+  async selectivePush(
+    databaseSelections: DatabaseSelection[],
+    bucketSelections: BucketSelection[]
+  ): Promise<void> {
+    await this.init();
+    if (!this.database) {
+      MessageFormatter.error("Database not initialized", undefined, { prefix: "Controller" });
+      return;
+    }
+
+    MessageFormatter.progress("Starting selective push (local config → Appwrite)...", { prefix: "Controller" });
+
+    // Convert database selections to Models.Database format
+    const selectedDatabases: Models.Database[] = [];
+
+    for (const dbSelection of databaseSelections) {
+      // Get the full database object from the controller
+      const databases = await fetchAllDatabases(this.database);
+      const database = databases.find(db => db.$id === dbSelection.databaseId);
+
+      if (database) {
+        selectedDatabases.push(database);
+        MessageFormatter.info(`Selected database: ${database.name} (${database.$id})`, { prefix: "Controller" });
+
+        // Log selected tables for this database
+        if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
+          MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
+        }
+      } else {
+        MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found`, { prefix: "Controller" });
+      }
+    }
+
+    if (selectedDatabases.length === 0) {
+      MessageFormatter.warning("No valid databases selected for push", { prefix: "Controller" });
+      return;
+    }
+
+    // Log bucket selections if provided
+    if (bucketSelections && bucketSelections.length > 0) {
+      MessageFormatter.info(`Selected ${bucketSelections.length} buckets:`, { prefix: "Controller" });
+      for (const bucketSelection of bucketSelections) {
+        const dbInfo = bucketSelection.databaseId ? ` (DB: ${bucketSelection.databaseId})` : '';
+        MessageFormatter.info(`  - ${bucketSelection.bucketName} (${bucketSelection.bucketId})${dbInfo}`, { prefix: "Controller" });
+      }
+    }
+
+    // PUSH OPERATION: Push local configuration to Appwrite
+    // Build database-specific collection mappings from databaseSelections
+    const databaseCollectionsMap = new Map<string, any[]>();
+
+    // Get all collections/tables from config (they're at the root level, not nested in databases)
+    const allCollections = this.config?.collections || this.config?.tables || [];
+
+    // Create database-specific collection mapping to preserve relationships
+    for (const dbSelection of databaseSelections) {
+      const collectionsForDatabase: any[] = [];
+
+      MessageFormatter.info(`Processing collections for database: ${dbSelection.databaseId}`, { prefix: "Controller" });
+
+      // Filter collections that were selected for THIS specific database
+      for (const collection of allCollections) {
+        const collectionId = collection.$id || (collection as any).id;
+
+        // Check if this collection was selected for THIS database
+        if (dbSelection.tableIds.includes(collectionId)) {
+          collectionsForDatabase.push(collection);
+          MessageFormatter.info(`  - Selected collection: ${collection.name || collectionId} for database ${dbSelection.databaseId}`, { prefix: "Controller" });
+        }
+      }
+
+      databaseCollectionsMap.set(dbSelection.databaseId, collectionsForDatabase);
+      MessageFormatter.info(`Database ${dbSelection.databaseId}: ${collectionsForDatabase.length} collections selected`, { prefix: "Controller" });
+    }
+
+    // Calculate total collections for logging
+    const totalSelectedCollections = Array.from(databaseCollectionsMap.values())
+      .reduce((total, collections) => total + collections.length, 0);
+
+    MessageFormatter.info(`Pushing ${totalSelectedCollections} selected tables/collections to ${databaseCollectionsMap.size} databases`, { prefix: "Controller" });
+
+    // Ensure databases exist
+    await this.ensureDatabasesExist(selectedDatabases);
+    await this.ensureDatabaseConfigBucketsExist(selectedDatabases);
+
+    // Create/update collections with database-specific context
+    for (const database of selectedDatabases) {
+      const collectionsForThisDatabase = databaseCollectionsMap.get(database.$id) || [];
+      if (collectionsForThisDatabase.length > 0) {
+        MessageFormatter.info(`Pushing ${collectionsForThisDatabase.length} collections to database ${database.$id} (${database.name})`, { prefix: "Controller" });
+        await this.createOrUpdateCollections(database, undefined, collectionsForThisDatabase);
+      } else {
+        MessageFormatter.info(`No collections selected for database ${database.$id} (${database.name})`, { prefix: "Controller" });
+      }
+    }
+
+    MessageFormatter.success("Selective push completed successfully! Local config pushed to Appwrite.", { prefix: "Controller" });
   }
 
   async syncDb(

@@ -7,7 +7,7 @@
  * older Appwrite instances.
  */
 
-import { Query } from "node-appwrite";
+import { Client, Databases, IndexType, Query, type Models, RelationshipType, RelationMutate } from "node-appwrite";
 import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
@@ -39,12 +39,12 @@ import {
  * LegacyAdapter - Translates TablesDB calls to legacy Databases API
  */
 export class LegacyAdapter extends BaseAdapter {
-  private databases: any;
+  private databases: Databases;
   
-  constructor(client: any) {
+  constructor(client: Client) {
     super(client, 'legacy');
     // Assuming Databases service is available on the client
-    this.databases = client;
+    this.databases = new Databases(client);
   }
   
   // Row (Document) Operations - Translate object notation to positional parameters
@@ -325,7 +325,7 @@ export class LegacyAdapter extends BaseAdapter {
         params.databaseId,
         params.tableId,
         params.key,
-        params.type,
+        params.type as IndexType,
         params.attributes,
         params.orders || []
       );
@@ -369,122 +369,122 @@ export class LegacyAdapter extends BaseAdapter {
       
       switch (params.type.toLowerCase()) {
         case 'string':
-          result = await this.databases.createStringAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.size || 255,
-            params.required ?? false,
-            params.default,
-            params.array ?? false,
-            params.encrypt ?? false
-          );
+          result = await this.databases.createStringAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            size: params.size || 255,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false,
+            encrypt: params.encrypt ?? false
+          });
           break;
           
         case 'integer':
-          result = await this.databases.createIntegerAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.min,
-            params.max,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createIntegerAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            min: params.min,
+            max: params.max,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'float':
         case 'double':
-          result = await this.databases.createFloatAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.min,
-            params.max,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createFloatAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            min: params.min,
+            max: params.max,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'boolean':
-          result = await this.databases.createBooleanAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createBooleanAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'datetime':
-          result = await this.databases.createDatetimeAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createDatetimeAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'email':
-          result = await this.databases.createEmailAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createEmailAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'enum':
-          result = await this.databases.createEnumAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.elements || [],
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createEnumAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            elements: params.elements || [],
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'ip':
-          result = await this.databases.createIpAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createIpAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'url':
-          result = await this.databases.createUrlAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.required ?? false,
-            params.default,
-            params.array ?? false
-          );
+          result = await this.databases.createUrlAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
+          });
           break;
           
         case 'relationship':
-          result = await this.databases.createRelationshipAttribute(
-            params.databaseId,
-            params.tableId,
-            params.key,
-            params.relatedCollection || '',
-            params.type || 'oneToOne',
-            params.twoWay ?? false,
-            params.onDelete || 'restrict'
-          );
+          result = await this.databases.createRelationshipAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            relatedCollectionId: params.relatedCollection || '',
+            type: (params.type || 'oneToOne') as RelationshipType,
+            twoWay: params.twoWay ?? false,
+            onDelete: params.onDelete || 'restrict'
+          });
           break;
           
         default:
@@ -506,17 +506,146 @@ export class LegacyAdapter extends BaseAdapter {
   
   async updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse> {
     try {
-      // TablesDB: updateAttribute({ databaseId, tableId, key, required, default })
-      // Legacy: updateStringAttribute, updateIntegerAttribute, etc.
-      // Note: Legacy API has type-specific update methods
-      const result = await this.databases.updateStringAttribute(
-        params.databaseId,
-        params.tableId,
-        params.key,
-        params.required ?? false,
-        params.default
-      );
-      
+      // Get the current collection to determine the attribute type
+      const collection = await this.databases.getCollection(params.databaseId, params.tableId);
+      const existingAttr = collection.attributes.find((attr: any) => attr.key === params.key);
+
+      if (!existingAttr) {
+        throw new AdapterError(
+          `Attribute '${params.key}' not found in collection '${params.tableId}'`,
+          'ATTRIBUTE_NOT_FOUND'
+        );
+      }
+
+      let result;
+      const attributeType = existingAttr.type.toLowerCase();
+
+      // Use type-specific update methods based on attribute type with object notation
+      switch (attributeType) {
+        case 'string':
+          const stringAttr = existingAttr as Models.AttributeString;
+          result = await this.databases.updateStringAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? stringAttr.required,
+            xdefault: params.default !== undefined ? params.default : stringAttr.default,
+            size: stringAttr.size
+          });
+          break;
+
+        case 'integer':
+          const integerAttr = existingAttr as Models.AttributeInteger;
+          result = await this.databases.updateIntegerAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? integerAttr.required,
+            xdefault: params.default !== undefined ? params.default : integerAttr.default,
+            min: integerAttr.min,
+            max: integerAttr.max
+          });
+          break;
+
+        case 'float':
+        case 'double':
+          const floatAttr = existingAttr as Models.AttributeFloat;
+          result = await this.databases.updateFloatAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? floatAttr.required,
+            xdefault: params.default !== undefined ? params.default : floatAttr.default,
+            min: floatAttr.min,
+            max: floatAttr.max
+          });
+          break;
+
+        case 'boolean':
+          const booleanAttr = existingAttr as Models.AttributeBoolean;
+          result = await this.databases.updateBooleanAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? booleanAttr.required,
+            xdefault: params.default !== undefined ? params.default : booleanAttr.default
+          });
+          break;
+
+        case 'datetime':
+          const datetimeAttr = existingAttr as Models.AttributeDatetime;
+          result = await this.databases.updateDatetimeAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? datetimeAttr.required,
+            xdefault: params.default !== undefined ? params.default : datetimeAttr.default
+          });
+          break;
+
+        case 'email':
+          const emailAttr = existingAttr as Models.AttributeEmail;
+          result = await this.databases.updateEmailAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? emailAttr.required,
+            xdefault: params.default !== undefined ? params.default : emailAttr.default
+          });
+          break;
+
+        case 'enum':
+          const enumAttr = existingAttr as Models.AttributeEnum;
+          result = await this.databases.updateEnumAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            elements: enumAttr.elements || [],
+            required: params.required ?? enumAttr.required,
+            xdefault: params.default !== undefined ? params.default : enumAttr.default
+          });
+          break;
+
+        case 'ip':
+          const ipAttr = existingAttr as Models.AttributeIp;
+          result = await this.databases.updateIpAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? ipAttr.required,
+            xdefault: params.default !== undefined ? params.default : ipAttr.default
+          });
+          break;
+
+        case 'url':
+          const urlAttr = existingAttr as Models.AttributeUrl;
+          result = await this.databases.updateUrlAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            required: params.required ?? urlAttr.required,
+            xdefault: params.default !== undefined ? params.default : urlAttr.default
+          });
+          break;
+
+        case 'relationship':
+          // Relationship attributes have different update method signature
+          const relationshipAttr = existingAttr as Models.AttributeRelationship;
+          result = await this.databases.updateRelationshipAttribute({
+            databaseId: params.databaseId,
+            collectionId: params.tableId,
+            key: params.key,
+            onDelete: relationshipAttr.onDelete as RelationMutate
+          });
+          break;
+
+        default:
+          throw new AdapterError(
+            `Unsupported attribute type for update: ${attributeType}`,
+            'UNSUPPORTED_ATTRIBUTE_TYPE'
+          );
+      }
+
       return { data: result };
     } catch (error) {
       throw new AdapterError(

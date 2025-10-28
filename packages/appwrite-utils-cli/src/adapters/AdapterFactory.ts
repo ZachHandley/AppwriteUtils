@@ -252,8 +252,7 @@ export class AdapterFactory {
         }
       }
 
-      const tablesDB = new TablesDB(client);
-      const adapter = new TablesDBAdapter(tablesDB);
+      const adapter = new TablesDBAdapter(client);
 
       const totalDuration = Date.now() - startTime;
       logger.info('TablesDB adapter created successfully', {
@@ -337,8 +336,7 @@ export class AdapterFactory {
         }
       }
 
-      const databases = new Databases(client);
-      const adapter = new LegacyAdapter(databases);
+      const adapter = new LegacyAdapter(client);
 
       const totalDuration = Date.now() - startTime;
       logger.info('Legacy adapter created successfully', {

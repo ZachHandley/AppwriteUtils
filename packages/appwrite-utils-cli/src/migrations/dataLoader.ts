@@ -315,7 +315,7 @@ export class DataLoader {
         collection.$id = collectionExists.$id;
         this.config.collections[index] = collectionConfig;
         // Find or create an import operation for the collection
-        const adapter = new LegacyAdapter(this.database);
+        const adapter = new LegacyAdapter(this.database.client);
         const collectionImportOperation = await findOrCreateOperation(
           adapter,
           dbId,
@@ -957,7 +957,7 @@ export class DataLoader {
       this.oldIdToNewIdPerCollectionMap
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMap)
         .get(this.getCollectionKey(collection.name));
-    const adapter = new LegacyAdapter(this.database);
+    const adapter = new LegacyAdapter(this.database.client);
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         adapter,
@@ -1188,7 +1188,7 @@ export class DataLoader {
     let operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
-    const adapter = new LegacyAdapter(this.database);
+    const adapter = new LegacyAdapter(this.database.client);
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         adapter,

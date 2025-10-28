@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { resolve as resolvePath, dirname, isAbsolute } from "node:path";
 import yaml from "js-yaml";
 import { register } from "tsx/esm/api";
 import { pathToFileURL } from "node:url";
@@ -19,6 +20,7 @@ import {
   type CollectionDiscoveryResult,
   type TableDiscoveryResult,
 } from "../../utils/configDiscovery.js";
+import { expandTildePath } from "../../functions/pathResolution.js";
 
 /**
  * Options for loading collections or tables
@@ -52,6 +54,35 @@ export interface CollectionLoadOptions {
  */
 export class ConfigLoaderService {
   /**
+   * Normalizes function dirPath to absolute path
+   * @param func Function configuration object
+   * @param configDir Directory containing the config file
+   * @returns Function with normalized dirPath
+   */
+  private normalizeFunctionPath(func: any, configDir: string): any {
+    if (!func.dirPath) {
+      return func;
+    }
+
+    // Expand tilde first
+    const expandedPath = expandTildePath(func.dirPath);
+
+    // If already absolute, return as-is
+    if (isAbsolute(expandedPath)) {
+      return {
+        ...func,
+        dirPath: expandedPath
+      };
+    }
+
+    // Resolve relative to config directory
+    return {
+      ...func,
+      dirPath: resolvePath(configDir, expandedPath)
+    };
+  }
+
+  /**
    * Loads configuration from a discovered path, auto-detecting the type
    * @param configPath Path to the configuration file
    * @param sessionOptions Optional session preservation options
@@ -77,6 +108,13 @@ export class ConfigLoaderService {
           "JSON project config must contain at minimum 'endpoint' and 'projectId' fields"
         );
       }
+
+      const configDir = path.dirname(configPath);
+
+      // Normalize function paths
+      const normalizedFunctions = partialConfig.functions
+        ? partialConfig.functions.map(func => this.normalizeFunctionPath(func, configDir))
+        : [];
 
       return {
         appwriteEndpoint: partialConfig.appwriteEndpoint,
@@ -105,7 +143,7 @@ export class ConfigLoaderService {
         },
         databases: partialConfig.databases || [],
         buckets: partialConfig.buckets || [],
-        functions: partialConfig.functions || [],
+        functions: normalizedFunctions,
         collections: partialConfig.collections || [],
         sessionCookie: partialConfig.sessionCookie,
         authMethod: partialConfig.authMethod || "auto",
@@ -155,6 +193,13 @@ export class ConfigLoaderService {
 
       // Load collections and tables from their respective directories
       const configDir = path.dirname(yamlPath);
+
+      // Normalize function paths
+      if (config.functions) {
+        config.functions = config.functions.map(func =>
+          this.normalizeFunctionPath(func, configDir)
+        );
+      }
       const collectionsDir = path.join(configDir, config.schemaConfig?.collectionsDirectory || "collections");
       const tablesDir = path.join(configDir, config.schemaConfig?.tablesDirectory || "tables");
 
@@ -248,6 +293,14 @@ export class ConfigLoaderService {
         throw new Error(`Failed to load TypeScript config from: ${tsPath}`);
       }
 
+      // Normalize function paths
+      const configDir = path.dirname(tsPath);
+      if (config.functions) {
+        config.functions = config.functions.map(func =>
+          this.normalizeFunctionPath(func, configDir)
+        );
+      }
+
       MessageFormatter.success(`Loaded TypeScript config from: ${tsPath}`, {
         prefix: "Config",
       });
@@ -290,6 +343,14 @@ export class ConfigLoaderService {
       const collections = getCollectionsFromProject(projectConfig);
       if (collections.length > 0) {
         appwriteConfig.collections = collections;
+      }
+
+      // Normalize function paths
+      const configDir = path.dirname(jsonPath);
+      if (appwriteConfig.functions) {
+        appwriteConfig.functions = appwriteConfig.functions.map(func =>
+          this.normalizeFunctionPath(func, configDir)
+        );
       }
 
       MessageFormatter.success(`Loaded project config from: ${jsonPath}`, {

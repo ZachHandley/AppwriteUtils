@@ -289,7 +289,7 @@ export class ImportController {
           "currentOperations",
           importOperationId
         );
-        const adapter = new LegacyAdapter(this.database);
+        const adapter = new LegacyAdapter(this.database.client);
         await updateOperation(adapter, db.$id, importOperation.$id, {
           status: "in_progress",
         });
@@ -349,7 +349,7 @@ export class ImportController {
           await Promise.all(batchPromises);
           MessageFormatter.success(`Completed batch ${i + 1} of ${dataSplit.length}`, { prefix: "Import" });
           if (importOperation) {
-            const adapter = new LegacyAdapter(this.database);
+            const adapter = new LegacyAdapter(this.database.client);
             await updateOperation(adapter, db.$id, importOperation.$id, {
               progress: processedItems,
             });
@@ -357,7 +357,7 @@ export class ImportController {
         }
         // After all batches are processed, update the operation status to completed
         if (importOperation) {
-          const adapter = new LegacyAdapter(this.database);
+          const adapter = new LegacyAdapter(this.database.client);
           await updateOperation(adapter, db.$id, importOperation.$id, {
             status: "completed",
           });

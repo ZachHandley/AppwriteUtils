@@ -6,7 +6,7 @@
  * and returns Models.Row instead of Models.Document.
  */
 
-import { Query } from "node-appwrite";
+import { IndexType, Query, RelationshipType, type Models } from "node-appwrite";
 import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
@@ -33,23 +33,28 @@ import {
   type AdapterMetadata,
   AdapterError
 } from './DatabaseAdapter.js';
+import { TablesDB, Client } from "node-appwrite";
 
 /**
  * TablesDBAdapter implementation for native TablesDB API
  */
 export class TablesDBAdapter extends BaseAdapter {
-  private tablesDB: any;
+  private tablesDB: TablesDB;
   
-  constructor(client: any) {
+  constructor(client: Client) {
     super(client, 'tablesdb');
     // Assuming TablesDB service is available on the client
-    this.tablesDB = client.tablesDB || client;
+    this.tablesDB = new TablesDB(client);
   }
   
   // Row (Document) Operations
   async listRows(params: ListRowsParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.listRows(params);
+      const result = await this.tablesDB.listRows({
+        tableId: params.tableId,
+        databaseId: params.databaseId,
+        queries: params.queries || [],
+      });
       return {
         data: result.rows,
         rows: result.rows,
@@ -270,7 +275,7 @@ export class TablesDBAdapter extends BaseAdapter {
         params.databaseId,
         params.tableId,
         params.key,
-        params.type,
+        params.type as IndexType,
         params.attributes,
         params.orders || []
       );
@@ -305,6 +310,7 @@ export class TablesDBAdapter extends BaseAdapter {
   async createAttribute(params: CreateAttributeParams): Promise<ApiResponse> {
     try {
       // TablesDB exposes type-specific column methods
+      // TablesDB uses type-specific column methods
       let result;
       const type = (params.type || "").toLowerCase();
       const required = params.required ?? false;
@@ -327,11 +333,11 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            size: typeof params.size === "number" ? params.size : 255,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array,
-            encrypt
+            size: params.size || 255,
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false,
+            encrypt: params.encrypt ?? false
           });
           break;
 
@@ -340,11 +346,11 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
+            required: params.required ?? false,
             min: params.min,
             max: params.max,
-            xdefault: required ? undefined : numberDefault,
-            array
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -354,11 +360,11 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
+            required: params.required ?? false,
             min: params.min,
             max: params.max,
-            xdefault: required ? undefined : numberDefault,
-            array
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -367,9 +373,9 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : booleanDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -378,9 +384,9 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -389,9 +395,9 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -401,9 +407,9 @@ export class TablesDBAdapter extends BaseAdapter {
             tableId: params.tableId,
             key: params.key,
             elements: params.elements || [],
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -412,9 +418,9 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -423,9 +429,9 @@ export class TablesDBAdapter extends BaseAdapter {
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            array
+            required: params.required ?? false,
+            xdefault: params.default,
+            array: params.array ?? false
           });
           break;
 
@@ -433,12 +439,12 @@ export class TablesDBAdapter extends BaseAdapter {
           result = await this.tablesDB.createRelationshipColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
-            relatedTableId: params.relatedCollection || params.relatedTableId || "",
-            type: params.relationType || "oneToOne",
-            twoWay: params.twoWay ?? false,
             key: params.key,
+            relatedTableId: params.relatedCollection || '',
+            type: (params.type || 'oneToOne') as RelationshipType,
+            twoWay: params.twoWay ?? false,
             twoWayKey: params.twoWayKey,
-            onDelete: params.onDelete
+            onDelete: params.onDelete || 'restrict'
           });
           break;
 
@@ -461,121 +467,143 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse> {
     try {
-      const type = (params.type || "").toLowerCase();
-      const required = params.required ?? false;
-      const normalizedDefault =
-        params.default === null || params.default === undefined
-          ? undefined
-          : params.default;
-      const numberDefault =
-        typeof normalizedDefault === "number" ? normalizedDefault : undefined;
-      const stringDefault =
-        typeof normalizedDefault === "string" ? normalizedDefault : undefined;
-      const booleanDefault =
-        typeof normalizedDefault === "boolean" ? normalizedDefault : undefined;
+      // TablesDB uses type-specific update methods with object notation
+      // We need to detect the existing column type to use the correct update method
+      // For now, we'll need to get the column info first, then use the appropriate update method
+
+      // Get the current table schema to determine the column type
+      const tableInfo = await this.tablesDB.getTable(params.databaseId, params.tableId);
+
+      // Find the column to determine its type
+      const column = tableInfo.columns?.find(col => col.key === params.key);
+      if (!column) {
+        throw new AdapterError(
+          `Column '${params.key}' not found in table`,
+          'COLUMN_NOT_FOUND'
+        );
+      }
+
       let result;
 
-      switch (type) {
+      // Use the appropriate updateXColumn method based on the column type
+      // Cast column to proper Models type to access its specific properties
+      const columnType = (column as any).type;
+
+      switch (columnType) {
         case 'string':
+          const stringColumn = column as Models.ColumnString;
           result = await this.tablesDB.updateStringColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault,
-            size: params.size
+            required: params.required !== undefined ? params.required : stringColumn.required,
+            xdefault: params.default !== undefined ? params.default : stringColumn.default
           });
           break;
+
         case 'integer':
+          const integerColumn = column as Models.ColumnInteger;
           result = await this.tablesDB.updateIntegerColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : numberDefault,
-            min: params.min,
-            max: params.max
+            required: params.required !== undefined ? params.required : integerColumn.required,
+            xdefault: params.default !== undefined ? params.default : integerColumn.default
           });
           break;
+
         case 'float':
         case 'double':
+          const floatColumn = column as Models.ColumnFloat;
           result = await this.tablesDB.updateFloatColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : numberDefault,
-            min: params.min,
-            max: params.max
+            required: params.required !== undefined ? params.required : floatColumn.required,
+            xdefault: params.default !== undefined ? params.default : floatColumn.default
           });
           break;
+
         case 'boolean':
+          const booleanColumn = column as Models.ColumnBoolean;
           result = await this.tablesDB.updateBooleanColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : booleanDefault
+            required: params.required !== undefined ? params.required : booleanColumn.required,
+            xdefault: params.default !== undefined ? params.default : booleanColumn.default
           });
           break;
+
         case 'datetime':
+          const datetimeColumn = column as Models.ColumnDatetime;
           result = await this.tablesDB.updateDatetimeColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault
+            required: params.required !== undefined ? params.required : datetimeColumn.required,
+            xdefault: params.default !== undefined ? params.default : datetimeColumn.default
           });
           break;
+
         case 'email':
+          const emailColumn = column as Models.ColumnEmail;
           result = await this.tablesDB.updateEmailColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault
+            required: params.required !== undefined ? params.required : emailColumn.required,
+            xdefault: params.default !== undefined ? params.default : emailColumn.default
           });
           break;
+
         case 'enum':
+          const enumColumn = column as Models.ColumnEnum;
           result = await this.tablesDB.updateEnumColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            elements: params.elements || [],
-            required,
-            xdefault: required ? undefined : stringDefault
+            required: params.required !== undefined ? params.required : enumColumn.required,
+            xdefault: params.default !== undefined ? params.default : enumColumn.default,
+            elements: enumColumn.elements
           });
           break;
+
         case 'ip':
+          const ipColumn = column as Models.ColumnIp;
           result = await this.tablesDB.updateIpColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault
+            required: params.required !== undefined ? params.required : ipColumn.required,
+            xdefault: params.default !== undefined ? params.default : ipColumn.default
           });
           break;
+
         case 'url':
+          const urlColumn = column as Models.ColumnUrl;
           result = await this.tablesDB.updateUrlColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
             key: params.key,
-            required,
-            xdefault: required ? undefined : stringDefault
+            required: params.required !== undefined ? params.required : urlColumn.required,
+            xdefault: params.default !== undefined ? params.default : urlColumn.default
           });
           break;
+
         case 'relationship':
+          const relationshipColumn = column as Models.ColumnRelationship;
           result = await this.tablesDB.updateRelationshipColumn({
             databaseId: params.databaseId,
             tableId: params.tableId,
-            key: params.key,
-            onDelete: params.onDelete
+            key: params.key
           });
           break;
+
         default:
           throw new AdapterError(
-            `Unsupported attribute type for update: ${params.type}`,
-            'UNSUPPORTED_ATTRIBUTE_TYPE'
+            `Unsupported column type for update: ${columnType}`,
+            'UNSUPPORTED_COLUMN_TYPE'
           );
       }
 
@@ -591,11 +619,11 @@ export class TablesDBAdapter extends BaseAdapter {
 
   async deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.deleteColumn(
-        params.databaseId,
-        params.tableId,
-        params.key
-      );
+      const result = await this.tablesDB.deleteColumn({
+        databaseId: params.databaseId,
+        tableId: params.tableId,
+        key: params.key
+      });
       return { data: result };
     } catch (error) {
       throw new AdapterError(
@@ -609,7 +637,7 @@ export class TablesDBAdapter extends BaseAdapter {
   // Bulk Operations (Native TablesDB Support)
   async bulkCreateRows(params: BulkCreateRowsParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.bulkCreateRows(params);
+      const result = await this.tablesDB.createRows(params);
       return {
         data: result.rows,
         rows: result.rows,
@@ -626,7 +654,7 @@ export class TablesDBAdapter extends BaseAdapter {
   
   async bulkUpsertRows(params: BulkUpsertRowsParams): Promise<ApiResponse> {
     try {
-      const result = await this.tablesDB.bulkUpsertRows(params);
+      const result = await this.tablesDB.upsertRows(params);
       return {
         data: result.rows,
         rows: result.rows,
@@ -705,63 +733,21 @@ async bulkDeleteRows(params: BulkDeleteRowsParams): Promise<ApiResponse> {
    * Execute a transaction (if supported by TablesDB)
    */
   async executeTransaction(operations: Array<() => Promise<any>>): Promise<ApiResponse> {
-    if (!this.tablesDB.transaction) {
-      throw new AdapterError(
-        'Transactions are not supported in this TablesDB version',
-        'TRANSACTIONS_NOT_SUPPORTED'
-      );
-    }
-    
     try {
-      const result = await this.tablesDB.transaction(operations);
+      // Create a new transaction first
+      const transaction = await this.tablesDB.createTransaction();
+
+      // Add operations to the transaction
+      const result = await this.tablesDB.createOperations({
+        transactionId: transaction.$id,
+        operations: operations.map(op => ({ operation: 'execute', fn: op }))
+      });
+
       return { data: result };
     } catch (error) {
       throw new AdapterError(
         `Transaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         'TRANSACTION_FAILED',
-        error instanceof Error ? error : undefined
-      );
-    }
-  }
-  
-  /**
-   * Subscribe to real-time updates (if supported)
-   */
-  subscribeToTable(params: { databaseId: string; tableId: string }, callback: (data: any) => void): () => void {
-    if (!this.tablesDB.subscribe) {
-      throw new AdapterError(
-        'Real-time subscriptions are not supported',
-        'REALTIME_NOT_SUPPORTED'
-      );
-    }
-    
-    try {
-      return this.tablesDB.subscribe(`databases.${params.databaseId}.tables.${params.tableId}.rows`, callback);
-    } catch (error) {
-      throw new AdapterError(
-        `Failed to subscribe to table: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'SUBSCRIPTION_FAILED',
-        error instanceof Error ? error : undefined
-      );
-    }
-  }
-  
-  /**
-   * Get table statistics (if available in TablesDB)
-   */
-  async getTableStats(params: GetTableParams): Promise<ApiResponse> {
-    try {
-      if (!this.tablesDB.getTableStats) {
-        // Fallback to basic table info
-        return this.getTable(params);
-      }
-      
-      const result = await this.tablesDB.getTableStats(params);
-      return { data: result };
-    } catch (error) {
-      throw new AdapterError(
-        `Failed to get table stats: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'GET_TABLE_STATS_FAILED',
         error instanceof Error ? error : undefined
       );
     }

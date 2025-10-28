@@ -159,14 +159,14 @@ async function performEnhancedSync(
           bucketSelections
         );
 
-        const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary);
+        const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary, 'pull');
         if (!confirmed) {
-          MessageFormatter.info("Sync operation cancelled by user", { prefix: "Sync" });
+          MessageFormatter.info("Pull operation cancelled by user", { prefix: "Sync" });
           return null;
         }
 
-        // Perform sync with existing configuration
-        await controller.selectiveSync(databaseSelections, bucketSelections);
+        // Perform sync with existing configuration (pull from remote)
+        await controller.selectivePull(databaseSelections, bucketSelections);
         return selectionSummary;
       }
     }
@@ -285,14 +285,14 @@ async function performEnhancedSync(
       bucketSelections
     );
 
-    const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary);
+    const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary, 'pull');
     if (!confirmed) {
-      MessageFormatter.info("Sync operation cancelled by user", { prefix: "Sync" });
+      MessageFormatter.info("Pull operation cancelled by user", { prefix: "Sync" });
       return null;
     }
 
-    // Perform the selective sync
-    await controller.selectiveSync(databaseSelections, bucketSelections);
+    // Perform the selective sync (pull from remote)
+    await controller.selectivePull(databaseSelections, bucketSelections);
 
     MessageFormatter.success("Enhanced sync completed successfully", { prefix: "Sync" });
     return selectionSummary;

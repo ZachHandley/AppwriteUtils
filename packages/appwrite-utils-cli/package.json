@@ -1,7 +1,7 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "1.7.8",
+  "version": "1.8.0",
   "main": "src/main.ts",
   "type": "module",
   "repository": {
@@ -24,7 +24,9 @@
     "appwrite-migrate": "./dist/main.js"
   },
   "scripts": {
-    "build": "bun run tsc",
+    "build": "bun run tsc && bun run copy-templates",
+    "prebuild": "rm -rf dist",
+    "copy-templates": "tsx scripts/copy-templates.ts",
     "start": "tsx --no-cache src/main.ts",
     "deploy": "bun run build && npm publish --access public",
     "test": "jest",
@@ -41,6 +43,7 @@
     "chalk": "^5.4.1",
     "cli-progress": "^3.12.0",
     "commander": "^12.1.0",
+    "decimal.js": "^10.6.0",
     "es-toolkit": "^1.39.4",
     "ignore": "^6.0.2",
     "inquirer": "^9.3.7",
