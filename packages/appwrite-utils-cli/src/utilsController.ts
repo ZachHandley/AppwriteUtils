@@ -858,6 +858,15 @@ export class UtilsController {
       return;
     }
 
+    // Always reload config from disk so pushes use current local YAML/Ts definitions
+    try {
+      await this.reloadConfig();
+      MessageFormatter.info("Reloaded config from disk for push", { prefix: "Controller" });
+    } catch (e) {
+      // Non-fatal; continue with existing config
+      MessageFormatter.warning("Could not reload config; continuing with current in-memory config", { prefix: "Controller" });
+    }
+
     MessageFormatter.progress("Starting selective push (local config → Appwrite)...", { prefix: "Controller" });
 
     // Convert database selections to Models.Database format
@@ -915,7 +924,8 @@ export class UtilsController {
         // Check if this collection was selected for THIS database
         if (dbSelection.tableIds.includes(collectionId)) {
           collectionsForDatabase.push(collection);
-          MessageFormatter.info(`  - Selected collection: ${collection.name || collectionId} for database ${dbSelection.databaseId}`, { prefix: "Controller" });
+          const source = (collection as any)._isFromTablesDir ? 'tables/' : 'collections/';
+          MessageFormatter.info(`  - Selected collection: ${collection.name || collectionId} for database ${dbSelection.databaseId} [source: ${source}]`, { prefix: "Controller" });
         }
       }
 

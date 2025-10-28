@@ -319,11 +319,18 @@ export const createOrUpdateCollectionsViaAdapter = async (
       const minus = plan.toRecreate.map((r: any) => (r.newAttribute as any).key);
       const skip = plan.unchanged;
 
+      // Compute deletions (remote extras not present locally)
+      const desiredKeysForDelete = new Set((attributes || []).map((a: any) => a.key));
+      const extraRemoteKeys = (existingCols || [])
+        .map((c: any) => c?.key)
+        .filter((k: any): k is string => !!k && !desiredKeysForDelete.has(k));
+
       const parts: string[] = [];
       if (plus.length) parts.push(`➕  ${plus.length} (${plus.join(', ')})`);
       if (plusminus.length) parts.push(`🔧  ${plusminus.length} (${plusminus.join(', ')})`);
       if (minus.length) parts.push(`♻️  ${minus.length} (${minus.join(', ')})`);
       if (skip.length) parts.push(`⏭️  ${skip.length}`);
+      parts.push(`🗑️  ${extraRemoteKeys.length}${extraRemoteKeys.length ? ` (${extraRemoteKeys.join(', ')})` : ''}`);
       MessageFormatter.info(`Plan → ${parts.join('  |  ') || 'no changes'}`, { prefix: 'Attributes' });
 
       // Execute
@@ -509,6 +516,113 @@ export const createOrUpdateCollectionsViaAdapter = async (
       MessageFormatter.info(`Summary → ➕  ${created.length}  |  🔧  ${updated.length}  |  ⏭️  ${skipped.length}` , { prefix: 'Indexes' });
     } catch (e) {
       MessageFormatter.error(`Failed to list/create indexes`, e instanceof Error ? e : new Error(String(e)), { prefix: 'Indexes' });
+    }
+
+    // Deletions for indexes: remove remote indexes not declared in YAML/config
+    try {
+      const desiredIndexKeys = new Set((indexes || []).map((i: any) => i.key));
+      const idxRes = await adapter.listIndexes({ databaseId, tableId });
+      const existingIdx: any[] = (idxRes as any).data || (idxRes as any).indexes || [];
+      const extraIdx = existingIdx
+        .filter((i: any) => i?.key && !desiredIndexKeys.has(i.key))
+        .map((i: any) => i.key as string);
+      if (extraIdx.length > 0) {
+        MessageFormatter.info(`Plan → 🗑️  ${extraIdx.length} indexes (${extraIdx.join(', ')})`, { prefix: 'Indexes' });
+        const deleted: string[] = [];
+        const errors: Array<{ key: string; error: string }> = [];
+        for (const key of extraIdx) {
+          try {
+            await adapter.deleteIndex({ databaseId, tableId, key });
+            // Optionally wait for index to disappear
+            const start = Date.now();
+            const maxWait = 30000;
+            while (Date.now() - start < maxWait) {
+              try {
+                const li = await adapter.listIndexes({ databaseId, tableId });
+                const list: any[] = (li as any).data || (li as any).indexes || [];
+                if (!list.find((ix: any) => ix.key === key)) break;
+              } catch {}
+              await delay(1000);
+            }
+            deleted.push(key);
+          } catch (e: any) {
+            errors.push({ key, error: e?.message || String(e) });
+          }
+        }
+        if (deleted.length) {
+          MessageFormatter.success(`Deleted ${deleted.length} indexes: ${deleted.join(', ')}`, { prefix: 'Indexes' });
+        }
+        if (errors.length) {
+          MessageFormatter.error(`${errors.length} index deletions failed`, undefined, { prefix: 'Indexes' });
+          errors.forEach(er => MessageFormatter.error(`  ${er.key}: ${er.error}`, undefined, { prefix: 'Indexes' }));
+        }
+      } else {
+        MessageFormatter.info(`Plan → 🗑️  0 indexes`, { prefix: 'Indexes' });
+      }
+    } catch (e) {
+      MessageFormatter.warning(`Could not evaluate index deletions: ${(e as Error)?.message || e}`, { prefix: 'Indexes' });
+    }
+
+    // Deletions: remove columns/attributes that are present remotely but not in desired config
+    try {
+      const desiredKeys = new Set((attributes || []).map((a: any) => a.key));
+      const tableInfo3 = await adapter.getTable({ databaseId, tableId });
+      const existingCols3: any[] = (tableInfo3 as any).data?.columns || (tableInfo3 as any).data?.attributes || [];
+      const toDelete = existingCols3
+        .filter((col: any) => col?.key && !desiredKeys.has(col.key))
+        .map((col: any) => col.key as string);
+
+      if (toDelete.length > 0) {
+        MessageFormatter.info(`Plan → 🗑️  ${toDelete.length} (${toDelete.join(', ')})`, { prefix: 'Attributes' });
+        const deleted: string[] = [];
+        const errors: Array<{ key: string; error: string }> = [];
+        for (const key of toDelete) {
+          try {
+            // Drop any indexes that reference this attribute to avoid server errors
+            try {
+              const idxRes = await adapter.listIndexes({ databaseId, tableId });
+              const ilist: any[] = (idxRes as any).data || (idxRes as any).indexes || [];
+              for (const idx of ilist) {
+                const attrs: string[] = Array.isArray(idx.attributes) ? idx.attributes : [];
+                if (attrs.includes(key)) {
+                  MessageFormatter.info(`🗑️  Deleting index '${idx.key}' referencing '${key}'`, { prefix: 'Indexes' });
+                  await adapter.deleteIndex({ databaseId, tableId, key: idx.key });
+                  await delay(500);
+                }
+              }
+            } catch {}
+
+            await adapter.deleteAttribute({ databaseId, tableId, key });
+            // Wait briefly for deletion to settle
+            const start = Date.now();
+            const maxWaitMs = 60000;
+            while (Date.now() - start < maxWaitMs) {
+              try {
+                const tinfo = await adapter.getTable({ databaseId, tableId });
+                const cols = (tinfo as any).data?.columns || (tinfo as any).data?.attributes || [];
+                const found = cols.find((c: any) => c.key === key);
+                if (!found) break;
+                if (found.status && found.status !== 'deleting') break;
+              } catch {}
+              await delay(1000);
+            }
+            deleted.push(key);
+          } catch (e: any) {
+            errors.push({ key, error: e?.message || String(e) });
+          }
+        }
+        if (deleted.length) {
+          MessageFormatter.success(`Deleted ${deleted.length} attributes: ${deleted.join(', ')}`, { prefix: 'Attributes' });
+        }
+        if (errors.length) {
+          MessageFormatter.error(`${errors.length} deletions failed`, undefined, { prefix: 'Attributes' });
+          errors.forEach(er => MessageFormatter.error(`  ${er.key}: ${er.error}`, undefined, { prefix: 'Attributes' }));
+        }
+      } else {
+        MessageFormatter.info(`Plan → 🗑️  0`, { prefix: 'Attributes' });
+      }
+    } catch (e) {
+      MessageFormatter.warning(`Could not evaluate deletions: ${(e as Error)?.message || e}`, { prefix: 'Attributes' });
     }
 
     // Mark this table as fully processed to prevent re-processing
