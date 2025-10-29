@@ -1398,6 +1398,7 @@ async function main() {
       // Build DatabaseSelection[] with tableIds per DB
       const databaseSelections: DatabaseSelection[] = [];
       const allConfigItems = controller.config.collections || controller.config.tables || [];
+      let lastSelectedTableIds: string[] | null = null;
 
       for (const dbId of selectedDbIds) {
         const db = availableDatabases.find(d => d.$id === dbId);
@@ -1418,18 +1419,54 @@ async function main() {
         // Determine selected table IDs
         let selectedTableIds: string[] = [];
         if (parsedArgv.collectionIds) {
-          const ids = parsedArgv.collectionIds.split(/[,\s]+/).filter(Boolean);
-          // Only allow IDs that are in eligible config items
-          const eligibleIds = new Set(eligibleConfigItems.map((c: any) => c.$id || c.id));
-          selectedTableIds = ids.filter(id => eligibleIds.has(id));
+          // Non-interactive: respect provided table IDs as-is (apply to each selected DB)
+          selectedTableIds = parsedArgv.collectionIds.split(/[\,\s]+/).filter(Boolean);
         } else {
-          selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
-            dbId,
-            db.name,
-            availableTables,
-            eligibleConfigItems,
-            { showSelectAll: false, allowNewOnly: true, defaultSelected: [] }
-          );
+          // If we have a previous selection, offer to reuse it
+          if (lastSelectedTableIds && lastSelectedTableIds.length > 0) {
+            const inquirer = (await import("inquirer")).default;
+            const { reuseMode } = await inquirer.prompt([
+              {
+                type: "list",
+                name: "reuseMode",
+                message: `How do you want to select tables for ${db.name}?`,
+                choices: [
+                  { name: `Use same selection as previous (${lastSelectedTableIds.length} items)`, value: "same" },
+                  { name: `Filter by this database (manual select)`, value: "filter" },
+                  { name: `Show all available in this database (manual select)`, value: "all" }
+                ],
+                default: "same"
+              }
+            ]);
+
+            if (reuseMode === "same") {
+              selectedTableIds = [...lastSelectedTableIds];
+            } else if (reuseMode === "all") {
+              selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+                dbId,
+                db.name,
+                availableTables,
+                allConfigItems as any[],
+                { showSelectAll: false, allowNewOnly: false, defaultSelected: lastSelectedTableIds }
+              );
+            } else {
+              selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+                dbId,
+                db.name,
+                availableTables,
+                eligibleConfigItems,
+                { showSelectAll: false, allowNewOnly: true, defaultSelected: lastSelectedTableIds }
+              );
+            }
+          } else {
+            selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+              dbId,
+              db.name,
+              availableTables,
+              eligibleConfigItems,
+              { showSelectAll: false, allowNewOnly: true, defaultSelected: [] }
+            );
+          }
         }
 
         databaseSelections.push({
@@ -1439,6 +1476,9 @@ async function main() {
           tableNames: [],
           isNew: false,
         });
+        if (!parsedArgv.collectionIds) {
+          lastSelectedTableIds = selectedTableIds;
+        }
       }
 
       if (databaseSelections.every(sel => sel.tableIds.length === 0)) {
@@ -1451,10 +1491,13 @@ async function main() {
         collections: databaseSelections.reduce((sum, s) => sum + s.tableIds.length, 0),
         details: databaseSelections.map(s => `${s.databaseId}: ${s.tableIds.length} items`),
       };
-      const confirmed = await ConfirmationDialogs.showOperationSummary('Push', pushSummary, { confirmationRequired: true });
-      if (!confirmed) {
-        MessageFormatter.info("Push operation cancelled", { prefix: "Push" });
-        return;
+      // Skip confirmation if both dbIds and collectionIds are provided (non-interactive)
+      if (!(parsedArgv.dbIds && parsedArgv.collectionIds)) {
+        const confirmed = await ConfirmationDialogs.showOperationSummary('Push', pushSummary, { confirmationRequired: true });
+        if (!confirmed) {
+          MessageFormatter.info("Push operation cancelled", { prefix: "Push" });
+          return;
+        }
       }
 
       await controller.selectivePush(databaseSelections, []);

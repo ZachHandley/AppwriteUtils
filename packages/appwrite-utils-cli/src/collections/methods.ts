@@ -238,8 +238,8 @@ export const createOrUpdateCollectionsViaAdapter = async (
   for (const collection of collectionsToProcess) {
     const { attributes, indexes, ...collectionData } = collection as any;
 
-    // Check if this table has already been processed in this session
-    if (collectionData.$id && isCollectionProcessed(collectionData.$id)) {
+    // Check if this table has already been processed in this session (per database)
+    if (collectionData.$id && isCollectionProcessed(collectionData.$id, databaseId)) {
       MessageFormatter.info(`Table '${collectionData.name}' already processed, skipping`, { prefix: "Tables" });
       continue;
     }
@@ -262,11 +262,35 @@ export const createOrUpdateCollectionsViaAdapter = async (
       }
     }
 
-    // Find existing table by name
-    const list = await adapter.listTables({ databaseId, queries: [Query.equal('name', collectionData.name)] });
-    const items: any[] = (list as any).tables || [];
-    let table = items[0];
+    // Find existing table — prefer lookup by ID (if provided), then by name
+    let table: any | undefined;
     let tableId: string;
+
+    // 1) Try by explicit $id first (handles rename scenarios)
+    if (collectionData.$id) {
+      try {
+        const byId = await adapter.getTable({ databaseId, tableId: collectionData.$id });
+        table = (byId as any).data || (byId as any).tables?.[0];
+        if (table?.$id) {
+          MessageFormatter.info(`Found existing table by ID: ${table.$id}`, { prefix: 'Tables' });
+        }
+      } catch {
+        // Not found by ID; fall back to name lookup
+      }
+    }
+
+    // 2) If not found by ID, try by name
+    if (!table) {
+      const list = await adapter.listTables({ databaseId, queries: [Query.equal('name', collectionData.name)] });
+      const items: any[] = (list as any).tables || [];
+      table = items[0];
+      if (table?.$id) {
+        // If local has $id that differs from remote, prefer remote (IDs are immutable)
+        if (collectionData.$id && collectionData.$id !== table.$id) {
+          MessageFormatter.warning(`Config $id '${collectionData.$id}' differs from existing table ID '${table.$id}'. Using existing table.`, { prefix: 'Tables' });
+        }
+      }
+    }
 
     if (!table) {
       // Determine ID (prefer provided $id or re-use deleted one)
@@ -625,8 +649,8 @@ export const createOrUpdateCollectionsViaAdapter = async (
       MessageFormatter.warning(`Could not evaluate deletions: ${(e as Error)?.message || e}`, { prefix: 'Attributes' });
     }
 
-    // Mark this table as fully processed to prevent re-processing
-    markCollectionProcessed(tableId, collectionData.name);
+    // Mark this table as fully processed for this database to prevent re-processing in the same DB only
+    markCollectionProcessed(tableId, collectionData.name, databaseId);
   }
 
   // Process queued relationships once mapping likely populated

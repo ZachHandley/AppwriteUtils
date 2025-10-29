@@ -1835,7 +1835,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   // Filter to only attributes that need processing (new, changed, or not yet processed)
   const attributesToProcess = attributes.filter((attribute) => {
     // Skip if already processed in this session
-    if (isAttributeProcessed(currentCollection.$id, attribute.key)) {
+    if (isAttributeProcessed(dbId, currentCollection.$id, attribute.key)) {
       return false;
     }
 
@@ -1879,7 +1879,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
 
       if (success) {
         // Mark this specific attribute as processed
-        markAttributeProcessed(currentCollection.$id, attribute.key);
+        markAttributeProcessed(dbId, currentCollection.$id, attribute.key);
 
         // Get updated collection data for next iteration
         try {

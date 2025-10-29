@@ -76,6 +76,7 @@ enum CHOICES {
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
   private isUsingTypeScriptConfig: boolean = false;
+  private lastSelectedCollectionIds: string[] = [];
 
   constructor(private currentDir: string) {}
 
@@ -481,25 +482,45 @@ export class InteractiveCLI {
     // Show current database context clearly before view mode selection
     MessageFormatter.info(`DB: ${database.name}`, { prefix: "Collections" });
 
-    // Ask user if they want to filter by database or show all
+    // Ask user if they want to filter by database, show all, or reuse previous selection
+    const choices: { name: string; value: string }[] = [
+      {
+        name: `Show all available collections/tables (${totalCount} total) - You can push any collection to any database`,
+        value: "all"
+      },
+      {
+        name: `Filter by database "${database.name}" - Show only related collections/tables`,
+        value: "filter"
+      }
+    ];
+    if (this.lastSelectedCollectionIds && this.lastSelectedCollectionIds.length > 0) {
+      choices.unshift({
+        name: `Use same selection as before (${this.lastSelectedCollectionIds.length} items)`,
+        value: "same"
+      });
+    }
+
     const { filterChoice } = await inquirer.prompt([
       {
         type: "list",
         name: "filterChoice",
         message: chalk.blue("How would you like to view collections/tables?"),
-        choices: [
-          {
-            name: `Show all available collections/tables (${totalCount} total) - You can push any collection to any database`,
-            value: "all"
-          },
-          {
-            name: `Filter by database "${database.name}" - Show only related collections/tables`,
-            value: "filter"
-          }
-        ],
-        default: "all"
+        choices,
+        default: choices[0]?.value || "all"
       }
     ]);
+
+    // If user wants to reuse the previous selection, map IDs to current config and return
+    if (filterChoice === "same") {
+      const map = new Map<string, Models.Collection>(
+        this.getLocalCollections().map((c: any) => [c.$id || c.id, c as Models.Collection])
+      );
+      const selected = this.lastSelectedCollectionIds
+        .map((id) => map.get(id))
+        .filter((c): c is Models.Collection => !!c);
+      MessageFormatter.info(`Using same selection as previous: ${selected.length} item(s)`, { prefix: "Collections" });
+      return selected;
+    }
 
     // User's choice overrides the parameter
     const userWantsFiltering = filterChoice === "filter";
@@ -519,7 +540,17 @@ export class InteractiveCLI {
       MessageFormatter.info(`ℹ️  Showing all available collections/tables - you can push any collection to any database\n`, { prefix: "Collections" });
     }
 
-    return this.selectCollections(database, databasesClient, message, multiSelect, preferLocal, userWantsFiltering);
+    const result = await this.selectCollections(
+      database,
+      databasesClient,
+      message,
+      multiSelect,
+      preferLocal,
+      userWantsFiltering
+    );
+    // Remember this selection for subsequent databases
+    this.lastSelectedCollectionIds = (result || []).map((c: any) => c.$id || c.id);
+    return result;
   }
 
   private getTemplateDefaults(template: string) {

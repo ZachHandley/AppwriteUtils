@@ -18,8 +18,15 @@ export interface QueuedOperation {
 // Global state management
 export const queuedOperations: QueuedOperation[] = [];
 export const nameToIdMapping: Map<string, string> = new Map();
+// Keys are scoped per database to avoid cross-database collisions
+// Collections key format: `${databaseId}::${collectionId}`
+// Attributes key format: `${databaseId}::${collectionId}::${attributeKey}`
 export const processedCollections: Set<string> = new Set();
-export const processedAttributes: Set<string> = new Set(); // format: "collectionId:attributeKey"
+export const processedAttributes: Set<string> = new Set();
+
+// Helpers to build scoped keys
+const collectionKey = (databaseId: string, collectionId: string) => `${databaseId}::${collectionId}`;
+const attributeKeyScoped = (databaseId: string, collectionId: string, key: string) => `${databaseId}::${collectionId}::${key}`;
 
 export const enqueueOperation = (operation: QueuedOperation) => {
   // Avoid duplicate queue entries for same attribute
@@ -86,17 +93,18 @@ export const clearProcessingState = () => {
 /**
  * Check if a collection has already been fully processed
  */
-export const isCollectionProcessed = (collectionId: string): boolean => {
-  return processedCollections.has(collectionId);
+export const isCollectionProcessed = (collectionId: string, databaseId: string): boolean => {
+  return processedCollections.has(collectionKey(databaseId, collectionId));
 };
 
 /**
  * Mark a collection as fully processed
  */
-export const markCollectionProcessed = (collectionId: string, collectionName?: string) => {
-  processedCollections.add(collectionId);
+export const markCollectionProcessed = (collectionId: string, collectionName: string | undefined, databaseId: string) => {
+  processedCollections.add(collectionKey(databaseId, collectionId));
 
   const logData = {
+    databaseId,
     collectionId,
     collectionName,
     totalProcessedCollections: processedCollections.size,
@@ -104,7 +112,7 @@ export const markCollectionProcessed = (collectionId: string, collectionName?: s
   };
 
   if (collectionName) {
-    MessageFormatter.success(`Marked collection '${collectionName}' (${collectionId}) as processed`);
+    MessageFormatter.success(`Marked collection '${collectionName}' (${collectionId}) as processed`, { prefix: 'Tables' });
   }
 
   logger.info('Collection marked as processed', logData);
@@ -113,18 +121,19 @@ export const markCollectionProcessed = (collectionId: string, collectionName?: s
 /**
  * Check if a specific attribute has been processed
  */
-export const isAttributeProcessed = (collectionId: string, attributeKey: string): boolean => {
-  return processedAttributes.has(`${collectionId}:${attributeKey}`);
+export const isAttributeProcessed = (databaseId: string, collectionId: string, attributeKey: string): boolean => {
+  return processedAttributes.has(attributeKeyScoped(databaseId, collectionId, attributeKey));
 };
 
 /**
  * Mark a specific attribute as processed
  */
-export const markAttributeProcessed = (collectionId: string, attributeKey: string) => {
-  const identifier = `${collectionId}:${attributeKey}`;
+export const markAttributeProcessed = (databaseId: string, collectionId: string, attributeKey: string) => {
+  const identifier = attributeKeyScoped(databaseId, collectionId, attributeKey);
   processedAttributes.add(identifier);
 
   logger.debug('Attribute marked as processed', {
+    databaseId,
     collectionId,
     attributeKey,
     identifier,
@@ -193,8 +202,8 @@ export const processQueue = async (db: Databases | DatabaseAdapter, dbId: string
       const attributeKey = operation.attribute.key;
       const collectionId = operation.collectionId;
 
-      // Skip if this specific attribute was already processed
-      if (isAttributeProcessed(collectionId, attributeKey)) {
+      // Skip if this specific attribute was already processed (per database)
+      if (isAttributeProcessed(dbId, collectionId, attributeKey)) {
         MessageFormatter.debug(`Attribute '${attributeKey}' already processed, removing from queue`);
         logger.debug('Removing already processed attribute from queue', {
           attributeKey,
@@ -327,7 +336,7 @@ export const processQueue = async (db: Databases | DatabaseAdapter, dbId: string
             targetCollectionName: targetCollection.name,
             operation: 'processQueue'
           });
-          markAttributeProcessed(collectionId, attributeKey);
+          markAttributeProcessed(dbId, collectionId, attributeKey);
           queuedOperations.splice(i, 1);
           progress = true;
         } else {

@@ -625,6 +625,13 @@ export class UtilsController {
       logger.debug(`Updated config.apiMode from adapter: ${this.config.apiMode}`, { prefix: "UtilsController" });
     }
 
+    // Ensure we don't carry state between databases in a multi-db push
+    // This resets processed sets and name->id mapping per database
+    try {
+      const { clearProcessingState } = await import('./shared/operationQueue.js');
+      clearProcessingState();
+    } catch {}
+
     // Always prefer adapter path for unified behavior. LegacyAdapter internally translates when needed.
     if (this.adapter) {
       logger.debug("Using adapter for createOrUpdateCollections (unified path)", {
