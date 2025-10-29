@@ -138,36 +138,14 @@ export const functionCommands = {
       return;
     }
 
-    // Offer choice of function config sources: central YAML, .fnconfig.yaml, or both
-    let sourceChoice: 'central' | 'fnconfig' | 'both' = 'both';
+    // Discover per-function .fnconfig.yaml definitions and merge with central list for selection
+    // No global prompt; we'll handle conflicts per-function if both exist.
+    let discovered: any[] = [];
+    let central: any[] = (cli as any).controller!.config!.functions || [];
     try {
-      const answer = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'source',
-          message: 'Select function config source:',
-          choices: [
-            { name: 'config.yaml functions (central)', value: 'central' },
-            { name: '.fnconfig.yaml (discovered per-function)', value: 'fnconfig' },
-            { name: 'Both (merge; .fnconfig overrides)', value: 'both' },
-          ],
-          default: 'both'
-        }
-      ]);
-      sourceChoice = answer.source;
-    } catch {}
-
-    try {
-      const discovered = discoverFnConfigs((cli as any).currentDir);
-      const central = (cli as any).controller!.config!.functions || [];
-      if (sourceChoice === 'central') {
-        (cli as any).controller!.config!.functions = central as any;
-      } else if (sourceChoice === 'fnconfig') {
-        (cli as any).controller!.config!.functions = discovered as any;
-      } else {
-        const merged = mergeDiscoveredFunctions(central, discovered);
-        (cli as any).controller!.config!.functions = merged as any;
-      }
+      discovered = discoverFnConfigs((cli as any).currentDir) as any[];
+      const merged = mergeDiscoveredFunctions(central as any, discovered as any);
+      (cli as any).controller!.config!.functions = merged as any;
     } catch {}
 
     const functions = await (cli as any).selectFunctions(
@@ -187,24 +165,51 @@ export const functionCommands = {
         return;
       }
 
+      // Resolve effective config for this function (prefer per-function choice if both sources exist)
+      const byIdOrName = (arr: any[]) => arr.find((f:any) => f?.$id === functionConfig.$id || f?.name === functionConfig.name);
+      const centralDef = byIdOrName(central as any[]);
+      const discoveredDef = byIdOrName(discovered as any[]);
+
+      let effectiveConfig = functionConfig;
+      if (centralDef && discoveredDef) {
+        try {
+          const answer = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'cfgChoice',
+              message: `Multiple configs found for '${functionConfig.name}'. Which to use?`,
+              choices: [
+                { name: 'config.yaml (central)', value: 'central' },
+                { name: '.fnconfig.yaml (local file)', value: 'fnconfig' },
+                { name: 'Merge (.fnconfig overrides central)', value: 'merge' },
+              ],
+              default: 'fnconfig'
+            }
+          ]);
+          if (answer.cfgChoice === 'central') effectiveConfig = centralDef;
+          else if (answer.cfgChoice === 'fnconfig') effectiveConfig = discoveredDef;
+          else effectiveConfig = { ...centralDef, ...discoveredDef };
+        } catch {}
+      }
+
       // Ensure functions array exists
       if (!(cli as any).controller.config.functions) {
         (cli as any).controller.config.functions = [];
       }
 
-      const functionNameLower = functionConfig.name
+      const functionNameLower = effectiveConfig.name
         .toLowerCase()
         .replace(/\s+/g, "-");
 
       // Debug logging
       MessageFormatter.info(`🔍 Function deployment debug:`, { prefix: "Functions" });
-      MessageFormatter.info(`  Function name: ${functionConfig.name}`, { prefix: "Functions" });
-      MessageFormatter.info(`  Function ID: ${functionConfig.$id}`, { prefix: "Functions" });
-      MessageFormatter.info(`  Config dirPath: ${functionConfig.dirPath || 'undefined'}`, { prefix: "Functions" });
-      if (functionConfig.dirPath) {
-        const expandedPath = functionConfig.dirPath.startsWith('~/')
-          ? functionConfig.dirPath.replace('~', os.homedir())
-          : functionConfig.dirPath;
+      MessageFormatter.info(`  Function name: ${effectiveConfig.name}`, { prefix: "Functions" });
+      MessageFormatter.info(`  Function ID: ${effectiveConfig.$id}`, { prefix: "Functions" });
+      MessageFormatter.info(`  Config dirPath: ${effectiveConfig.dirPath || 'undefined'}`, { prefix: "Functions" });
+      if (effectiveConfig.dirPath) {
+        const expandedPath = effectiveConfig.dirPath.startsWith('~/')
+          ? effectiveConfig.dirPath.replace('~', os.homedir())
+          : effectiveConfig.dirPath;
         MessageFormatter.info(`  Expanded dirPath: ${expandedPath}`, { prefix: "Functions" });
       }
       MessageFormatter.info(`  Appwrite folder: ${(cli as any).controller.getAppwriteFolderPath()}`, { prefix: "Functions" });
@@ -218,10 +223,10 @@ export const functionCommands = {
       // Check locations in priority order:
       const priorityLocations = [
         // 1. Config dirPath if specified (with tilde expansion)
-        functionConfig.dirPath
-          ? (require('node:path').isAbsolute(expandTildePath(functionConfig.dirPath))
-              ? expandTildePath(functionConfig.dirPath)
-              : require('node:path').resolve(yamlBaseDir, expandTildePath(functionConfig.dirPath)))
+        effectiveConfig.dirPath
+          ? (require('node:path').isAbsolute(expandTildePath(effectiveConfig.dirPath))
+              ? expandTildePath(effectiveConfig.dirPath)
+              : require('node:path').resolve(yamlBaseDir, expandTildePath(effectiveConfig.dirPath)))
           : undefined,
         // 2. Appwrite config folder/functions/name
         join(
@@ -280,13 +285,13 @@ export const functionCommands = {
             const { path: downloadedPath, function: remoteFunction } =
               await downloadLatestFunctionDeployment(
                 (cli as any).controller.appwriteServer!,
-                functionConfig.$id,
+                effectiveConfig.$id,
                 join((cli as any).controller.getAppwriteFolderPath()!, "functions")
               );
             MessageFormatter.success(`✨ Function downloaded to ${downloadedPath}`, { prefix: "Functions" });
 
             functionPath = downloadedPath;
-            functionConfig.dirPath = downloadedPath;
+            effectiveConfig.dirPath = downloadedPath;
 
             const existingIndex = (cli as any).controller.config.functions.findIndex(
               (f: any) => f?.$id === remoteFunction.$id
@@ -303,7 +308,7 @@ export const functionCommands = {
             return;
           }
         } else {
-          MessageFormatter.error(`Function ${functionConfig.name} not found locally. Cannot deploy.`, undefined, { prefix: "Functions" });
+          MessageFormatter.error(`Function ${effectiveConfig.name} not found locally. Cannot deploy.`, undefined, { prefix: "Functions" });
           return;
         }
       }
@@ -316,9 +321,9 @@ export const functionCommands = {
       try {
         await deployLocalFunction(
           (cli as any).controller.appwriteServer,
-          functionConfig.name,
+          effectiveConfig.name,
           {
-            ...functionConfig,
+            ...effectiveConfig,
             dirPath: functionPath,
           },
           functionPath

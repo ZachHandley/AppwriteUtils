@@ -28,7 +28,7 @@ import {
 import { getDatabaseFromConfig } from "./afterImportActions.js";
 import { getAdapterFromConfig } from "../utils/getClientFromConfig.js";
 import { listBuckets } from "../storage/methods.js";
-import { listFunctions, listFunctionDeployments } from "../functions/methods.js";
+import { listFunctions, listFunctionDeployments, getFunction } from "../functions/methods.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { isLegacyDatabases } from "../utils/typeGuards.js";
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
@@ -574,8 +574,19 @@ export class AppwriteToX {
       Query.limit(1000),
     ]);
 
-    this.updatedConfig.functions = remoteFunctions.functions.map(
-      (func) => ({
+    // Fetch full details per function to ensure 'scopes' and other fields are present
+    const detailedFunctions: any[] = [];
+    for (const f of remoteFunctions.functions) {
+      try {
+        const full = await getFunction(this.config.appwriteClient!, f.$id);
+        detailedFunctions.push(full);
+      } catch {
+        detailedFunctions.push(f);
+      }
+    }
+
+    this.updatedConfig.functions = detailedFunctions.map(
+      (func: any) => ({
         $id: func.$id,
         name: func.name,
         runtime: func.runtime as Runtime,
@@ -587,6 +598,7 @@ export class AppwriteToX {
         logging: func.logging !== false,
         entrypoint: func.entrypoint || "src/index.ts",
         commands: func.commands || "npm install",
+        scopes: Array.isArray(func.scopes) ? func.scopes : [],
         dirPath: `functions/${func.name}`,
         specification: func.specification as Specification,
       })
