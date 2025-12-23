@@ -13,13 +13,12 @@ import type {
   AttributeMappings,
 } from "appwrite-utils";
 import type { ImportDataActions } from "./importDataActions.js";
-import { areCollectionNamesSame, tryAwaitWithRetry } from "../utils/index.js";
+import { areCollectionNamesSame, tryAwaitWithRetry } from "appwrite-utils-helpers";
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
 import { UsersController } from "../users/methods.js";
-import { logger } from "../shared/logging.js";
+import { logger, LegacyAdapter } from "appwrite-utils-helpers";
 import { updateOperation } from "../shared/migrationHelpers.js";
-import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
 import {
   BatchSchema,
   OperationCreateSchema,
@@ -30,7 +29,7 @@ import {
   transferDatabaseLocalToLocal,
   transferStorageLocalToLocal,
 } from "./transfer.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
 import { ProgressManager } from "../shared/progressManager.js";
 
 export class ImportController {

@@ -1,20 +1,20 @@
 import inquirer from "inquirer";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import { migrateConfig } from "../../utils/configMigration.js";
 import {
   validateCollectionsTablesConfig,
   reportValidationResults,
-} from "../../config/configValidation.js";
+  ConfigManager
+} from "appwrite-utils-helpers";
 import {
   createMigrationPlan,
   executeMigrationPlan,
   saveMigrationResult,
   type MigrationStrategy,
-} from "../../config/configMigration.js";
+} from 'appwrite-utils-helpers';
 import { createEmptyCollection } from "../../utils/setupFiles.js";
 import chalk from "chalk";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
-import { ConfigManager } from "../../config/ConfigManager.js";
 import { UtilsController } from "../../utilsController.js";
 
 export const configCommands = {
@@ -56,7 +56,7 @@ export const configCommands = {
         return;
       }
 
-      const { validateCollectionsTablesConfig, reportValidationResults } = await import("../../config/configValidation.js");
+      const { validateCollectionsTablesConfig, reportValidationResults } = await import("appwrite-utils-helpers");
       const validation = validateCollectionsTablesConfig(config);
 
       reportValidationResults(validation, { verbose: true });
@@ -90,7 +90,7 @@ export const configCommands = {
         return;
       }
 
-      const { createMigrationPlan, executeMigrationPlan, saveMigrationResult } = await import("../../config/configMigration.js");
+      const { createMigrationPlan, executeMigrationPlan, saveMigrationResult } = await import("appwrite-utils-helpers");
 
       // Get user's migration strategy preference
       const { strategy } = await inquirer.prompt([

@@ -1,14 +1,16 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
 import { join } from "node:path";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import { Query } from "node-appwrite";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import { ConfirmationDialogs } from "../../shared/confirmationDialogs.js";
 import { SelectionDialogs } from "../../shared/selectionDialogs.js";
 import type { DatabaseSelection, BucketSelection } from "../../shared/selectionDialogs.js";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 import { fetchAllDatabases } from "../../databases/methods.js";
 import { listBuckets } from "../../storage/methods.js";
 import { getFunction, downloadLatestFunctionDeployment } from "../../functions/methods.js";
+import { wipeTableRows } from "../../collections/wipeOperations.js";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
 
 export const databaseCommands = {
@@ -745,5 +747,133 @@ export const databaseCommands = {
       }
     }
     MessageFormatter.success("Wipe collections operation completed", { prefix: "Wipe" });
+  },
+
+  async wipeTablesData(cli: InteractiveCLI): Promise<void> {
+    const controller = (cli as any).controller;
+
+    if (!controller?.adapter) {
+      throw new Error(
+        "Database adapter is not initialized. TablesDB operations require adapter support."
+      );
+    }
+
+    try {
+      // Step 1: Select database (single selection for clearer UX)
+      const databases = await fetchAllDatabases(controller.database);
+
+      if (!databases || databases.length === 0) {
+        MessageFormatter.warning("No databases found", { prefix: "Wipe" });
+        return;
+      }
+
+      const { selectedDatabase } = await inquirer.prompt([
+        {
+          type: "list",
+          name: "selectedDatabase",
+          message: "Select database containing tables to wipe:",
+          choices: databases.map((db: any) => ({
+            name: `${db.name} (${db.$id})`,
+            value: db
+          }))
+        }
+      ]);
+
+      const database = selectedDatabase;
+
+      // Step 2: Get available tables
+      const adapter = controller.adapter;
+      const tablesResponse = await adapter.listTables({
+        databaseId: database.$id,
+        queries: [Query.limit(500)]
+      });
+      const availableTables = (tablesResponse as any).tables || [];
+
+      if (availableTables.length === 0) {
+        MessageFormatter.warning(`No tables found in database: ${database.name}`, { prefix: "Wipe" });
+        return;
+      }
+
+      // Step 3: Select tables using existing SelectionDialogs
+      const selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
+        database.$id,
+        database.name,
+        availableTables,
+        [], // No configured tables context needed for wipe
+        {
+          showSelectAll: true,
+          allowNewOnly: false,
+          defaultSelected: []
+        }
+      );
+
+      if (selectedTableIds.length === 0) {
+        MessageFormatter.warning("No tables selected. Operation cancelled.", { prefix: "Wipe" });
+        return;
+      }
+
+      // Step 4: Show confirmation with table details
+      const selectedTables = availableTables.filter((t: any) =>
+        selectedTableIds.includes(t.$id)
+      );
+      const tableNames = selectedTables.map((t: any) => t.name);
+
+      console.log(chalk.yellow.bold("\n⚠️  WARNING: Table Row Wipe Operation"));
+      console.log(chalk.yellow("This will delete ALL ROWS from the selected tables."));
+      console.log(chalk.yellow("The table structures will remain intact.\n"));
+      console.log(chalk.cyan("Database:"), chalk.white(database.name));
+      console.log(chalk.cyan("Tables to wipe:"));
+      tableNames.forEach((name: string) => console.log(chalk.white(`  • ${name}`)));
+      console.log();
+
+      const { confirmed } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirmed",
+          message: chalk.red.bold("Are you ABSOLUTELY SURE you want to wipe these table rows?"),
+          default: false
+        }
+      ]);
+
+      if (!confirmed) {
+        MessageFormatter.info("Wipe operation cancelled by user", { prefix: "Wipe" });
+        return;
+      }
+
+      // Step 5: Execute wipe using existing wipeTableRows function
+      MessageFormatter.progress("Starting table row wipe operation...", { prefix: "Wipe" });
+
+      for (const table of selectedTables) {
+        try {
+          MessageFormatter.info(`Wiping rows from table: ${table.name}`, { prefix: "Wipe" });
+
+          // Use existing wipeTableRows from wipeOperations.ts
+          await wipeTableRows(adapter, database.$id, table.$id);
+
+          MessageFormatter.success(
+            `Successfully wiped rows from table: ${table.name}`,
+            { prefix: "Wipe" }
+          );
+        } catch (error) {
+          MessageFormatter.error(
+            `Failed to wipe table ${table.name}`,
+            error instanceof Error ? error : new Error(String(error)),
+            { prefix: "Wipe" }
+          );
+        }
+      }
+
+      MessageFormatter.success(
+        `Wipe operation completed for ${selectedTables.length} table(s)`,
+        { prefix: "Wipe" }
+      );
+    } catch (error) {
+      MessageFormatter.error(
+        "Table wipe operation failed",
+        error instanceof Error ? error : new Error(String(error)),
+        { prefix: "Wipe" }
+      );
+      throw error;
+    }
   }
 };

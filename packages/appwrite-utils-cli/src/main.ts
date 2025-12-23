@@ -6,35 +6,20 @@ import { InteractiveCLI } from "./interactiveCLI.js";
 import { UtilsController, type SetupOptions } from "./utilsController.js";
 import type { TransferOptions } from "./migrations/transfer.js";
 import { Databases, Storage, type Models } from "node-appwrite";
-import { getClient } from "./utils/getClientFromConfig.js";
+import { getClient } from "appwrite-utils-helpers";
 import { fetchAllDatabases } from "./databases/methods.js";
 import { setupDirsFiles } from "./utils/setupFiles.js";
 import { fetchAllCollections } from "./collections/methods.js";
 import type { Specification } from "appwrite-utils";
 import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
-import { MessageFormatter } from "./shared/messageFormatter.js";
+import { MessageFormatter, logger, AuthenticationError } from "appwrite-utils-helpers";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 import { SelectionDialogs } from "./shared/selectionDialogs.js";
-import { logger } from "./shared/logging.js";
 import type { SyncSelectionSummary, DatabaseSelection, BucketSelection } from "./shared/selectionDialogs.js";
 import path from "path";
 import fs from "fs";
 import { createRequire } from "node:module";
-import {
-  loadAppwriteProjectConfig,
-  findAppwriteProjectConfig,
-  projectConfigToAppwriteConfig,
-} from "./utils/projectConfig.js";
-import {
-  hasSessionAuth,
-  getAvailableSessions,
-  getAuthenticationStatus,
-} from "./utils/sessionAuth.js";
-import {
-  findYamlConfig,
-  loadYamlConfigWithSession,
-} from "./config/yamlConfig.js";
 
 const require = createRequire(import.meta.url);
 if (!(globalThis as any).require) {
@@ -43,6 +28,7 @@ if (!(globalThis as any).require) {
 
 interface CliOptions {
   config?: string;
+  appwriteConfig?: boolean;
   it?: boolean;
   dbIds?: string;
   collectionIds?: string;
@@ -83,7 +69,7 @@ interface CliOptions {
   constantsOutput?: string;
   migrateCollectionsToTables?: boolean;
   useSession?: boolean;
-  session?: string;
+  sessionCookie?: string;
   listBackups?: boolean;
   autoSync?: boolean;
   selectBuckets?: boolean;
@@ -370,6 +356,11 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Path to Appwrite configuration file (appwriteConfig.ts)",
   })
+  .option("appwriteConfig", {
+    alias: ["appwrite-config", "use-appwrite-config"],
+    type: "boolean",
+    description: "Prefer loading from appwrite.config.json instead of config.yaml",
+  })
   .option("it", {
     alias: ["interactive", "i"],
     type: "boolean",
@@ -617,202 +608,55 @@ async function main() {
   const startTime = Date.now();
   const operationStats: Record<string, number> = {};
 
-  // Early session detection for better user guidance
-  const availableSessions = getAvailableSessions();
-  let hasAnyValidSessions = availableSessions.length > 0;
-
   if (argv.it) {
-    const cli = new InteractiveCLI(process.cwd());
+    const cli = new InteractiveCLI(process.cwd(), {
+      useSession: argv.useSession,
+      sessionCookie: argv.sessionCookie
+    });
     await cli.run();
   } else {
-    // Enhanced config creation with session and project file support
-    let directConfig: any = undefined;
+    // Non-interactive mode - pass auth flags through to controller
+    // ConfigManager will handle config discovery and auth decisions
+    // Users can provide credentials via CLI flags even without a config file
 
-    // Show authentication status on startup if no config provided
-    if (
-      !argv.config &&
-      !argv.endpoint &&
-      !argv.projectId &&
-      !argv.apiKey &&
-      !argv.useSession &&
-      !argv.sessionCookie
-    ) {
-      if (hasAnyValidSessions) {
-        MessageFormatter.info(
-          `Found ${availableSessions.length} available session(s)`,
-          { prefix: "Auth" }
-        );
-        availableSessions.forEach((session) => {
-          MessageFormatter.info(
-            `  \u2022 ${session.projectId} (${session.email || "unknown"}) at ${
-              session.endpoint
-            }`,
-            { prefix: "Auth" }
-          );
-        });
-        MessageFormatter.info(
-          "Use --session to enable session authentication",
-          { prefix: "Auth" }
-        );
-      } else {
-        MessageFormatter.info("No active Appwrite sessions found", {
-          prefix: "Auth",
-        });
-        MessageFormatter.info(
-          "\u2022 Run 'appwrite login' to authenticate with session",
-          { prefix: "Auth" }
-        );
-        MessageFormatter.info(
-          "\u2022 Or provide --apiKey for API key authentication",
-          { prefix: "Auth" }
-        );
-      }
-    }
+    const controller = UtilsController.getInstance(process.cwd());
 
-    // Priority 1: Check for appwrite.json project configuration
-    const projectConfigPath = findAppwriteProjectConfig(process.cwd());
-    if (projectConfigPath) {
-      const projectConfig = loadAppwriteProjectConfig(projectConfigPath);
-      if (projectConfig) {
-        directConfig = projectConfigToAppwriteConfig(projectConfig);
-        MessageFormatter.info(
-          `Loaded project configuration from ${projectConfigPath}`,
-          { prefix: "CLI" }
-        );
-      }
-    }
+    // Build init options from CLI flags
+    const initOptions: any = {
+      useSession: argv.useSession,
+      sessionCookie: argv.sessionCookie,
+      preferJson: argv.appwriteConfig,
+    };
 
-    // Priority 2: CLI arguments override project config
-    if (
-      argv.endpoint ||
-      argv.projectId ||
-      argv.apiKey ||
-      argv.useSession ||
-      argv.sessionCookie
-    ) {
-      directConfig = {
-        ...directConfig,
-        appwriteEndpoint: argv.endpoint || directConfig?.appwriteEndpoint,
-        appwriteProject: argv.projectId || directConfig?.appwriteProject,
-        appwriteKey: argv.apiKey || directConfig?.appwriteKey,
+    // Add CLI overrides if provided - these can work even without a config file
+    if (argv.endpoint || argv.projectId || argv.apiKey) {
+      initOptions.overrides = {
+        appwriteEndpoint: argv.endpoint,
+        appwriteProject: argv.projectId,
+        appwriteKey: argv.apiKey,
       };
     }
 
-    // Priority 3: Session authentication support with improved detection
-    let sessionAuthAvailable = false;
-
-    if (directConfig?.appwriteEndpoint && directConfig?.appwriteProject) {
-      sessionAuthAvailable = hasSessionAuth(
-        directConfig.appwriteEndpoint,
-        directConfig.appwriteProject
-      );
-    }
-
-    if (argv.useSession || argv.sessionCookie) {
-      if (argv.sessionCookie) {
-        // Explicit session cookie provided
-        MessageFormatter.info(
-          "Using explicit session cookie for authentication",
-          { prefix: "Auth" }
-        );
-      } else if (sessionAuthAvailable) {
-        MessageFormatter.info(
-          "Session authentication detected and will be used",
-          { prefix: "Auth" }
-        );
-      } else {
-        MessageFormatter.warning(
-          "Session authentication requested but no valid session found",
-          { prefix: "Auth" }
-        );
-        const availableSessions = getAvailableSessions();
-        if (availableSessions.length > 0) {
-          MessageFormatter.info(
-            `Available sessions: ${availableSessions
-              .map((s) => `${s.projectId} (${s.email || "unknown"})`)
-              .join(", ")}`,
-            { prefix: "Auth" }
-          );
-          MessageFormatter.info(
-            "Use --session flag to enable session authentication",
-            { prefix: "Auth" }
-          );
-        } else {
-          MessageFormatter.warning(
-            "No Appwrite CLI sessions found. Please run 'appwrite login' first.",
-            { prefix: "Auth" }
-          );
-        }
-        MessageFormatter.error(
-          "Session authentication requested but not available",
-          undefined,
-          { prefix: "Auth" }
-        );
-        return; // Exit early if session auth was requested but not available
+    try {
+      await controller.init(initOptions);
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
+        process.exit(1);
       }
-    } else if (sessionAuthAvailable && !argv.apiKey) {
-      // Auto-detect session authentication when no API key is provided
-      MessageFormatter.info(
-        "Session authentication detected - no API key required",
-        { prefix: "Auth" }
-      );
-      MessageFormatter.info(
-        "Use --session flag to explicitly enable session authentication",
-        { prefix: "Auth" }
-      );
+      // Re-throw other errors
+      throw error;
     }
 
-    // Enhanced session authentication support:
-    // 1. If session auth is explicitly requested via flags, use it
-    // 2. If no API key is provided but sessions are available, offer to use session auth
-    // 3. Auto-detect session authentication when possible
-    let finalDirectConfig = directConfig;
-
-    if (
-      (argv.useSession || argv.sessionCookie) &&
-      (!directConfig ||
-        !directConfig.appwriteEndpoint ||
-        !directConfig.appwriteProject)
-    ) {
-      // Don't pass incomplete directConfig - let UtilsController load YAML config normally
-      finalDirectConfig = null;
-    } else if (
-      finalDirectConfig &&
-      !finalDirectConfig.appwriteKey &&
-      !argv.useSession &&
-      !argv.sessionCookie
-    ) {
-      // Auto-detect session authentication when no API key provided
-      if (sessionAuthAvailable) {
-        MessageFormatter.info(
-          "No API key provided, but session authentication is available",
-          { prefix: "Auth" }
-        );
-        MessageFormatter.info(
-          "Automatically using session authentication (add --session to suppress this message)",
-          { prefix: "Auth" }
-        );
-        // Implicitly enable session authentication
-        argv.useSession = true;
-      }
+    // After init, check if we have a valid config (from file OR CLI overrides)
+    if (!controller.config) {
+      MessageFormatter.error("No Appwrite configuration available", undefined, { prefix: "CLI" });
+      MessageFormatter.info("Provide credentials via CLI flags (--endpoint, --projectId, --apiKey or --session)", { prefix: "CLI" });
+      MessageFormatter.info("Or create a config file using --setup", { prefix: "CLI" });
+      return;
     }
 
-    // Create controller with session authentication support using singleton
-    const controller = UtilsController.getInstance(
-      process.cwd(),
-      finalDirectConfig
-    );
-
-    // Pass session authentication options to the controller
-    const initOptions: any = {};
-    if (argv.useSession || argv.sessionCookie) {
-      initOptions.useSession = true;
-      if (argv.sessionCookie) {
-        initOptions.sessionCookie = argv.sessionCookie;
-      }
-    }
-
-    await controller.init(initOptions);
+    const parsedArgv = argv;
 
     if (argv.setup) {
       await setupDirsFiles(false, process.cwd());
@@ -827,10 +671,10 @@ async function main() {
 
     if (argv.generateConstants) {
       const { ConstantsGenerator } = await import(
-        "./utils/constantsGenerator.js"
+        "appwrite-utils-helpers"
       );
       type SupportedLanguage =
-        import("./utils/constantsGenerator.js").SupportedLanguage;
+        import("appwrite-utils-helpers").SupportedLanguage;
 
       if (!controller.config) {
         MessageFormatter.error("No Appwrite configuration found", undefined, {
@@ -928,7 +772,7 @@ async function main() {
         }
 
         const { migrateCollectionsToTables } = await import(
-          "./config/configMigration.js"
+          "appwrite-utils-helpers"
         );
 
         MessageFormatter.info("Starting collections to tables migration...", {
@@ -965,55 +809,9 @@ async function main() {
       return;
     }
 
-    if (!controller.config) {
-      // Provide better guidance based on available authentication methods
-      const availableSessions = getAvailableSessions();
-
-      if (availableSessions.length > 0) {
-        MessageFormatter.error("No Appwrite configuration found", undefined, {
-          prefix: "CLI",
-        });
-        MessageFormatter.info("Available authentication options:", {
-          prefix: "Auth",
-        });
-        MessageFormatter.info("• Session authentication: Add --session flag", {
-          prefix: "Auth",
-        });
-        MessageFormatter.info(
-          "• API key authentication: Add --apiKey YOUR_API_KEY",
-          { prefix: "Auth" }
-        );
-        MessageFormatter.info(
-          `• Available sessions: ${availableSessions
-            .map((s) => `${s.projectId} (${s.email || "unknown"})`)
-            .join(", ")}`,
-          { prefix: "Auth" }
-        );
-      } else {
-        MessageFormatter.error("No Appwrite configuration found", undefined, {
-          prefix: "CLI",
-        });
-        MessageFormatter.info("Authentication options:", { prefix: "Auth" });
-        MessageFormatter.info(
-          "• Login with Appwrite CLI: Run 'appwrite login' then use --session flag",
-          { prefix: "Auth" }
-        );
-        MessageFormatter.info("• Use API key: Add --apiKey YOUR_API_KEY", {
-          prefix: "Auth",
-        });
-        MessageFormatter.info(
-          "• Create config file: Run with --setup to initialize project configuration",
-          { prefix: "Auth" }
-        );
-      }
-      return;
-    }
-
-    const parsedArgv = argv;
-
     // List backups if requested
     if (parsedArgv.listBackups) {
-      const { AdapterFactory } = await import("./adapters/AdapterFactory.js");
+      const { AdapterFactory } = await import("appwrite-utils-helpers");
       const { listBackups } = await import("./shared/backupTracking.js");
 
       if (!controller.config) {
@@ -1150,7 +948,7 @@ async function main() {
       const { comprehensiveBackup } = await import(
         "./backups/operations/comprehensiveBackup.js"
       );
-      const { AdapterFactory } = await import("./adapters/AdapterFactory.js");
+      const { AdapterFactory } = await import("appwrite-utils-helpers");
 
       // Get tracking database ID (interactive prompt if not specified)
       let trackingDatabaseId = parsedArgv.trackingDatabaseId;

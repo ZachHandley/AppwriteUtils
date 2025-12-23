@@ -1,9 +1,7 @@
 import { indexSchema, type Index } from "appwrite-utils";
 import { Databases, IndexType, Query, type Models } from "node-appwrite";
-import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
-import { delay, tryAwaitWithRetry, calculateExponentialBackoff } from "../utils/helperFunctions.js";
-import { isLegacyDatabases } from "../utils/typeGuards.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import type { DatabaseAdapter } from "appwrite-utils-helpers";
+import { delay, tryAwaitWithRetry, calculateExponentialBackoff, isLegacyDatabases, MessageFormatter } from "appwrite-utils-helpers";
 
 // System attributes that are always available for indexing in Appwrite
 const SYSTEM_ATTRIBUTES = ['$id', '$createdAt', '$updatedAt', '$permissions'];

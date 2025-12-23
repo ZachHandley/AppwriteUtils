@@ -14,18 +14,15 @@ import {
 } from "appwrite-utils";
 import path from "path";
 import fs from "fs";
-import { convertObjectByAttributeMappings } from "../utils/dataConverters.js";
+import { convertObjectByAttributeMappings } from "appwrite-utils-helpers";
 import { z } from "zod";
 import { checkForCollection } from "../collections/methods.js";
 import { ID, Users, type Databases } from "node-appwrite";
-import { logger } from "../shared/logging.js";
+import { logger, LegacyAdapter, MessageFormatter } from "appwrite-utils-helpers";
 import { findOrCreateOperation, updateOperation } from "../shared/migrationHelpers.js";
 import { AuthUserCreateSchema } from "../schemas/authUser.js";
-import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
 import { UsersController } from "../users/methods.js";
-import { finalizeByAttributeMap } from "../utils/helperFunctions.js";
 import { isEmpty } from "es-toolkit/compat";
-import { MessageFormatter } from "../shared/messageFormatter.js";
 
 // Define a schema for the structure of collection import data using Zod for validation
 export const CollectionImportDataSchema = z.object({

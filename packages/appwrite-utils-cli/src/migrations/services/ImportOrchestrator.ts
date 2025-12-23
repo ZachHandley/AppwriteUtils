@@ -23,12 +23,12 @@ import { RelationshipResolver, type CollectionImportData } from "./RelationshipR
 import type { ImportDataActions } from "../importDataActions.js";
 import type { SetupOptions } from "../../utilsController.js";
 import { UsersController } from "../../users/methods.js";
-import { logger } from "../../shared/logging.js";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import { logger } from 'appwrite-utils-helpers';
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import { ProgressManager } from "../../shared/progressManager.js";
-import { tryAwaitWithRetry } from "../../utils/index.js";
+import { tryAwaitWithRetry } from "appwrite-utils-helpers";
 import { updateOperation, findOrCreateOperation } from "../../shared/migrationHelpers.js";
-import { LegacyAdapter } from "../../adapters/LegacyAdapter.js";
+import { LegacyAdapter } from 'appwrite-utils-helpers';
 import { resolveAndUpdateRelationships } from "../relationships.js";
 
 // Enhanced rate limiting configuration - now managed by RateLimitManager

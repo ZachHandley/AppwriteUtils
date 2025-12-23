@@ -1,5 +1,5 @@
 import pLimit from "p-limit";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 
 export interface RateLimitConfig {
   // Data operations

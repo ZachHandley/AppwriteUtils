@@ -2,15 +2,13 @@ import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import type { AppwriteConfig } from "appwrite-utils";
 import { findAppwriteConfig } from "./loadConfigs.js";
-import { loadYamlConfig } from "../config/yamlConfig.js";
-import { fetchServerVersion, isVersionAtLeast } from "./versionDetection.js";
-import { findYamlConfig } from "../config/yamlConfig.js";
+import { loadYamlConfig, findYamlConfig, generateYamlConfigTemplate } from "appwrite-utils-helpers";
+import { fetchServerVersion, isVersionAtLeast } from 'appwrite-utils-helpers';
 import { ID } from "node-appwrite";
 import { ulid } from "ulidx";
-import { generateYamlConfigTemplate } from "../config/yamlConfig.js";
-import { loadAppwriteProjectConfig, findAppwriteProjectConfig, getProjectDirectoryName, isTablesDBProject } from "./projectConfig.js";
-import { hasSessionAuth, getSessionAuth } from "./sessionAuth.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { loadAppwriteProjectConfig, findAppwriteProjectConfig, getProjectDirectoryName, isTablesDBProject } from 'appwrite-utils-helpers';
+import { hasSessionAuth, getSessionAuth } from 'appwrite-utils-helpers';
+import { MessageFormatter } from "appwrite-utils-helpers";
 
 // Example base configuration using types from appwrite-utils
 const baseConfig: AppwriteConfig = {

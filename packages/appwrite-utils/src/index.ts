@@ -90,6 +90,8 @@ export {
   attributeSchema,
   type Attributes,
   attributesSchema,
+  type Column,
+  type Columns,
 } from "./schemas/attribute.js";
 export {
   indexSchema,

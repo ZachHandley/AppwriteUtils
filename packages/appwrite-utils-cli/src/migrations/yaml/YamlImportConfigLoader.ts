@@ -2,7 +2,7 @@ import { z } from "zod";
 import path from "path";
 import fs from "fs";
 import yaml from "js-yaml";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 import type { ImportDef, AttributeMappings } from "appwrite-utils";
 
 // YAML Import Configuration Schema

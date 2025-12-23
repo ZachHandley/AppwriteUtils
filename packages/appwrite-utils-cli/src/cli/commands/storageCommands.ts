@@ -2,10 +2,9 @@ import inquirer from "inquirer";
 import chalk from "chalk";
 import { Storage, Permission, Role, Compression, type Models } from "node-appwrite";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import { listBuckets, createBucket as createBucketApi, deleteBucket as deleteBucketApi } from "../../storage/methods.js";
-import { writeYamlConfig } from "../../config/yamlConfig.js";
-import { ConfigManager } from "../../config/ConfigManager.js";
+import { writeYamlConfig, ConfigManager } from "appwrite-utils-helpers";
 
 export const storageCommands = {
   async createBucket(cli: InteractiveCLI): Promise<void> {

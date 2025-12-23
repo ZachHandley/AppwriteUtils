@@ -4,12 +4,11 @@ import {
   ID,
   Query,
 } from "node-appwrite";
-import { tryAwaitWithRetry, delay, calculateExponentialBackoff } from "../utils/helperFunctions.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { tryAwaitWithRetry, delay, calculateExponentialBackoff, MessageFormatter } from "appwrite-utils-helpers";
 import { chunk } from "es-toolkit";
-import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
-import { isLegacyDatabases } from "../utils/typeGuards.js";
-import { getAdapter } from "../utils/getClientFromConfig.js";
+import type { DatabaseAdapter } from "appwrite-utils-helpers";
+import { isLegacyDatabases } from "appwrite-utils-helpers";
+import { getAdapter } from "appwrite-utils-helpers";
 
 /**
  * Transfers all documents from one collection to another in a different database

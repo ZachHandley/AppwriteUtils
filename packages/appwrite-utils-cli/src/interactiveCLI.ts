@@ -35,9 +35,8 @@ import { join } from "node:path";
 import path from "path";
 import fs from "node:fs";
 import os from "node:os";
-import { MessageFormatter } from "./shared/messageFormatter.js";
+import { MessageFormatter, findYamlConfig } from "appwrite-utils-helpers";
 import { findAppwriteConfig } from "./utils/loadConfigs.js";
-import { findYamlConfig } from "./config/yamlConfig.js";
 
 // Import command modules
 import { configCommands } from "./cli/commands/configCommands.js";
@@ -73,12 +72,20 @@ enum CHOICES {
   EXIT = "👋 Exit",
 }
 
+export interface InteractiveCLIOptions {
+  useSession?: boolean;
+  sessionCookie?: string;
+}
+
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
   private isUsingTypeScriptConfig: boolean = false;
   private lastSelectedCollectionIds: string[] = [];
+  private options: InteractiveCLIOptions;
 
-  constructor(private currentDir: string) {}
+  constructor(private currentDir: string, options: InteractiveCLIOptions = {}) {
+    this.options = options;
+  }
 
   async run(): Promise<void> {
     MessageFormatter.banner(
@@ -204,7 +211,10 @@ export class InteractiveCLI {
   }): Promise<void> {
     if (!this.controller) {
       this.controller = UtilsController.getInstance(this.currentDir, directConfig);
-      await this.controller.init();
+      await this.controller.init({
+        useSession: this.options.useSession,
+        sessionCookie: this.options.sessionCookie
+      });
     } else {
       // Extract session info from existing controller before reinitializing
       const sessionInfo = await this.controller.getSessionInfo();
@@ -219,12 +229,18 @@ export class InteractiveCLI {
         // Reinitialize with session preservation
         UtilsController.clearInstance();
         this.controller = UtilsController.getInstance(this.currentDir, enhancedDirectConfig);
-        await this.controller.init();
+        await this.controller.init({
+          useSession: this.options.useSession,
+          sessionCookie: this.options.sessionCookie
+        });
       } else if (directConfig) {
         // Standard reinitialize without session
         UtilsController.clearInstance();
         this.controller = UtilsController.getInstance(this.currentDir, directConfig);
-        await this.controller.init();
+        await this.controller.init({
+          useSession: this.options.useSession,
+          sessionCookie: this.options.sessionCookie
+        });
       }
       // If no directConfig provided, keep existing controller
     }

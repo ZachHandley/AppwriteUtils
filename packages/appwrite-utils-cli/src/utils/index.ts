@@ -1,2 +1,2 @@
-export * from "./helperFunctions.js";
+export * from 'appwrite-utils-helpers';
 export * from "./setupFiles.js";

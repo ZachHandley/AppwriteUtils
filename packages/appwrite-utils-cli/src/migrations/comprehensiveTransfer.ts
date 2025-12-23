@@ -16,10 +16,9 @@ import {
   AppwriteException,
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { MessageFormatter, getClient } from "appwrite-utils-helpers";
 import { processQueue, queuedOperations } from "../shared/operationQueue.js";
 import { ProgressManager } from "../shared/progressManager.js";
-import { getClient } from "../utils/getClientFromConfig.js";
 import {
   transferDatabaseLocalToLocal,
   transferDatabaseLocalToRemote,
@@ -36,9 +35,8 @@ import pLimit from "p-limit";
 import chalk from "chalk";
 import { join } from "node:path";
 import fs from "node:fs";
-import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
-import { getAdapter } from "../utils/getClientFromConfig.js";
-import { mapToCreateAttributeParams } from "../shared/attributeMapper.js";
+import type { DatabaseAdapter } from "appwrite-utils-helpers";
+import { getAdapter, mapToCreateAttributeParams } from "appwrite-utils-helpers";
 
 export interface ComprehensiveTransferOptions {
   sourceEndpoint: string;
@@ -1277,7 +1275,9 @@ export class ComprehensiveTransfer {
             await deployLocalFunction(
               this.targetClient,
               func.name,
-              functionConfig
+              functionConfig,
+              undefined,
+              this.tempDir
             );
 
             this.results.functions.transferred++;

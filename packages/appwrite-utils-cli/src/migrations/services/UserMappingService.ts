@@ -5,7 +5,7 @@ import type {
   AppwriteConfig,
 } from "appwrite-utils";
 import { AuthUserCreateSchema } from "../../schemas/authUser.js";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 import type { DataTransformationService } from "./DataTransformationService.js";
 
 /**

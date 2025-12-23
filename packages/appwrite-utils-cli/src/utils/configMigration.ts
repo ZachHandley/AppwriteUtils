@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { existsSync } from "fs";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
 import { ConfirmationDialogs } from "../shared/confirmationDialogs.js";
 import yaml from "js-yaml";
 
