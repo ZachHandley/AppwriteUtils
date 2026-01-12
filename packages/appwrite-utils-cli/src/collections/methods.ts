@@ -532,11 +532,17 @@ export const createOrUpdateCollectionsViaAdapter = async (
     // Deletions: remove columns/attributes that are present remotely but not in desired config
     try {
       const desiredKeys = new Set((attributes || []).map((a: any) => a.key));
+      // Also track case-insensitive keys to avoid double-deletion of renames (handled as recreates)
+      const desiredKeysLower = new Set((attributes || []).map((a: any) => a.key?.toLowerCase()));
       const tableInfo3 = await adapter.getTable({ databaseId, tableId });
       const existingCols3: any[] = (tableInfo3 as any).data?.columns || (tableInfo3 as any).data?.attributes || [];
       const toDelete = existingCols3
         .filter((col: any) => {
-          if (!col?.key || desiredKeys.has(col.key)) return false;
+          if (!col?.key) return false;
+          // Exact match - keep it
+          if (desiredKeys.has(col.key)) return false;
+          // Case-insensitive match (rename scenario) - already handled as recreate, don't delete again
+          if (desiredKeysLower.has(col.key?.toLowerCase())) return false;
           // Don't delete child-side relationship attributes - they're auto-managed by Appwrite
           // for two-way relationships and deleting them would break the parent relationship
           if (col.type === 'relationship' && col.side === 'child') return false;

@@ -908,22 +908,40 @@ export class UtilsController {
 
     // Convert database selections to Models.Database format
     const selectedDatabases: Models.Database[] = [];
+    const serverDatabases = await fetchAllDatabases(this.database);
+    const configuredDatabases = this.config?.databases || [];
 
     for (const dbSelection of databaseSelections) {
-      // Get the full database object from the controller
-      const databases = await fetchAllDatabases(this.database);
-      const database = databases.find(db => db.$id === dbSelection.databaseId);
+      // First try to find on server
+      const serverDb = serverDatabases.find(db => db.$id === dbSelection.databaseId);
 
-      if (database) {
-        selectedDatabases.push(database);
-        MessageFormatter.info(`Selected database: ${database.name} (${database.$id})`, { prefix: "Controller" });
-
-        // Log selected tables for this database
-        if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
-          MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
-        }
+      if (serverDb) {
+        selectedDatabases.push(serverDb);
+        MessageFormatter.info(`Selected database: ${serverDb.name} (${serverDb.$id})`, { prefix: "Controller" });
       } else {
-        MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found`, { prefix: "Controller" });
+        // Database doesn't exist on server - check if it's in local config
+        const configDb = configuredDatabases.find((db: any) => db.$id === dbSelection.databaseId);
+
+        if (configDb) {
+          // Create a pseudo-database object that ensureDatabasesExist will create
+          const dbId = configDb.$id;
+          selectedDatabases.push({
+            $id: dbId,
+            name: configDb.name || dbId,
+            $createdAt: new Date().toISOString(),
+            $updatedAt: new Date().toISOString(),
+            enabled: true,
+          } as Models.Database);
+          MessageFormatter.info(`Selected database: ${configDb.name || dbId} (${dbId}) [will be created]`, { prefix: "Controller" });
+        } else {
+          MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found in server or local config`, { prefix: "Controller" });
+          continue;
+        }
+      }
+
+      // Log selected tables for this database
+      if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
+        MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
       }
     }
 

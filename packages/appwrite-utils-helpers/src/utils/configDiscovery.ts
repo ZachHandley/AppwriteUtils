@@ -2,6 +2,7 @@ import path from "path";
 import fs from "fs";
 import {
   CollectionCreateSchema,
+  TableCreateSchema,
   type CollectionCreate,
   type Collection
 } from "appwrite-utils";
@@ -267,58 +268,97 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
 
 /**
  * Loads a YAML table file and converts it to CollectionCreate format
+ * Supports both TablesDB terminology (columns, rowSecurity) and Collection terminology (attributes, documentSecurity)
+ * Uses the canonical schemas from appwrite-utils for validation
  * @param filePath Path to the YAML table file
  * @returns CollectionCreate object or null if loading fails
  */
 export const loadYamlTable = (filePath: string): CollectionCreate | null => {
   try {
     const fileContent = fs.readFileSync(filePath, "utf8");
-    const yamlData = yaml.load(fileContent) as unknown;
+    const yamlData = yaml.load(fileContent) as any;
 
-    // Use the new table-specific schema
-    const parsedTable = YamlTableSchema.parse(yamlData);
+    if (!yamlData || typeof yamlData !== 'object') {
+      MessageFormatter.error(`Invalid YAML data in ${filePath}`, undefined, { prefix: "Config" });
+      return null;
+    }
 
-    // Convert YAML table to CollectionCreate format (internal representation)
-    const table: CollectionCreate = {
-      name: parsedTable.name,
-      $id: (yamlData as any).tableId || parsedTable.id || parsedTable.name.toLowerCase().replace(/\s+/g, '_'),
-      documentSecurity: parsedTable.rowSecurity, // Convert rowSecurity to documentSecurity
-      enabled: parsedTable.enabled,
-      $permissions: parsedTable.permissions.map(p => ({
-        permission: p.permission as any,
-        target: p.target
-      })),
-      attributes: parsedTable.columns.map(col => ({ // Convert columns to attributes
-        key: col.key,
-        type: col.type as any,
-        size: col.size,
-        required: col.required,
-        array: col.array,
-        xdefault: col.default,
-        min: col.min,
-        max: col.max,
-        elements: col.elements,
-        relatedCollection: col.relatedTable, // Convert relatedTable to relatedCollection
-        relationType: col.relationType as any,
-        twoWay: col.twoWay,
-        twoWayKey: col.twoWayKey,
-        onDelete: col.onDelete as any,
-        side: col.side as any,
-        encrypt: col.encrypt,
-        format: col.format
-      })),
-      indexes: parsedTable.indexes.map(idx => ({
-        key: idx.key,
-        type: idx.type as any,
-        attributes: idx.columns, // Convert columns to attributes
-        orders: idx.orders as any
-      })),
-      importDefs: parsedTable.importDefs || []
+    // Transform YAML field names to match schema expectations
+    // Support both TablesDB and Collection terminology
+    const transformedData: any = {
+      name: yamlData.name,
+      // Support both $id and tableId
+      $id: yamlData.$id || yamlData.tableId || yamlData.id,
+      enabled: yamlData.enabled ?? true,
+      // Support both documentSecurity and rowSecurity
+      documentSecurity: yamlData.documentSecurity ?? yamlData.rowSecurity ?? false,
+      databaseId: yamlData.databaseId,
+      databaseIds: yamlData.databaseIds,
+      importDefs: yamlData.importDefs || [],
     };
 
-    return table;
+    // Transform permissions: YAML uses 'permissions', schema expects '$permissions'
+    if (yamlData.permissions) {
+      transformedData.$permissions = yamlData.permissions.map((p: any) => ({
+        permission: p.permission,
+        target: p.target
+      }));
+    } else if (yamlData.$permissions) {
+      transformedData.$permissions = yamlData.$permissions;
+    }
+
+    // Support both 'columns' (TablesDB) and 'attributes' (Collections)
+    // Transform relatedTable → relatedCollection for compatibility
+    const rawFields = yamlData.columns || yamlData.attributes || [];
+    transformedData.attributes = rawFields.map((field: any) => ({
+      key: field.key,
+      type: field.type,
+      size: field.size,
+      required: field.required ?? false,
+      array: field.array,
+      xdefault: field.default,
+      min: field.min,
+      max: field.max,
+      elements: field.elements,
+      // Support both relatedTable (TablesDB) and relatedCollection (Collections)
+      relatedCollection: field.relatedCollection || field.relatedTable,
+      relationType: field.relationType,
+      twoWay: field.twoWay,
+      twoWayKey: field.twoWayKey,
+      onDelete: field.onDelete,
+      side: field.side,
+      encrypt: field.encrypt,
+      format: field.format
+    }));
+
+    // Transform indexes: support both 'columns' and 'attributes' in index definitions
+    if (yamlData.indexes) {
+      transformedData.indexes = yamlData.indexes.map((idx: any) => ({
+        key: idx.key,
+        type: idx.type,
+        // Support both 'columns' (TablesDB) and 'attributes' (Collections)
+        attributes: idx.attributes || idx.columns || [],
+        orders: idx.orders
+      }));
+    }
+
+    // Use CollectionCreateSchema for validation (we've normalized to 'attributes' format)
+    const parsedTable = CollectionCreateSchema.parse(transformedData);
+
+    return parsedTable;
   } catch (error) {
-    MessageFormatter.error(`Error loading YAML table from ${filePath}`, error as Error, { prefix: "Config" });
+    if (error instanceof z.ZodError) {
+      // Zod 4 uses .issues instead of .errors
+      const issues = (error as any).issues || (error as any).errors || [];
+      const errorMessages = issues.map((e: any) => `${(e.path || []).join('.')}: ${e.message}`).join(', ');
+      MessageFormatter.error(
+        `YAML validation error in ${filePath}: ${errorMessages}`,
+        undefined,
+        { prefix: "Config" }
+      );
+    } else {
+      MessageFormatter.error(`Error loading YAML table from ${filePath}`, error as Error, { prefix: "Config" });
+    }
     return null;
   }
 };

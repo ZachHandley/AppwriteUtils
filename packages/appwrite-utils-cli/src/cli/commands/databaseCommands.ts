@@ -21,18 +21,40 @@ export const databaseCommands = {
       // Initialize controller
       await (cli as any).controller!.init();
 
-      // Get available and configured databases
-      const availableDatabases = await fetchAllDatabases((cli as any).controller!.database!);
+      // Get available databases from server and configured databases from local config
+      const serverDatabases = await fetchAllDatabases((cli as any).controller!.database!);
       const configuredDatabases = (cli as any).controller!.config?.databases || [];
+
+      // For PUSH operations: Merge local configured databases with server databases
+      // This allows pushing databases that don't exist on the server yet
+      const serverDbIds = new Set(serverDatabases.map(db => db.$id));
+      const mergedDatabases = [...serverDatabases];
+
+      // Add locally configured databases that don't exist on server yet
+      for (const configDb of configuredDatabases) {
+        const dbId = configDb.$id;
+        if (dbId && !serverDbIds.has(dbId)) {
+          // Create a pseudo-database object for selection
+          mergedDatabases.push({
+            $id: dbId,
+            name: configDb.name || dbId,
+            $createdAt: new Date().toISOString(),
+            $updatedAt: new Date().toISOString(),
+            enabled: true,
+            _isLocalOnly: true, // Mark as not yet on server
+          } as any);
+          MessageFormatter.info(`Including local database "${configDb.name || dbId}" (not yet on server)`, { prefix: "Database" });
+        }
+      }
 
       // Get local collections for selection
       const localCollections = (cli as any).getLocalCollections();
 
       // Push operations always use local configuration as source of truth
 
-      // Select databases
+      // Select databases (now includes locally configured databases that don't exist on server)
       const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
-        availableDatabases,
+        mergedDatabases,
         configuredDatabases,
         { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
       );
@@ -47,7 +69,7 @@ export const databaseCommands = {
       const availableTablesMap = new Map<string, any[]>();
 
       for (const databaseId of selectedDatabaseIds) {
-        const database = availableDatabases.find(db => db.$id === databaseId)!;
+        const database = mergedDatabases.find(db => db.$id === databaseId)!;
 
         // Use the existing selectCollectionsAndTables method
         const selectedCollections = await (cli as any).selectCollectionsAndTables(
@@ -108,7 +130,7 @@ export const databaseCommands = {
                 selectedBucketIds,
                 availableBuckets,
                 configuredBuckets,
-                availableDatabases
+                mergedDatabases
               );
 
               MessageFormatter.info(`Selected ${bucketSelections.length} storage bucket(s)`, { prefix: "Database" });
@@ -123,7 +145,7 @@ export const databaseCommands = {
       // Create DatabaseSelection objects
       const databaseSelections = SelectionDialogs.createDatabaseSelection(
         selectedDatabaseIds,
-        availableDatabases,
+        mergedDatabases,
         tableSelectionsMap,
         configuredDatabases,
         availableTablesMap

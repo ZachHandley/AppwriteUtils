@@ -87,41 +87,132 @@ export function validateFunctionDirectory(dirPath: string): boolean {
 }
 
 /**
+ * Finds the git root directory by walking up from the given path
+ * @param startPath - Starting directory path
+ * @returns Git root path or undefined if not in a git repo
+ */
+function findGitRoot(startPath: string): string | undefined {
+  let currentDir = resolve(startPath);
+  const root = resolve('/');
+
+  while (currentDir !== root) {
+    if (existsSync(join(currentDir, '.git'))) {
+      return currentDir;
+    }
+    const parentDir = resolve(currentDir, '..');
+    if (parentDir === currentDir) break; // Hit filesystem root
+    currentDir = parentDir;
+  }
+
+  return undefined;
+}
+
+/**
+ * Case-insensitive search for a function directory within a functions/ folder
+ * @param functionsDir - Path to the functions/ directory
+ * @param functionName - Function name to search for (any case)
+ * @returns Matched directory path or undefined
+ */
+function findFunctionCaseInsensitive(
+  functionsDir: string,
+  functionName: string
+): string | undefined {
+  if (!existsSync(functionsDir)) return undefined;
+
+  try {
+    const stats = statSync(functionsDir);
+    if (!stats.isDirectory()) return undefined;
+
+    const entries = readdirSync(functionsDir);
+    const normalizedSearch = functionName.toLowerCase();
+
+    // Find case-insensitive match
+    const match = entries.find(entry => entry.toLowerCase() === normalizedSearch);
+
+    if (match) {
+      const matchPath = join(functionsDir, match);
+      if (validateFunctionDirectory(matchPath)) {
+        return matchPath;
+      }
+    }
+  } catch (error) {
+    logger.debug('Error searching functions directory', {
+      functionsDir,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  return undefined;
+}
+
+/**
  * Helper function to search for function in standard locations
+ * Walks up directory tree from config to git root, with case-insensitive matching
  * @param configDirPath - Directory where config file is located
  * @param normalizedName - Normalized function name
+ * @param originalName - Original function name (for case-insensitive matching)
  * @returns First valid function directory path or undefined
  */
 export function findFunctionInStandardLocations(
   configDirPath: string,
-  normalizedName: string
+  normalizedName: string,
+  originalName?: string
 ): string | undefined {
-  const searchPaths = [
-    // Same directory as config
-    join(configDirPath, 'functions', normalizedName),
-    // Parent directory of config
-    join(configDirPath, '..', 'functions', normalizedName),
-    // Current working directory
-    join(process.cwd(), 'functions', normalizedName),
-  ];
+  const gitRoot = findGitRoot(configDirPath);
+  const searchedPaths: string[] = [];
 
   logger.debug('Searching for function in standard locations', {
     normalizedName,
+    originalName,
     configDirPath,
-    searchPaths
+    gitRoot
   });
 
-  for (const searchPath of searchPaths) {
-    const resolvedPath = resolve(searchPath);
-    logger.debug('Checking search path', { searchPath, resolvedPath });
+  // Walk up from configDirPath to git root (or filesystem root if no git)
+  let currentDir = resolve(configDirPath);
+  const stopAt = gitRoot ? resolve(gitRoot, '..') : resolve('/');
 
-    if (validateFunctionDirectory(resolvedPath)) {
-      logger.debug('Found function in standard location', { resolvedPath });
-      return resolvedPath;
+  while (currentDir !== stopAt) {
+    const functionsDir = join(currentDir, 'functions');
+    searchedPaths.push(functionsDir);
+
+    // Try case-insensitive match with normalized name
+    let foundPath = findFunctionCaseInsensitive(functionsDir, normalizedName);
+    if (foundPath) {
+      logger.debug('Found function via case-insensitive search', { foundPath, searchDir: functionsDir });
+      return foundPath;
+    }
+
+    // Also try original name if different
+    if (originalName && originalName !== normalizedName) {
+      foundPath = findFunctionCaseInsensitive(functionsDir, originalName);
+      if (foundPath) {
+        logger.debug('Found function via original name search', { foundPath, searchDir: functionsDir });
+        return foundPath;
+      }
+    }
+
+    // Move up one directory
+    const parentDir = resolve(currentDir, '..');
+    if (parentDir === currentDir) break; // Hit filesystem root
+    currentDir = parentDir;
+  }
+
+  // Also check current working directory
+  const cwdFunctionsDir = join(process.cwd(), 'functions');
+  if (!searchedPaths.includes(cwdFunctionsDir)) {
+    const foundPath = findFunctionCaseInsensitive(cwdFunctionsDir, normalizedName);
+    if (foundPath) {
+      logger.debug('Found function in cwd/functions', { foundPath });
+      return foundPath;
     }
   }
 
-  logger.debug('Function not found in any standard location', { normalizedName });
+  logger.debug('Function not found in any standard location', {
+    normalizedName,
+    originalName,
+    searchedPaths
+  });
   return undefined;
 }
 
@@ -191,9 +282,9 @@ export function resolveFunctionDirectory(
     return resolvedPath;
   }
 
-  // Priority 3: Search standard locations
+  // Priority 3: Search standard locations (walks up to git root with case-insensitive matching)
   logger.debug('Searching standard locations for function');
-  const foundPath = findFunctionInStandardLocations(configDirPath, normalizedName);
+  const foundPath = findFunctionInStandardLocations(configDirPath, normalizedName, functionName);
 
   if (foundPath) {
     logger.debug('Resolved using standard location search', { foundPath });
@@ -201,15 +292,31 @@ export function resolveFunctionDirectory(
     return foundPath;
   }
 
-  // Priority 4: Not found - throw error
-  const searchedLocations = [
-    join(configDirPath, 'functions', normalizedName),
-    join(configDirPath, '..', 'functions', normalizedName),
-    join(process.cwd(), 'functions', normalizedName),
-  ];
+  // Priority 4: Not found - build list of searched locations for error message
+  const searchedLocations: string[] = [];
+  let searchDir = resolve(configDirPath);
+  const gitRoot = (() => {
+    let dir = searchDir;
+    while (dir !== resolve('/')) {
+      if (existsSync(join(dir, '.git'))) return dir;
+      const parent = resolve(dir, '..');
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return undefined;
+  })();
+  const stopAt = gitRoot ? resolve(gitRoot, '..') : resolve('/');
+
+  while (searchDir !== stopAt) {
+    searchedLocations.push(join(searchDir, 'functions', normalizedName));
+    const parent = resolve(searchDir, '..');
+    if (parent === searchDir) break;
+    searchDir = parent;
+  }
+  searchedLocations.push(join(process.cwd(), 'functions', normalizedName));
 
   const errorMsg = `Function directory not found for '${functionName}' (normalized: '${normalizedName}'). ` +
-    `Searched locations:\n${searchedLocations.map(p => `  - ${p}`).join('\n')}`;
+    `Searched locations (up to git root):\n${searchedLocations.map(p => `  - ${p}`).join('\n')}`;
 
   logger.error('Function directory not found', {
     functionName,

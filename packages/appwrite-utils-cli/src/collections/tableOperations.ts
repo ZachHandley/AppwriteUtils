@@ -363,32 +363,53 @@ function analyzeColumnChanges(
 /**
  * Enhanced version of columns diff with detailed change analysis
  * Order: desired first, then existing (matches internal usage here)
+ * Handles case-insensitive key matches as renames (recreates)
  */
 export function diffColumnsDetailed(
   desiredAttributes: Attribute[],
   existingColumns: any[]
 ): ColumnOperationPlan {
+  // Exact key lookup (case-sensitive)
   const byKey = new Map((existingColumns || []).map((col: any) => [col?.key, col] as const));
+  // Case-insensitive key lookup for detecting renames
+  const byKeyLower = new Map((existingColumns || []).map((col: any) => [col?.key?.toLowerCase(), col] as const));
 
   const toCreate: Attribute[] = [];
   const toUpdate: Array<{ attribute: Attribute; changes: ColumnPropertyChange[] }> = [];
   const toRecreate: Array<{ oldAttribute: any; newAttribute: Attribute }> = [];
   const unchanged: string[] = [];
+  const handledExistingKeys = new Set<string>(); // Track which existing columns we've handled
 
   for (const attr of desiredAttributes || []) {
     const key = (attr as any)?.key;
-    const existing = key ? byKey.get(key) : undefined;
-    if (!existing) {
-      toCreate.push(attr);
+    if (!key) continue;
+
+    // First try exact match
+    const exactMatch = byKey.get(key);
+    if (exactMatch) {
+      handledExistingKeys.add(key);
+      const analysis = analyzeColumnChanges(exactMatch, attr);
+      if (!analysis.hasChanges) unchanged.push(analysis.columnKey);
+      else if (analysis.requiresRecreate) toRecreate.push({ oldAttribute: exactMatch, newAttribute: attr });
+      else toUpdate.push({ attribute: attr, changes: analysis.changes });
       continue;
     }
-    const analysis = analyzeColumnChanges(existing, attr);
-    if (!analysis.hasChanges) unchanged.push(analysis.columnKey);
-    else if (analysis.requiresRecreate) toRecreate.push({ oldAttribute: existing, newAttribute: attr });
-    else toUpdate.push({ attribute: attr, changes: analysis.changes });
+
+    // Check for case-insensitive match (rename scenario like oAuthAccounts -> oauthAccounts)
+    const caseInsensitiveMatch = byKeyLower.get(key.toLowerCase());
+    if (caseInsensitiveMatch && caseInsensitiveMatch.key !== key) {
+      // This is a rename - treat as recreate (delete old, create new)
+      handledExistingKeys.add(caseInsensitiveMatch.key);
+      toRecreate.push({ oldAttribute: caseInsensitiveMatch, newAttribute: attr });
+      continue;
+    }
+
+    // No match - it's a new attribute
+    toCreate.push(attr);
   }
 
   // Note: we keep toDelete empty for now (conservative behavior)
+  // Deletions are handled separately in methods.ts
   return { toCreate, toUpdate, toRecreate, toDelete: [], unchanged };
 }
 
