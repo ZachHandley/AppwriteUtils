@@ -964,7 +964,10 @@ export class UtilsController {
     const databaseCollectionsMap = new Map<string, any[]>();
 
     // Get all collections/tables from config (they're at the root level, not nested in databases)
-    const allCollections = this.config?.collections || this.config?.tables || [];
+    const allCollections = [
+      ...(this.config?.collections || []),
+      ...(this.config?.tables || [])
+    ];
 
     // Create database-specific collection mapping to preserve relationships
     for (const dbSelection of databaseSelections) {

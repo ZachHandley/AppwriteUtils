@@ -1,8 +1,8 @@
 {
   "name": "appwrite-utils-cli",
   "description": "Appwrite Utility Functions to help with database management, data conversion, data import, migrations, and much more. Meant to be used as a CLI tool, I do not recommend installing this in frontend environments.",
-  "version": "1.9.7",
-  "main": "src/main.ts",
+  "version": "1.10.0",
+  "main": "dist/main.js",
   "type": "module",
   "repository": {
     "type": "git",
@@ -39,8 +39,8 @@
     "@types/inquirer": "^9.0.8",
     "@types/json-schema": "^7.0.15",
     "@types/yargs": "^17.0.33",
-    "appwrite-utils": "latest",
-    "appwrite-utils-helpers": "workspace:*",
+    "appwrite-utils": "^1.7.0",
+    "appwrite-utils-helpers": "^0.1.0",
     "chalk": "^5.4.1",
     "cli-progress": "^3.12.0",
     "commander": "^12.1.0",

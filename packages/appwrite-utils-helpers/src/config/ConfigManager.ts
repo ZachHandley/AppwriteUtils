@@ -249,9 +249,25 @@ export class ConfigManager {
    */
   public async loadConfig(options: ConfigLoadOptions = {}): Promise<AppwriteConfig> {
     // 1. Return cache if available and not forcing reload
-    if (this.cachedConfig && !options.forceReload) {
-      logger.debug("Returning cached config", { prefix: "ConfigManager" });
-      return this.getCachedConfigWithOverrides(options.overrides);
+    const bypassCacheForAuth = options.useSession !== undefined || !!options.explicitSessionCookie;
+    if (this.cachedConfig && !options.forceReload && !bypassCacheForAuth) {
+      if (this.cachedConfig.sessionCookie) {
+        const sessionWorks = await this.sessionService.isSessionWorking(
+          this.cachedConfig.appwriteEndpoint,
+          this.cachedConfig.appwriteProject,
+          this.cachedConfig.sessionCookie
+        );
+        if (!sessionWorks) {
+          logger.warn("Cached session is not working; invalidating config cache", { prefix: "ConfigManager" });
+          this.invalidateCache();
+        } else {
+          logger.debug("Returning cached config", { prefix: "ConfigManager" });
+          return this.getCachedConfigWithOverrides(options.overrides);
+        }
+      } else {
+        logger.debug("Returning cached config", { prefix: "ConfigManager" });
+        return this.getCachedConfigWithOverrides(options.overrides);
+      }
     }
 
     logger.debug("Loading config from file", { prefix: "ConfigManager", options });
@@ -284,6 +300,39 @@ export class ConfigManager {
       // Session explicitly provided via options
       session = options.sessionOverride;
       logger.debug("Using session override from options", { prefix: "ConfigManager" });
+    } else if (options.useSession === true) {
+      // When session is explicitly requested, only accept a verified working session
+      const workingSessionResult = await this.sessionService.findWorkingSession(
+        config.appwriteEndpoint,
+        config.appwriteProject
+      );
+
+      if (workingSessionResult) {
+        session = workingSessionResult.session;
+        sessionPrefsKey = workingSessionResult.prefsKey;
+
+        logger.info(
+          `Found and tested working session from project ${workingSessionResult.prefsKey}`,
+          { prefix: "ConfigManager", email: workingSessionResult.session.email }
+        );
+
+        // Cache the working session key back to config file
+        config.sessionProjectId = workingSessionResult.prefsKey;
+
+        // Write the updated config back to file to cache the session key
+        const { writeYamlConfig } = await import('./yamlConfig.js');
+        try {
+          await writeYamlConfig(configPath, config);
+          logger.debug(`Cached session key ${workingSessionResult.prefsKey} to config file`, {
+            prefix: "ConfigManager"
+          });
+        } catch (error) {
+          logger.warn("Failed to cache session key to config file", {
+            prefix: "ConfigManager",
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
     } else {
       // First, try using cached sessionProjectId if available
       if (config.sessionProjectId) {
@@ -304,7 +353,16 @@ export class ConfigManager {
             expiresAt: cachedSessionData.expiresAt
           };
 
-          if (this.sessionService.isValidSession(sessionInfo)) {
+          const isValid = this.sessionService.isValidSession(sessionInfo);
+          const isWorking = isValid
+            ? await this.sessionService.isSessionWorking(
+                config.appwriteEndpoint,
+                config.appwriteProject,
+                cachedSessionData.cookie
+              )
+            : false;
+
+          if (isWorking) {
             session = sessionInfo;
             sessionPrefsKey = config.sessionProjectId;
             logger.info(`Using cached session key: ${config.sessionProjectId}`, {
@@ -323,20 +381,7 @@ export class ConfigManager {
         }
       }
 
-      // If no cached session or it doesn't work, try standard session discovery
-      if (!session) {
-        session = await this.sessionService.findSession(
-          config.appwriteEndpoint,
-          config.appwriteProject
-        );
-
-        // If standard discovery found a session, it's using the config's projectId
-        if (session) {
-          sessionPrefsKey = config.appwriteProject;
-        }
-      }
-
-      // If still no session found, test all available sessions for this endpoint
+      // If no cached session or it doesn't work, test all available sessions for this endpoint
       if (!session) {
         logger.debug("No direct session match, testing available sessions for endpoint", {
           prefix: "ConfigManager",
@@ -446,33 +491,48 @@ export class ConfigManager {
     // 9. Handle authentication based on hints
     if (options.useSession === true) {
       // Session auth PREFERRED (but API key fallback if available)
-      let sessionToUse = options.explicitSessionCookie
-        ? {
-            cookie: options.explicitSessionCookie,
-            endpoint: config.appwriteEndpoint,
-            projectId: config.appwriteProject,
-            email: undefined,
-            expiresAt: undefined
-          }
-        : await this.sessionService.findSession(config.appwriteEndpoint, config.appwriteProject);
+      let sessionToUse: SessionAuthInfo | null = null;
 
-      if (sessionToUse && this.sessionService.isValidSession(sessionToUse)) {
-        // Valid session found - use it
+      if (options.explicitSessionCookie) {
+        const explicitSession: SessionAuthInfo = {
+          cookie: options.explicitSessionCookie,
+          endpoint: config.appwriteEndpoint,
+          projectId: config.appwriteProject,
+          email: undefined,
+          expiresAt: undefined
+        };
+
+        if (this.sessionService.isValidSession(explicitSession)) {
+          const works = await this.sessionService.isSessionWorking(
+            config.appwriteEndpoint,
+            config.appwriteProject,
+            options.explicitSessionCookie
+          );
+          if (works) {
+            sessionToUse = explicitSession;
+          }
+        }
+      } else {
+        const workingSessionResult = await this.sessionService.findWorkingSession(
+          config.appwriteEndpoint,
+          config.appwriteProject
+        );
+        sessionToUse = workingSessionResult?.session || null;
+      }
+
+      if (sessionToUse) {
         config = this.mergeService.mergeSession(config, sessionToUse);
         logger.info(`Using session authentication for ${sessionToUse.email || 'user'}`, { prefix: "Auth" });
       } else if (config.appwriteKey?.trim()) {
-        // No valid session, but API key available - fall back with warning
         logger.warn(
-          `Session requested but not available, falling back to API key authentication`,
+          `Session requested but not available or unauthorized, falling back to API key authentication`,
           { prefix: "Auth" }
         );
         const available = await this.sessionService.getAvailableSessions();
         if (available.length > 0) {
           logger.info(`Available sessions: ${available.map(s => s.projectId).join(', ')}`, { prefix: "Auth" });
         }
-        // API key will be used by ClientFactory (already in config)
       } else {
-        // No session AND no API key - error
         const available = await this.sessionService.getAvailableSessions();
         throw new AuthenticationError('no-auth-available',
           `Session authentication requested but no valid session found, and no API key configured.`,
@@ -1009,7 +1069,10 @@ export class ConfigManager {
    */
   public getCollections(filter?: CollectionFilter): (Collection | CollectionCreate)[] {
     const config = this.getConfig();
-    const collections = config.collections || config.tables || [];
+    const collections = [
+      ...(config.collections || []),
+      ...(config.tables || [])
+    ];
 
     if (filter) {
       return collections.filter(filter);

@@ -170,6 +170,7 @@ export function collectionToYaml(
   }
 ): string {
   const schemaPath = config.schemaPath || (config.useTableTerminology ? "../.yaml_schemas/table.schema.json" : "../.yaml_schemas/collection.schema.json");
+  const useTableTerminology = config.useTableTerminology;
   // Convert Collection to YamlCollectionData format
   const yamlData: YamlCollectionData = {
     name: collection.name,
@@ -178,10 +179,16 @@ export function collectionToYaml(
   };
 
   // Use appropriate security field based on terminology
-  if (config.useTableTerminology) {
-    yamlData.rowSecurity = collection.documentSecurity;
+  const rowSecurityValue = (collection as any).rowSecurity;
+  const securityValue = collection.documentSecurity !== undefined
+    ? collection.documentSecurity
+    : typeof rowSecurityValue === "boolean"
+      ? rowSecurityValue
+      : false;
+  if (useTableTerminology) {
+    yamlData.rowSecurity = securityValue;
   } else {
-    yamlData.documentSecurity = collection.documentSecurity;
+    yamlData.documentSecurity = securityValue;
   }
 
   // Convert permissions
@@ -219,7 +226,14 @@ export function collectionToYaml(
         if (max !== undefined) yamlAttr.max = max;
       }
       if ('elements' in attr && attr.elements !== undefined) yamlAttr.elements = attr.elements;
-      if ('relatedCollection' in attr && attr.relatedCollection !== undefined) yamlAttr.relatedCollection = attr.relatedCollection;
+      const relatedTarget = (attr as any).relatedCollection ?? (attr as any).relatedTable;
+      if (relatedTarget !== undefined) {
+        if (useTableTerminology) {
+          yamlAttr.relatedTable = relatedTarget;
+        } else {
+          yamlAttr.relatedCollection = relatedTarget;
+        }
+      }
       if ('relationType' in attr && attr.relationType !== undefined) yamlAttr.relationType = attr.relationType;
       if ('twoWay' in attr && attr.twoWay !== undefined) yamlAttr.twoWay = attr.twoWay;
       if ('twoWayKey' in attr && attr.twoWayKey !== undefined) yamlAttr.twoWayKey = attr.twoWayKey;
@@ -230,7 +244,7 @@ export function collectionToYaml(
     });
 
     // Use appropriate terminology
-    if (config.useTableTerminology) {
+    if (useTableTerminology) {
       yamlData.columns = attributeArray;
     } else {
       yamlData.attributes = attributeArray;
@@ -247,8 +261,8 @@ export function collectionToYaml(
       };
 
       // Use appropriate field terminology for index references
-      if (config.useTableTerminology) {
-        indexData.columns = idx.attributes;
+      if (useTableTerminology) {
+        indexData.columns = idx.attributes || (idx as any).columns || [];
       } else {
         indexData.attributes = idx.attributes;
       }
@@ -316,12 +330,13 @@ export function normalizeYamlData(yamlData: YamlCollectionData): YamlCollectionD
 
   // Normalize index field references
   if (normalized.indexes) {
-    normalized.indexes = normalized.indexes.map(idx => ({
-      ...idx,
-      attributes: idx.columns || idx.attributes,
-      // Remove columns field after normalization
-      columns: undefined
-    }));
+    normalized.indexes = normalized.indexes.map(idx => {
+      const { columns, attributes, ...rest } = idx as any;
+      return {
+        ...rest,
+        attributes: attributes || columns || []
+      };
+    });
   }
 
   // Normalize security fields - prefer documentSecurity for consistency
@@ -359,22 +374,33 @@ export function convertTerminology(
         relatedCollection: undefined
       }));
       delete converted.attributes;
+    } else {
+      converted.columns = [];
     }
 
     // Convert index references
     if (converted.indexes) {
-      converted.indexes = converted.indexes.map(idx => ({
-        ...idx,
-        columns: idx.attributes,
-        attributes: idx.attributes // Keep both for compatibility
-      }));
+      converted.indexes = converted.indexes.map(idx => {
+        const columns = idx.attributes || idx.columns || [];
+        const { attributes, columns: existingColumns, ...rest } = idx as any;
+        return {
+          ...rest,
+          columns
+        };
+      });
     }
 
-    // Convert security field
-    if (yamlData.documentSecurity !== undefined && yamlData.rowSecurity === undefined) {
+    // Convert security field (documentSecurity maps to rowSecurity for tables)
+    const hasDocumentSecurity = yamlData.documentSecurity !== undefined;
+    const hasRowSecurity = yamlData.rowSecurity !== undefined;
+    if (hasDocumentSecurity) {
       converted.rowSecurity = yamlData.documentSecurity;
-      delete converted.documentSecurity;
+    } else if (hasRowSecurity) {
+      converted.rowSecurity = yamlData.rowSecurity;
+    } else {
+      converted.rowSecurity = false;
     }
+    delete converted.documentSecurity;
 
     return converted;
   } else {

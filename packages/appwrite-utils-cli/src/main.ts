@@ -1195,7 +1195,10 @@ async function main() {
 
       // Build DatabaseSelection[] with tableIds per DB
       const databaseSelections: DatabaseSelection[] = [];
-      const allConfigItems = controller.config.collections || controller.config.tables || [];
+      const allConfigItems = [
+        ...(controller.config.collections || []),
+        ...(controller.config.tables || [])
+      ];
       let lastSelectedTableIds: string[] | null = null;
 
       for (const dbId of selectedDbIds) {
@@ -1211,8 +1214,16 @@ async function main() {
           return true; // eligible everywhere if unspecified
         });
 
-        // Fetch available tables from remote for selection context
+        // Fetch available tables from remote for status/context
         const availableTables = await fetchAllCollections(dbId, controller.database);
+        const remoteTableIds = new Set(availableTables.map(table => table.$id));
+        const localItems = eligibleConfigItems;
+        const localItemIds = localItems.map(item => item.$id || (item as any).id || (item as any).tableId || item.name);
+        const localNewItems = localItems.filter(item => {
+          const itemId = item.$id || (item as any).id || (item as any).tableId || item.name;
+          return !remoteTableIds.has(itemId);
+        });
+        const localNewIds = localNewItems.map(item => item.$id || (item as any).id || (item as any).tableId || item.name);
 
         // Determine selected table IDs
         let selectedTableIds: string[] = [];
@@ -1220,50 +1231,64 @@ async function main() {
           // Non-interactive: respect provided table IDs as-is (apply to each selected DB)
           selectedTableIds = parsedArgv.collectionIds.split(/[\,\s]+/).filter(Boolean);
         } else {
-          // If we have a previous selection, offer to reuse it
-          if (lastSelectedTableIds && lastSelectedTableIds.length > 0) {
-            const inquirer = (await import("inquirer")).default;
-            const { reuseMode } = await inquirer.prompt([
-              {
-                type: "list",
-                name: "reuseMode",
-                message: `How do you want to select tables for ${db.name}?`,
-                choices: [
-                  { name: `Use same selection as previous (${lastSelectedTableIds.length} items)`, value: "same" },
-                  { name: `Filter by this database (manual select)`, value: "filter" },
-                  { name: `Show all available in this database (manual select)`, value: "all" }
-                ],
-                default: "same"
-              }
-            ]);
+          const inquirer = (await import("inquirer")).default;
+          const choices: Array<{ name: string; value: string }> = [];
 
-            if (reuseMode === "same") {
-              selectedTableIds = [...lastSelectedTableIds];
-            } else if (reuseMode === "all") {
-              selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
-                dbId,
-                db.name,
-                availableTables,
-                allConfigItems as any[],
-                { showSelectAll: false, allowNewOnly: false, defaultSelected: lastSelectedTableIds }
-              );
+          if (lastSelectedTableIds && lastSelectedTableIds.length > 0) {
+            choices.push({
+              name: `Use same selection as previous (${lastSelectedTableIds.length} items)`,
+              value: "same"
+            });
+          }
+
+          if (localItemIds.length > 0) {
+            choices.push({
+              name: `Select all local items for ${db.name} (${localItemIds.length} items)`,
+              value: "all_local"
+            });
+          }
+
+          if (localNewIds.length > 0) {
+            choices.push({
+              name: `Select only new local items (not on remote) (${localNewIds.length} items)`,
+              value: "new_only"
+            });
+          }
+
+          choices.push({
+            name: "Manual selection",
+            value: "manual"
+          });
+
+          const { selectionMode } = await inquirer.prompt([
+            {
+              type: "list",
+              name: "selectionMode",
+              message: `How do you want to select tables for ${db.name}?`,
+              choices,
+              default: choices[0]?.value || "manual"
+            }
+          ]);
+
+          if (selectionMode === "same") {
+            selectedTableIds = [...(lastSelectedTableIds || [])];
+          } else if (selectionMode === "all_local") {
+            selectedTableIds = [...localItemIds];
+          } else if (selectionMode === "new_only") {
+            selectedTableIds = [...localNewIds];
+          } else {
+            if (localItems.length === 0) {
+              MessageFormatter.warning(`No local tables/collections available for ${db.name}`, { prefix: "Push" });
+              selectedTableIds = [];
             } else {
               selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
                 dbId,
                 db.name,
-                availableTables,
-                eligibleConfigItems,
-                { showSelectAll: false, allowNewOnly: true, defaultSelected: lastSelectedTableIds }
+                localItems as any[],
+                availableTables as any[],
+                { showSelectAll: localItems.length > 1, allowNewOnly: false, defaultSelected: lastSelectedTableIds || [] }
               );
             }
-          } else {
-            selectedTableIds = await SelectionDialogs.selectTablesForDatabase(
-              dbId,
-              db.name,
-              availableTables,
-              eligibleConfigItems,
-              { showSelectAll: false, allowNewOnly: true, defaultSelected: [] }
-            );
           }
         }
 

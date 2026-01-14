@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { MessageFormatter } from "../../shared/messageFormatter.js";
 import { logger } from "../../shared/logging.js";
+import { isValidSessionCookie as isValidSessionCookieShared } from "../../clients/sessionAuth.js";
+import { fetchServerVersion, isVersionAtLeast } from "../../utils/versionDetection.js";
 
 /**
  * Session preferences stored in ~/.appwrite/prefs.json
@@ -272,38 +274,13 @@ export class SessionAuthService {
       requestedEndpoint: endpoint
     });
 
-    for (const [storedProjectId, sessionData] of Object.entries(prefs)) {
-      // Skip non-session entries (like "current")
-      if (typeof sessionData !== "object" || !sessionData.endpoint || !sessionData.cookie) {
-        continue;
-      }
-
-      const normalizedSessionEndpoint = this.normalizeEndpoint(sessionData.endpoint);
-
-      if (normalizedSessionEndpoint === normalizedRequestEndpoint) {
-        // Found a session with matching endpoint
-        logger.debug("Found session via endpoint-based fallback", {
-          requestedProjectId: projectId,
-          matchedProjectId: storedProjectId,
-          endpoint: sessionData.endpoint,
-          email: sessionData.email
-        });
-
-        MessageFormatter.info(
-          `Using session from project '${storedProjectId}' for endpoint-based authentication`,
-          { prefix: "Session" }
-        );
-
-        // Return session info with the REQUESTED projectId
-        // (since the session will be used for that project)
-        return {
-          endpoint: sessionData.endpoint,
-          projectId, // Use requested projectId, not stored one
-          email: sessionData.email,
-          cookie: sessionData.cookie,
-          expiresAt: sessionData.expiresAt
-        };
-      }
+    const workingSessionResult = await this.findWorkingSession(endpoint, projectId);
+    if (workingSessionResult) {
+      MessageFormatter.info(
+        `Using session from project '${workingSessionResult.prefsKey}' for endpoint-based authentication`,
+        { prefix: "Session" }
+      );
+      return workingSessionResult.session;
     }
 
     logger.debug("No session found for project or endpoint", {
@@ -518,39 +495,7 @@ export class SessionAuthService {
    * @returns true if cookie appears valid, false otherwise
    */
   private isValidSessionCookie(cookie: string): boolean {
-    if (!cookie || typeof cookie !== "string") {
-      return false;
-    }
-
-    // Trim whitespace
-    cookie = cookie.trim();
-
-    // Basic length check
-    if (cookie.length < 10) {
-      return false;
-    }
-
-    // Basic validation - Appwrite session cookies are typically JWT-like
-    // They should contain dots and be reasonably long
-    if (!cookie.includes(".")) {
-      return false;
-    }
-
-    // Check for obviously expired or malformed tokens
-    // JWT tokens typically have 3 parts separated by dots
-    const parts = cookie.split(".");
-    if (parts.length < 2) {
-      return false;
-    }
-
-    // Additional validation - ensure it's not obviously corrupted
-    // Should contain alphanumeric characters and common JWT characters
-    const validChars = /^[A-Za-z0-9._-]+$/;
-    if (!validChars.test(cookie)) {
-      return false;
-    }
-
-    return true;
+    return isValidSessionCookieShared(cookie);
   }
 
   /**
@@ -666,11 +611,23 @@ export class SessionAuthService {
       targetProjectId
     });
 
+    const serverVersion = await fetchServerVersion(endpoint);
+    const useTables = !!(serverVersion && isVersionAtLeast(serverVersion, "1.8.0"));
+    logger.debug("Session test using health check version info", {
+      prefix: "Session",
+      endpoint,
+      serverVersion: serverVersion || "unknown",
+      useTables
+    });
+
     for (const [prefsKey, sessionData] of candidates) {
       logger.debug(`Testing session for project key: ${prefsKey}`, { prefix: "Session" });
 
       // Test this session against the target project
-      const works = await this.testSession(endpoint, targetProjectId, sessionData.cookie);
+      const works = await this.testSession(endpoint, targetProjectId, sessionData.cookie, {
+        useTables,
+        serverVersion
+      });
 
       if (works) {
         logger.info(`Found working session for project ${targetProjectId}`, {
@@ -698,6 +655,32 @@ export class SessionAuthService {
     });
 
     return null;
+  }
+
+  /**
+   * Test an explicit session cookie against a project/endpoint
+   *
+   * @param endpoint - Appwrite endpoint URL
+   * @param projectId - Project ID to test against
+   * @param cookie - Session cookie to test
+   * @returns True if the session works, false otherwise
+   */
+  public async isSessionWorking(
+    endpoint: string,
+    projectId: string,
+    cookie: string
+  ): Promise<boolean> {
+    if (!cookie || typeof cookie !== "string") {
+      return false;
+    }
+
+    const serverVersion = await fetchServerVersion(endpoint);
+    const useTables = !!(serverVersion && isVersionAtLeast(serverVersion, "1.8.0"));
+
+    return await this.testSession(endpoint, projectId, cookie, {
+      useTables,
+      serverVersion
+    });
   }
 
   /**
@@ -734,10 +717,11 @@ export class SessionAuthService {
   private async testSession(
     endpoint: string,
     projectId: string,
-    cookie: string
+    cookie: string,
+    options: { useTables?: boolean; serverVersion?: string | null } = {}
   ): Promise<boolean> {
     try {
-      const { Client, Databases } = await import('node-appwrite');
+      const { Client, Databases, TablesDB, Query } = await import('node-appwrite');
 
       const client = new Client()
         .setEndpoint(endpoint)
@@ -748,10 +732,36 @@ export class SessionAuthService {
       // Set admin mode header for session testing
       client.headers['X-Appwrite-Mode'] = 'admin';
 
-      const databases = new Databases(client);
+      let useTables = options.useTables;
+      if (useTables === undefined) {
+        const version = options.serverVersion ?? await fetchServerVersion(endpoint);
+        useTables = !!(version && isVersionAtLeast(version, "1.8.0"));
+      }
 
-      // Attempt to list databases as a test
-      await databases.list();
+      if (useTables) {
+        const databases = new Databases(client);
+        let dbId: string | undefined;
+
+        // Fetch one database ID to test TablesDB
+        const dbList: any = await databases.list([Query.limit(1)]);
+        dbId = dbList?.databases?.[0]?.$id || dbList?.databases?.[0]?.id || dbList?.[0]?.$id;
+
+        if (!dbId) {
+          logger.debug("Session test succeeded; no databases found to test TablesDB", {
+            prefix: "Session",
+            endpoint,
+            projectId
+          });
+          return true;
+        }
+
+        const tables = new TablesDB(client);
+        await tables.listTables({ databaseId: dbId, queries: [Query.limit(1)] });
+      } else {
+        const databases = new Databases(client);
+        // Attempt to list databases as a test
+        await databases.list();
+      }
 
       logger.debug("Session test successful", {
         prefix: "Session",

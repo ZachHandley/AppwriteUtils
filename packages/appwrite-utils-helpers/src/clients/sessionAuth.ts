@@ -86,19 +86,29 @@ export function isValidSessionCookie(cookie: string): boolean {
     return false;
   }
 
-  cookie = cookie.trim();
-  if (cookie.length < 10) {
+  const trimmed = cookie.trim();
+  if (trimmed.length < 10) {
     return false;
   }
 
   // Accept Appwrite session cookies in any format:
   // - Full: "a_session_console=eyJ...}; expires=..."
-  // - Value only: "eyJ..."
-  if (cookie.includes('a_session') || cookie.startsWith('eyJ')) {
+  // - Value only: "eyJ..." (JWT-like)
+  if (trimmed.includes("a_session") || trimmed.startsWith("eyJ")) {
     return true;
   }
 
-  return false;
+  // Fallback: accept JWT-like tokens without "eyJ" prefix
+  if (!trimmed.includes(".")) {
+    return false;
+  }
+
+  const validChars = /^[A-Za-z0-9._-]+$/;
+  if (!validChars.test(trimmed)) {
+    return false;
+  }
+
+  return trimmed.split(".").length >= 2;
 }
 
 /**

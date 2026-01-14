@@ -121,6 +121,7 @@ const YamlCollectionSchema = z.object({
   name: z.string(),
   id: z.string().optional(),
   documentSecurity: z.boolean().default(false),
+  rowSecurity: z.boolean().default(false),
   enabled: z.boolean().default(true),
   permissions: z.array(
     z.object({
@@ -140,6 +141,29 @@ const YamlCollectionSchema = z.object({
       max: z.number().optional(),
       elements: z.array(z.string()).optional(),
       relatedCollection: z.string().optional(),
+      relatedTable: z.string().optional(),
+      relationType: z.string().optional(),
+      twoWay: z.boolean().optional(),
+      twoWayKey: z.string().optional(),
+      onDelete: z.string().optional(),
+      side: z.string().optional(),
+      encrypt: z.boolean().optional(),
+      format: z.string().optional()
+    })
+  ).optional().default([]),
+  columns: z.array(
+    z.object({
+      key: z.string(),
+      type: z.string(),
+      size: z.number().optional(),
+      required: z.boolean().default(false),
+      array: z.boolean().optional(),
+      default: z.any().optional(),
+      min: z.number().optional(),
+      max: z.number().optional(),
+      elements: z.array(z.string()).optional(),
+      relatedCollection: z.string().optional(),
+      relatedTable: z.string().optional(),
       relationType: z.string().optional(),
       twoWay: z.boolean().optional(),
       twoWayKey: z.string().optional(),
@@ -153,7 +177,8 @@ const YamlCollectionSchema = z.object({
     z.object({
       key: z.string(),
       type: z.string(),
-      attributes: z.array(z.string()),
+      attributes: z.array(z.string()).optional(),
+      columns: z.array(z.string()).optional(),
       orders: z.array(z.string()).optional()
     })
   ).optional().default([]),
@@ -216,20 +241,28 @@ type YamlTable = z.infer<typeof YamlTableSchema>;
 export const loadYamlCollection = (filePath: string): CollectionCreate | null => {
   try {
     const fileContent = fs.readFileSync(filePath, "utf8");
-    const yamlData = yaml.load(fileContent) as unknown;
+    const yamlData = yaml.load(fileContent) as any;
     const parsedCollection = YamlCollectionSchema.parse(yamlData);
+    const securityValue = typeof yamlData?.documentSecurity === "boolean"
+      ? yamlData.documentSecurity
+      : typeof yamlData?.rowSecurity === "boolean"
+        ? yamlData.rowSecurity
+        : parsedCollection.documentSecurity;
 
     // Convert YAML collection to CollectionCreate format
+    const rawAttributes = parsedCollection.attributes.length > 0
+      ? parsedCollection.attributes
+      : parsedCollection.columns;
     const collectionInput: CollectionCreate = {
       name: parsedCollection.name,
       $id: parsedCollection.id || parsedCollection.name.toLowerCase().replace(/\s+/g, '_'),
-      documentSecurity: parsedCollection.documentSecurity,
+      documentSecurity: securityValue,
       enabled: parsedCollection.enabled,
       $permissions: parsedCollection.permissions.map(p => ({
         permission: p.permission as any,
         target: p.target
       })),
-      attributes: parsedCollection.attributes.map(attr => ({
+      attributes: rawAttributes.map(attr => ({
         key: attr.key,
         type: attr.type as any,
         size: attr.size,
@@ -239,7 +272,7 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
         min: attr.min,
         max: attr.max,
         elements: attr.elements,
-        relatedCollection: attr.relatedCollection,
+        relatedCollection: attr.relatedCollection || attr.relatedTable,
         relationType: attr.relationType as any,
         twoWay: attr.twoWay,
         twoWayKey: attr.twoWayKey,
@@ -251,7 +284,7 @@ export const loadYamlCollection = (filePath: string): CollectionCreate | null =>
       indexes: parsedCollection.indexes.map(idx => ({
         key: idx.key,
         type: idx.type as any,
-        attributes: idx.attributes,
+        attributes: idx.attributes || idx.columns || [],
         orders: idx.orders as any
       })),
       importDefs: parsedCollection.importDefs && Array.isArray(parsedCollection.importDefs) && parsedCollection.importDefs.length > 0 ? parsedCollection.importDefs : []
