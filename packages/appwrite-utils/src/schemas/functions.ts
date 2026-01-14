@@ -35,7 +35,7 @@ export const AppwriteFunctionSchema = z.object({
   name: z.string(),
   runtime: RuntimeSchema,
   execute: z.array(z.string()),
-  events: z.array(z.string()),
+  events: z.array(EventTypeSchema).optional(),
   schedule: z.string().optional(),
   timeout: z.number().optional(),
   enabled: z.boolean().optional(),

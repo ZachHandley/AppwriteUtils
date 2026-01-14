@@ -109,13 +109,13 @@ const BaseTableSchema = BaseTableSchemaCore.extend({
   path: ["attributes", "columns"],
 })
 .refine((data) => {
-  // Validation: require at least one array with content
-  const hasAttributeContent = data.attributes && data.attributes.length > 0;
-  const hasColumnsContent = data.columns && data.columns.length > 0;
+  // Validation: require a terminology to be explicitly provided (empty arrays allowed)
+  const attributesProvided = data.attributes !== undefined;
+  const columnsProvided = data.columns !== undefined;
 
-  return hasAttributeContent || hasColumnsContent;
+  return attributesProvided || columnsProvided;
 }, {
-  message: "Table must have either 'attributes' (legacy) or 'columns' (TablesDB) with at least one field defined",
+  message: "Table must specify either 'attributes' (legacy) or 'columns' (TablesDB)",
   path: ["attributes", "columns"],
 });
 
@@ -170,13 +170,13 @@ const TableCreateBaseSchema = BaseTableSchemaCore.omit({
   path: ["attributes", "columns"],
 })
 .refine((data) => {
-  // Validation: require at least one array with content
-  const hasAttributeContent = data.attributes && data.attributes.length > 0;
-  const hasColumnsContent = data.columns && data.columns.length > 0;
+  // Validation: require a terminology to be explicitly provided (empty arrays allowed)
+  const attributesProvided = data.attributes !== undefined;
+  const columnsProvided = data.columns !== undefined;
 
-  return hasAttributeContent || hasColumnsContent;
+  return attributesProvided || columnsProvided;
 }, {
-  message: "Table must have either 'attributes' (legacy) or 'columns' (TablesDB) with at least one field defined",
+  message: "Table must specify either 'attributes' (legacy) or 'columns' (TablesDB)",
   path: ["attributes", "columns"],
 });
 

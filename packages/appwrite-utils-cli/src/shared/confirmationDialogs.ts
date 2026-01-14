@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
-import { MessageFormatter } from "./messageFormatter.js";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 
 export interface DestructiveOperationOptions {
   operation: string;

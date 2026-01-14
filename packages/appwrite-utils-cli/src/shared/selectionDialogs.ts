@@ -1,8 +1,8 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
 import type { Models } from "node-appwrite";
-import { MessageFormatter } from "./messageFormatter.js";
-import { logger } from "./logging.js";
+import { MessageFormatter } from 'appwrite-utils-helpers';
+import { logger } from 'appwrite-utils-helpers';
 
 /**
  * Interface for sync selection summary
@@ -307,7 +307,7 @@ export class SelectionDialogs {
       MessageFormatter.section(`Table Selection for ${databaseName}`);
     }
 
-    const configuredIds = new Set(configuredTables.map(table => table.$id || table.id));
+    const configuredIds = new Set(configuredTables.map(table => table.$id || table.id || (table as any).tableId || table.name));
 
     let choices: any[] = [];
 
@@ -320,9 +320,10 @@ export class SelectionDialogs {
     }
 
     availableTables.forEach(table => {
-      const isConfigured = configuredIds.has(table.$id);
+      const tableId = table.$id || table.id || (table as any).tableId || table.name;
+      const isConfigured = configuredIds.has(tableId);
       const status = isConfigured ? chalk.green('✅') : chalk.blue('○');
-      const name = `${status} ${table.name} (${table.$id})`;
+      const name = `${status} ${table.name} (${tableId})`;
 
       if (allowNewOnly && isConfigured) {
         return; // Skip configured tables if only allowing new ones
@@ -330,10 +331,10 @@ export class SelectionDialogs {
 
       choices.push({
         name,
-        value: table.$id,
+        value: tableId,
         short: table.name,
         // Do not preselect anything unless explicitly provided
-        checked: defaultSelected.includes(table.$id)
+        checked: defaultSelected.includes(tableId)
       });
     });
 
@@ -360,7 +361,7 @@ export class SelectionDialogs {
 
     // Handle select all
     if (selectedTableIds.includes('__SELECT_ALL__')) {
-      const allIds = availableTables.map(table => table.$id);
+      const allIds = availableTables.map(table => table.$id || table.id || (table as any).tableId || table.name);
       if (allowNewOnly) {
         return allIds.filter(id => !configuredIds.has(id));
       }

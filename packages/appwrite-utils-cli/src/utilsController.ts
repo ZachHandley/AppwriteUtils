@@ -15,7 +15,7 @@ import {
   findAppwriteConfig,
   findFunctionsDir,
 } from "./utils/loadConfigs.js";
-import { normalizeFunctionName, validateFunctionDirectory } from './functions/pathResolution.js';
+import { normalizeFunctionName, validateFunctionDirectory } from 'appwrite-utils-helpers';
 import { UsersController } from "./users/methods.js";
 import { AppwriteToX } from "./migrations/appwriteToX.js";
 import { ImportController } from "./migrations/importController.js";
@@ -56,10 +56,10 @@ import {
   transferUsersLocalToRemote,
   type TransferOptions,
 } from "./migrations/transfer.js";
-import { getClient, getClientWithAuth } from "./utils/getClientFromConfig.js";
-import { getAdapterFromConfig } from "./utils/getClientFromConfig.js";
-import type { DatabaseAdapter } from './adapters/DatabaseAdapter.js';
-import { hasSessionAuth, findSessionByEndpointAndProject, isValidSessionCookie, type SessionAuthInfo } from "./utils/sessionAuth.js";
+import { getClient, getClientWithAuth } from "appwrite-utils-helpers";
+import { getAdapterFromConfig } from "appwrite-utils-helpers";
+import type { DatabaseAdapter } from 'appwrite-utils-helpers';
+import { hasSessionAuth, findSessionByEndpointAndProject, isValidSessionCookie, type SessionAuthInfo } from "appwrite-utils-helpers";
 import { fetchAllDatabases } from "./databases/methods.js";
 import {
   listFunctions,
@@ -68,20 +68,24 @@ import {
 import chalk from "chalk";
 import { deployLocalFunction } from "./functions/deployments.js";
 import fs from "node:fs";
-import { configureLogging, updateLogger, logger } from "./shared/logging.js";
-import { MessageFormatter, Messages } from "./shared/messageFormatter.js";
-import { SchemaGenerator } from "./shared/schemaGenerator.js";
-import { findYamlConfig } from "./config/yamlConfig.js";
-import { createImportSchemas } from "./migrations/yaml/generateImportSchemas.js";
 import {
+  configureLogging,
+  updateLogger,
+  logger,
+  MessageFormatter,
+  Messages,
+  SchemaGenerator,
+  findYamlConfig,
   validateCollectionsTablesConfig,
   reportValidationResults,
   validateWithStrictMode,
+  ConfigManager,
   type ValidationResult
-} from "./config/configValidation.js";
-import { ConfigManager } from "./config/ConfigManager.js";
-import { ClientFactory } from "./utils/ClientFactory.js";
+} from "appwrite-utils-helpers";
+import { createImportSchemas } from "./migrations/yaml/generateImportSchemas.js";
+import { ClientFactory } from "appwrite-utils-helpers";
 import type { DatabaseSelection, BucketSelection } from "./shared/selectionDialogs.js";
+import { clearProcessingState, processQueue } from "./shared/operationQueue.js";
 
 export interface SetupOptions {
   databases?: Models.Database[];
@@ -96,6 +100,19 @@ export interface SetupOptions {
   importData?: boolean;
   checkDuplicates?: boolean;
   shouldWriteFile?: boolean;
+}
+
+export interface ControllerInitOptions {
+  validate?: boolean;
+  strictMode?: boolean;
+  useSession?: boolean;
+  sessionCookie?: string;
+  preferJson?: boolean;
+  overrides?: {
+    appwriteEndpoint?: string;
+    appwriteProject?: string;
+    appwriteKey?: string;
+  };
 }
 
 export class UtilsController {
@@ -247,8 +264,8 @@ export class UtilsController {
     }
   }
 
-  async init(options: { validate?: boolean; strictMode?: boolean; useSession?: boolean; sessionCookie?: string } = {}) {
-    const { validate = false, strictMode = false } = options;
+  async init(options: ControllerInitOptions = {}) {
+    const { validate = false, strictMode = false, preferJson = false, useSession, sessionCookie, overrides } = options;
     const configManager = ConfigManager.getInstance();
 
     // Load config if not already loaded
@@ -257,6 +274,10 @@ export class UtilsController {
         configDir: this.currentUserDir,
         validate,
         strictMode,
+        preferJson,
+        useSession,
+        explicitSessionCookie: sessionCookie,
+        overrides,
       });
     }
 
@@ -504,7 +525,8 @@ export class UtilsController {
       this.appwriteServer,
       functionName,
       functionConfig,
-      functionPath
+      functionPath,
+      this.appwriteFolderPath
     );
   }
 
@@ -628,7 +650,6 @@ export class UtilsController {
     // Ensure we don't carry state between databases in a multi-db push
     // This resets processed sets and name->id mapping per database
     try {
-      const { clearProcessingState } = await import('./shared/operationQueue.js');
       clearProcessingState();
     } catch {}
 
@@ -655,6 +676,15 @@ export class UtilsController {
         deletedCollections,
         collections
       );
+    }
+
+    // Safety net: Process any remaining queued operations to complete relationship sync
+    try {
+      MessageFormatter.info(`🔄 Processing final operation queue for database ${database.$id}`, { prefix: "UtilsController" });
+      await processQueue(this.adapter || this.database!, database.$id);
+      MessageFormatter.info(`✅ Operation queue processing completed`, { prefix: "UtilsController" });
+    } catch (error) {
+      MessageFormatter.error(`Failed to process operation queue`, error instanceof Error ? error : new Error(String(error)), { prefix: 'UtilsController' });
     }
   }
 
@@ -878,22 +908,40 @@ export class UtilsController {
 
     // Convert database selections to Models.Database format
     const selectedDatabases: Models.Database[] = [];
+    const serverDatabases = await fetchAllDatabases(this.database);
+    const configuredDatabases = this.config?.databases || [];
 
     for (const dbSelection of databaseSelections) {
-      // Get the full database object from the controller
-      const databases = await fetchAllDatabases(this.database);
-      const database = databases.find(db => db.$id === dbSelection.databaseId);
+      // First try to find on server
+      const serverDb = serverDatabases.find(db => db.$id === dbSelection.databaseId);
 
-      if (database) {
-        selectedDatabases.push(database);
-        MessageFormatter.info(`Selected database: ${database.name} (${database.$id})`, { prefix: "Controller" });
-
-        // Log selected tables for this database
-        if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
-          MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
-        }
+      if (serverDb) {
+        selectedDatabases.push(serverDb);
+        MessageFormatter.info(`Selected database: ${serverDb.name} (${serverDb.$id})`, { prefix: "Controller" });
       } else {
-        MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found`, { prefix: "Controller" });
+        // Database doesn't exist on server - check if it's in local config
+        const configDb = configuredDatabases.find((db: any) => db.$id === dbSelection.databaseId);
+
+        if (configDb) {
+          // Create a pseudo-database object that ensureDatabasesExist will create
+          const dbId = configDb.$id;
+          selectedDatabases.push({
+            $id: dbId,
+            name: configDb.name || dbId,
+            $createdAt: new Date().toISOString(),
+            $updatedAt: new Date().toISOString(),
+            enabled: true,
+          } as Models.Database);
+          MessageFormatter.info(`Selected database: ${configDb.name || dbId} (${dbId}) [will be created]`, { prefix: "Controller" });
+        } else {
+          MessageFormatter.warning(`Database with ID ${dbSelection.databaseId} not found in server or local config`, { prefix: "Controller" });
+          continue;
+        }
+      }
+
+      // Log selected tables for this database
+      if (dbSelection.tableIds && dbSelection.tableIds.length > 0) {
+        MessageFormatter.info(`  Tables: ${dbSelection.tableIds.join(', ')}`, { prefix: "Controller" });
       }
     }
 
@@ -916,7 +964,10 @@ export class UtilsController {
     const databaseCollectionsMap = new Map<string, any[]>();
 
     // Get all collections/tables from config (they're at the root level, not nested in databases)
-    const allCollections = this.config?.collections || this.config?.tables || [];
+    const allCollections = [
+      ...(this.config?.collections || []),
+      ...(this.config?.tables || [])
+    ];
 
     // Create database-specific collection mapping to preserve relationships
     for (const dbSelection of databaseSelections) {

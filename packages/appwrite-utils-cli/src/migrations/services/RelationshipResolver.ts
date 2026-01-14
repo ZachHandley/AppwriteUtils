@@ -4,7 +4,7 @@ import type {
   AppwriteConfig,
   CollectionCreate,
 } from "appwrite-utils";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 import { isEmpty } from "es-toolkit/compat";
 import type { UserMappingService } from "./UserMappingService.js";
 

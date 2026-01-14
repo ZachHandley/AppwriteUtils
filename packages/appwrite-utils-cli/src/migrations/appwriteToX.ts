@@ -1,5 +1,4 @@
-import { SchemaGenerator } from "../shared/schemaGenerator.js";
-import { findYamlConfig } from "../config/yamlConfig.js";
+import { SchemaGenerator, findYamlConfig } from "appwrite-utils-helpers";
 import {
   Client,
   Compression,
@@ -26,12 +25,12 @@ import {
   type Specification,
 } from "appwrite-utils";
 import { getDatabaseFromConfig } from "./afterImportActions.js";
-import { getAdapterFromConfig } from "../utils/getClientFromConfig.js";
+import { getAdapterFromConfig } from "appwrite-utils-helpers";
 import { listBuckets } from "../storage/methods.js";
 import { listFunctions, listFunctionDeployments, getFunction } from "../functions/methods.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { isLegacyDatabases } from "../utils/typeGuards.js";
-import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
+import { isLegacyDatabases } from "appwrite-utils-helpers";
+import type { DatabaseAdapter } from "appwrite-utils-helpers";
 import type { DatabaseSelection, BucketSelection } from "../shared/selectionDialogs.js";
 
 /**
@@ -121,8 +120,13 @@ export class AppwriteToX {
       const client = new Client();
       client
         .setEndpoint(this.config.appwriteEndpoint)
-        .setProject(this.config.appwriteProject)
-        .setKey(this.config.appwriteKey);
+        .setProject(this.config.appwriteProject);
+
+      // Only set API key if provided (session auth is alternative)
+      if (this.config.appwriteKey) {
+        client.setKey(this.config.appwriteKey);
+      }
+
       this.config.appwriteClient = client;
     }
   }

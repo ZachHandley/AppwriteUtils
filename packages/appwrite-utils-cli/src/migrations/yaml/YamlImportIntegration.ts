@@ -1,8 +1,8 @@
 import type { CollectionCreate, ImportDef } from "appwrite-utils";
 import { YamlImportConfigLoader, type YamlImportConfig } from "./YamlImportConfigLoader.js";
 import { createImportSchemas, createImportExamples } from "./generateImportSchemas.js";
-import { logger } from "../../shared/logging.js";
-import { normalizeYamlData, usesTableTerminology, convertTerminology, type YamlCollectionData } from "../../utils/yamlConverter.js";
+import { logger } from 'appwrite-utils-helpers';
+import { normalizeYamlData, usesTableTerminology, convertTerminology, type YamlCollectionData } from "appwrite-utils-helpers";
 import path from "path";
 import fs from "fs";
 import yaml from "js-yaml";

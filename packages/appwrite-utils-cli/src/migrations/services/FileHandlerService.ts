@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import type { AttributeMappings, AppwriteConfig } from "appwrite-utils";
 import type { ImportDataActions } from "../importDataActions.js";
-import { logger } from "../../shared/logging.js";
+import { logger } from 'appwrite-utils-helpers';
 import { RateLimitManager } from "./RateLimitManager.js";
 
 /**

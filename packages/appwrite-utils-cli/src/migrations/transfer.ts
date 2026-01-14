@@ -9,18 +9,16 @@ import {
   type Models,
 } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
-import { getAppwriteClient } from "../utils/helperFunctions.js";
+import { getAppwriteClient } from "appwrite-utils-helpers";
 // Legacy attribute helpers retained only for local-to-local flows if needed
 import { parseAttribute } from "appwrite-utils";
 import chalk from "chalk";
 import { fetchAllCollections } from "../collections/methods.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { LegacyAdapter } from "../adapters/LegacyAdapter.js";
+import { MessageFormatter, mapToCreateAttributeParams } from "appwrite-utils-helpers";
 import { ProgressManager } from "../shared/progressManager.js";
-import { getClient, getAdapter } from "../utils/getClientFromConfig.js";
+import { getClient, getAdapter } from "appwrite-utils-helpers";
 import { diffTableColumns } from "../collections/tableOperations.js";
-import { mapToCreateAttributeParams } from "../shared/attributeMapper.js";
-import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
+import { LegacyAdapter, type DatabaseAdapter } from "appwrite-utils-helpers";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;

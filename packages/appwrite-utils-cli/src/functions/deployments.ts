@@ -15,8 +15,8 @@ import {
   updateFunctionSpecifications,
 } from "./methods.js";
 import ignore from "ignore";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { resolveFunctionDirectory, validateFunctionDirectory } from './pathResolution.js';
+import { MessageFormatter } from "appwrite-utils-helpers";
+import { resolveFunctionDirectory, validateFunctionDirectory } from 'appwrite-utils-helpers';
 
 export const deployFunction = async (
   client: Client,
@@ -150,7 +150,8 @@ export const deployLocalFunction = async (
   client: Client,
   functionName: string,
   functionConfig: AppwriteFunction,
-  functionPath?: string
+  functionPath?: string,
+  configDirPath?: string
 ) => {
   let functionExists = true;
   let functionThatExists: Models.Function;
@@ -160,10 +161,10 @@ export const deployLocalFunction = async (
     functionExists = false;
   }
 
-  const configDirPath = process.cwd(); // TODO: This should be passed from caller
+  const resolvedConfigDir = configDirPath ?? process.cwd();
   const resolvedPath = resolveFunctionDirectory(
     functionName,
-    configDirPath,
+    resolvedConfigDir,
     functionConfig.dirPath,
     functionPath
   );

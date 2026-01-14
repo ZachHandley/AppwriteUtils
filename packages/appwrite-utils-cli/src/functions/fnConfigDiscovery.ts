@@ -3,8 +3,8 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { homedir } from 'node:os';
 import { AppwriteFunctionSchema, type AppwriteFunction } from 'appwrite-utils';
-import { shouldIgnoreDirectory } from '../utils/directoryUtils.js';
-import { MessageFormatter } from '../shared/messageFormatter.js';
+import { shouldIgnoreDirectory } from 'appwrite-utils-helpers';
+import { MessageFormatter } from 'appwrite-utils-helpers';
 
 function findGitRoot(startDir: string): string {
   let dir = path.resolve(startDir);

@@ -4,11 +4,19 @@ import { type AppwriteConfig, type Collection, type CollectionCreate, type Table
 import { register } from "tsx/esm/api"; // Import the register function
 import { pathToFileURL } from "node:url";
 import chalk from "chalk";
-import { findYamlConfig, loadYamlConfig, loadYamlConfigWithSession, extractSessionOptionsFromConfig, type YamlSessionOptions } from "../config/yamlConfig.js";
-import { detectAppwriteVersionCached, fetchServerVersion, isVersionAtLeast } from "./versionDetection.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { validateCollectionsTablesConfig, reportValidationResults, type ValidationResult } from "../config/configValidation.js";
-import { resolveCollectionsDir, resolveTablesDir } from "./pathResolvers.js";
+import {
+  findYamlConfig,
+  loadYamlConfig,
+  loadYamlConfigWithSession,
+  extractSessionOptionsFromConfig,
+  validateCollectionsTablesConfig,
+  reportValidationResults,
+  type YamlSessionOptions,
+  type ValidationResult
+} from "appwrite-utils-helpers";
+import { detectAppwriteVersionCached, fetchServerVersion, isVersionAtLeast } from 'appwrite-utils-helpers';
+import { MessageFormatter } from "appwrite-utils-helpers";
+import { resolveCollectionsDir, resolveTablesDir } from 'appwrite-utils-helpers';
 import {
   findAppwriteConfig,
   findAppwriteConfigTS,
@@ -16,7 +24,7 @@ import {
   discoverCollections,
   discoverTables,
   discoverLegacyDirectory
-} from "./configDiscovery.js";
+} from 'appwrite-utils-helpers';
 
 /**
  * Session authentication preservation options for config loading
@@ -63,7 +71,7 @@ export function createSessionPreservation(
 }
 
 // Re-export config discovery functions for backward compatibility
-export { findAppwriteConfig, findFunctionsDir } from "./configDiscovery.js";
+export { findAppwriteConfig, findFunctionsDir } from 'appwrite-utils-helpers';
 
 /**
  * Loads the Appwrite configuration and returns both config and the path where it was found.

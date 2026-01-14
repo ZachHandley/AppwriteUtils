@@ -17,8 +17,8 @@ import {
   usesTableTerminology,
   type YamlTerminologyConfig,
   type YamlCollectionData
-} from "../utils/yamlConverter.js";
-import { createYamlLoader } from "../utils/yamlLoader.js";
+} from "appwrite-utils-helpers";
+import { createYamlLoader } from "appwrite-utils-helpers";
 import { YamlImportIntegration } from "../migrations/yaml/YamlImportIntegration.js";
 import { createImportSchemas } from "../migrations/yaml/generateImportSchemas.js";
 import {

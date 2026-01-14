@@ -5,8 +5,7 @@ import type {
   Attribute,
   RelationshipAttribute,
 } from "appwrite-utils";
-import { logger } from "../shared/logging.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
+import { logger, MessageFormatter } from "appwrite-utils-helpers";
 
 /**
  * Finds collections that have defined relationship attributes.

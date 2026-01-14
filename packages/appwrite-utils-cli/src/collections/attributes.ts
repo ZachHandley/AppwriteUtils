@@ -14,13 +14,11 @@ import {
   delay,
   tryAwaitWithRetry,
   calculateExponentialBackoff,
-} from "../utils/helperFunctions.js";
+} from "appwrite-utils-helpers";
 import chalk from "chalk";
 import { Decimal } from "decimal.js";
-import type { DatabaseAdapter, CreateAttributeParams, UpdateAttributeParams, DeleteAttributeParams } from "../adapters/DatabaseAdapter.js";
-import { logger } from "../shared/logging.js";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { isDatabaseAdapter } from "../utils/typeGuards.js";
+import type { DatabaseAdapter, CreateAttributeParams, UpdateAttributeParams, DeleteAttributeParams } from "appwrite-utils-helpers";
+import { logger, MessageFormatter, isDatabaseAdapter } from "appwrite-utils-helpers";
 
 // Extreme values that Appwrite may return, which should be treated as undefined
 const EXTREME_MIN_INTEGER = -9223372036854776000;
@@ -651,13 +649,6 @@ const updateLegacyAttribute = async (
   collectionId: string,
   attribute: Attribute
 ): Promise<void> => {
-  console.log(`DEBUG updateLegacyAttribute before normalizeMinMaxValues:`, {
-    key: attribute.key,
-    type: attribute.type,
-    min: (attribute as any).min,
-    max: (attribute as any).max
-  });
-
   const { min: normalizedMin, max: normalizedMax } =
     normalizeMinMaxValues(attribute);
 
@@ -1515,37 +1506,10 @@ export const createOrUpdateAttribute = async (
     //   `Updating attribute with same key ${attribute.key} but different values`
     // );
 
-    // DEBUG: Log before object merge to detect corruption
-    if ((attribute.key === 'conversationType' || attribute.key === 'messageStreakCount')) {
-      console.log(`[DEBUG] MERGE - key="${attribute.key}"`, {
-        found: {
-          elements: (foundAttribute as any)?.elements,
-          min: (foundAttribute as any)?.min,
-          max: (foundAttribute as any)?.max
-        },
-        desired: {
-          elements: (attribute as any)?.elements,
-          min: (attribute as any)?.min,
-          max: (attribute as any)?.max
-        }
-      });
-    }
-
     finalAttribute = {
       ...foundAttribute,
       ...attribute,
     };
-
-    // DEBUG: Log after object merge to detect corruption
-    if ((finalAttribute.key === 'conversationType' || finalAttribute.key === 'messageStreakCount')) {
-      console.log(`[DEBUG] AFTER_MERGE - key="${finalAttribute.key}"`, {
-        merged: {
-          elements: finalAttribute?.elements,
-          min: (finalAttribute as any)?.min,
-          max: (finalAttribute as any)?.max
-        }
-      });
-    }
     action = "update";
   } else if (
     !updateEnabled &&

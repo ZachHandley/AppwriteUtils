@@ -35,9 +35,8 @@ import { join } from "node:path";
 import path from "path";
 import fs from "node:fs";
 import os from "node:os";
-import { MessageFormatter } from "./shared/messageFormatter.js";
+import { MessageFormatter, findYamlConfig } from "appwrite-utils-helpers";
 import { findAppwriteConfig } from "./utils/loadConfigs.js";
-import { findYamlConfig } from "./config/yamlConfig.js";
 
 // Import command modules
 import { configCommands } from "./cli/commands/configCommands.js";
@@ -73,12 +72,20 @@ enum CHOICES {
   EXIT = "👋 Exit",
 }
 
+export interface InteractiveCLIOptions {
+  useSession?: boolean;
+  sessionCookie?: string;
+}
+
 export class InteractiveCLI {
   private controller: UtilsController | undefined;
   private isUsingTypeScriptConfig: boolean = false;
   private lastSelectedCollectionIds: string[] = [];
+  private options: InteractiveCLIOptions;
 
-  constructor(private currentDir: string) {}
+  constructor(private currentDir: string, options: InteractiveCLIOptions = {}) {
+    this.options = options;
+  }
 
   async run(): Promise<void> {
     MessageFormatter.banner(
@@ -204,7 +211,10 @@ export class InteractiveCLI {
   }): Promise<void> {
     if (!this.controller) {
       this.controller = UtilsController.getInstance(this.currentDir, directConfig);
-      await this.controller.init();
+      await this.controller.init({
+        useSession: this.options.useSession,
+        sessionCookie: this.options.sessionCookie
+      });
     } else {
       // Extract session info from existing controller before reinitializing
       const sessionInfo = await this.controller.getSessionInfo();
@@ -219,12 +229,18 @@ export class InteractiveCLI {
         // Reinitialize with session preservation
         UtilsController.clearInstance();
         this.controller = UtilsController.getInstance(this.currentDir, enhancedDirectConfig);
-        await this.controller.init();
+        await this.controller.init({
+          useSession: this.options.useSession,
+          sessionCookie: this.options.sessionCookie
+        });
       } else if (directConfig) {
         // Standard reinitialize without session
         UtilsController.clearInstance();
         this.controller = UtilsController.getInstance(this.currentDir, directConfig);
-        await this.controller.init();
+        await this.controller.init({
+          useSession: this.options.useSession,
+          sessionCookie: this.options.sessionCookie
+        });
       }
       // If no directConfig provided, keep existing controller
     }
@@ -383,6 +399,12 @@ export class InteractiveCLI {
         (coll) => !configCollections.some((c) => c.name === coll.name || c.$id === coll.$id)
       );
 
+    const getCollectionId = (collection: Models.Collection) => collection.$id || collection.name;
+    const localCollectionIds = new Set(configCollections.map((c) => c.$id || c.name));
+    const localCollections = allCollections.filter((collection) =>
+      localCollectionIds.has(getCollectionId(collection))
+    );
+
     // Enhanced choice display with type indicators
     const choices = allCollections
       .sort((a, b) => {
@@ -438,6 +460,20 @@ export class InteractiveCLI {
         };
       });
 
+    if (multiSelect && localCollections.length > 1) {
+      choices.unshift({
+        name: chalk.green.bold(`📋 Select All Local Items (${localCollections.length})`),
+        value: "__SELECT_ALL_LOCAL__"
+      });
+    }
+
+    if (multiSelect && allCollections.length > 1) {
+      choices.unshift({
+        name: chalk.green.bold(`📋 Select All Shown (${allCollections.length})`),
+        value: "__SELECT_ALL__"
+      });
+    }
+
     const { selectedCollections } = await inquirer.prompt([
       {
         type: multiSelect ? "checkbox" : "list",
@@ -446,8 +482,27 @@ export class InteractiveCLI {
         choices,
         loop: true,
         pageSize: 15, // Increased page size to accommodate additional info
+        validate: (input: any[]) => {
+          if (!multiSelect) return true;
+          if (input.includes("__SELECT_ALL__") && input.length > 1) {
+            return "Cannot select 'Select All' with individual items.";
+          }
+          if (input.includes("__SELECT_ALL_LOCAL__") && input.length > 1) {
+            return "Cannot select 'Select All Local' with individual items.";
+          }
+          return true;
+        }
       },
     ]);
+
+    if (multiSelect && Array.isArray(selectedCollections)) {
+      if (selectedCollections.includes("__SELECT_ALL__")) {
+        return allCollections;
+      }
+      if (selectedCollections.includes("__SELECT_ALL_LOCAL__")) {
+        return localCollections;
+      }
+    }
 
     return selectedCollections;
   }
@@ -1019,7 +1074,10 @@ export class InteractiveCLI {
     _sourceFolder?: string;
     databaseId?: string;
   })[] {
-    const configCollections = this.controller!.config?.collections || [];
+    const configCollections = [
+      ...(this.controller!.config?.collections || []),
+      ...(this.controller!.config?.tables || [])
+    ];
     // @ts-expect-error - appwrite invalid types
     return configCollections.map((c) => ({
       $id: c.$id || ulid(),

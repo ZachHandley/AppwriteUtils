@@ -13,23 +13,36 @@ import {
   type FunctionScope,
   type Specification,
   type Runtime as AppwriteUtilsRuntime,
+  EventTypeSchema,
 } from "appwrite-utils";
 import chalk from "chalk";
 import { extract as extractTar } from "tar";
-import { MessageFormatter } from "../shared/messageFormatter.js";
-import { expandTildePath, normalizeFunctionName } from "./pathResolution.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
+import { expandTildePath, normalizeFunctionName } from 'appwrite-utils-helpers';
 
 /**
  * Validates and filters events array for Appwrite functions
  * - Filters out empty/invalid strings
+ * - Validates against EventTypeSchema
  * - Limits to 100 items maximum (Appwrite limit)
  * - Returns empty array if input is invalid
  */
 const validateEvents = (events?: string[]): string[] => {
   if (!events || !Array.isArray(events)) return [];
-  
+
   return events
-    .filter(event => event && typeof event === 'string' && event.trim().length > 0)
+    .filter(event => {
+      if (!event || typeof event !== 'string' || event.trim().length === 0) {
+        return false;
+      }
+      // Validate against EventTypeSchema
+      const result = EventTypeSchema.safeParse(event);
+      if (!result.success) {
+        MessageFormatter.warning(`Invalid event type "${event}" will be filtered out`, { prefix: "Functions" });
+        return false;
+      }
+      return true;
+    })
     .slice(0, 100);
 };
 

@@ -5,7 +5,7 @@ import os from "node:os";
 import { ulid } from "ulidx";
 import chalk from "chalk";
 import { Query } from "node-appwrite";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import {
   createFunctionTemplate,
   deleteFunction,
@@ -15,7 +15,7 @@ import {
 } from "../../functions/methods.js";
 import { deployLocalFunction } from "../../functions/deployments.js";
 import { discoverFnConfigs, mergeDiscoveredFunctions } from "../../functions/fnConfigDiscovery.js";
-import { addFunctionToYamlConfig, findYamlConfig } from "../../config/yamlConfig.js";
+import { addFunctionToYamlConfig, findYamlConfig } from "appwrite-utils-helpers";
 import { RuntimeSchema, type AppwriteFunction, type Runtime, type Specification } from "appwrite-utils";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
 
@@ -326,7 +326,8 @@ export const functionCommands = {
             ...effectiveConfig,
             dirPath: functionPath,
           },
-          functionPath
+          functionPath,
+          yamlBaseDir
         );
         MessageFormatter.success("Function deployed successfully!", { prefix: "Functions" });
       } catch (error) {

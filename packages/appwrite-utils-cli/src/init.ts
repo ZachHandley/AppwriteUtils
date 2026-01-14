@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import inquirer from "inquirer";
 import { createEmptyCollection, setupDirsFiles } from "./utils/setupFiles.js";
-import { MessageFormatter } from "./shared/messageFormatter.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
 
 MessageFormatter.banner("Appwrite Utils CLI Tool by Zach Handley", "For more information, visit https://github.com/zachhandley/appwrite-utils");
 

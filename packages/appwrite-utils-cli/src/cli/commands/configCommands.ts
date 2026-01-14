@@ -1,20 +1,27 @@
 import inquirer from "inquirer";
-import { MessageFormatter } from "../../shared/messageFormatter.js";
+import fs from "fs";
+import path from "path";
+import { MessageFormatter } from 'appwrite-utils-helpers';
 import { migrateConfig } from "../../utils/configMigration.js";
 import {
   validateCollectionsTablesConfig,
   reportValidationResults,
-} from "../../config/configValidation.js";
+  ConfigManager,
+  findAppwriteConfig,
+  findYamlConfig,
+  YamlLoader,
+  resolveCollectionsDir,
+  resolveTablesDir
+} from "appwrite-utils-helpers";
 import {
   createMigrationPlan,
   executeMigrationPlan,
   saveMigrationResult,
   type MigrationStrategy,
-} from "../../config/configMigration.js";
+} from 'appwrite-utils-helpers';
 import { createEmptyCollection } from "../../utils/setupFiles.js";
 import chalk from "chalk";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
-import { ConfigManager } from "../../config/ConfigManager.js";
 import { UtilsController } from "../../utilsController.js";
 
 export const configCommands = {
@@ -56,7 +63,7 @@ export const configCommands = {
         return;
       }
 
-      const { validateCollectionsTablesConfig, reportValidationResults } = await import("../../config/configValidation.js");
+      const { validateCollectionsTablesConfig, reportValidationResults } = await import("appwrite-utils-helpers");
       const validation = validateCollectionsTablesConfig(config);
 
       reportValidationResults(validation, { verbose: true });
@@ -78,6 +85,9 @@ export const configCommands = {
 
       await (cli as any).initControllerIfNeeded();
 
+      const currentDir = (cli as any).currentDir;
+      const yamlConfigPath = findYamlConfig(currentDir);
+
       // Ensure config is properly loaded with YAML collections
       if (!(cli as any).controller?.config) {
         MessageFormatter.error("No configuration found", undefined, { prefix: "Migration" });
@@ -89,8 +99,6 @@ export const configCommands = {
         MessageFormatter.error("No collections found in configuration. Please check your YAML files or appwriteConfig.ts", undefined, { prefix: "Migration" });
         return;
       }
-
-      const { createMigrationPlan, executeMigrationPlan, saveMigrationResult } = await import("../../config/configMigration.js");
 
       // Get user's migration strategy preference
       const { strategy } = await inquirer.prompt([
@@ -105,6 +113,60 @@ export const configCommands = {
           ]
         }
       ]);
+
+      if (yamlConfigPath) {
+        const appwriteDir = path.dirname(yamlConfigPath);
+        const collectionsDir = resolveCollectionsDir(appwriteDir);
+        const tablesDir = resolveTablesDir(appwriteDir);
+
+        if (!fs.existsSync(collectionsDir)) {
+          MessageFormatter.error(`Collections directory not found: ${collectionsDir}`, undefined, { prefix: "Migration" });
+          return;
+        }
+
+        const collectionFiles = fs
+          .readdirSync(collectionsDir)
+          .filter(file => file.endsWith(".yaml") || file.endsWith(".yml"));
+
+        if (collectionFiles.length === 0) {
+          MessageFormatter.error("No YAML collection files found to migrate.", undefined, { prefix: "Migration" });
+          return;
+        }
+
+        const { confirmed } = await inquirer.prompt([
+          {
+            type: "confirm",
+            name: "confirmed",
+            message: `Proceed with migration? This will process ${collectionFiles.length} file(s).`,
+            default: false
+          }
+        ]);
+
+        if (!confirmed) {
+          MessageFormatter.info("Migration cancelled by user", { prefix: "Migration" });
+          return;
+        }
+
+        const yamlLoader = new YamlLoader(appwriteDir);
+        const result = await yamlLoader.migrateTerminology(
+          path.relative(appwriteDir, collectionsDir),
+          path.relative(appwriteDir, tablesDir),
+          true
+        );
+
+        if (result.errors.length > 0) {
+          MessageFormatter.warning(`Migration completed with ${result.errors.length} error(s).`, { prefix: "Migration" });
+        }
+
+        if (strategy === "move") {
+          const backupDir = `${collectionsDir}.backup.${Date.now()}`;
+          fs.renameSync(collectionsDir, backupDir);
+          MessageFormatter.info(`Collections moved to ${path.basename(backupDir)}`, { prefix: "Migration" });
+        }
+
+        MessageFormatter.success(`Collections migrated to tables (${result.migrated} converted, ${result.skipped} skipped).`, { prefix: "Migration" });
+        return;
+      }
 
       // Map user-friendly strategy names to internal MigrationStrategy types
       const migrationStrategy = strategy === "move" ? "full_migration" :
@@ -122,7 +184,9 @@ export const configCommands = {
 
       if (confirmed) {
         const result = executeMigrationPlan((cli as any).controller.config, plan);
-        await saveMigrationResult(result, (cli as any).currentDir);
+        const configDir = findAppwriteConfig(currentDir) || currentDir;
+        const outputPath = path.join(configDir, "appwriteConfig.ts");
+        await saveMigrationResult(result, outputPath, { originalConfigPath: outputPath });
 
         MessageFormatter.success("Collections to tables migration completed!", { prefix: "Migration" });
       } else {

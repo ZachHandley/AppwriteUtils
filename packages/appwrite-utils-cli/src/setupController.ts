@@ -3,7 +3,7 @@ import { loadConfig } from "./utils/loadConfigs.js";
 import path from "path";
 import fs from "fs";
 import type { AppwriteConfig } from "appwrite-utils";
-import { MessageFormatter } from "./shared/messageFormatter.js";
+import { MessageFormatter } from "appwrite-utils-helpers";
 
 export class SetupController {
   private currentDir: string;

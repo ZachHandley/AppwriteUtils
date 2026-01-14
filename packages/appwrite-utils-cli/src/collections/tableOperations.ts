@@ -1,5 +1,5 @@
 import type { Attribute } from "appwrite-utils";
-import { mapToCreateAttributeParams, mapToUpdateAttributeParams } from "../shared/attributeMapper.js";
+import { mapToCreateAttributeParams, mapToUpdateAttributeParams } from "appwrite-utils-helpers";
 import { Decimal } from "decimal.js";
 const EXTREME_BOUND = new Decimal('1e12');
 
@@ -143,10 +143,13 @@ export function normalizeAttributeToComparable(attr: Attribute): ComparableColum
 }
 
 export function normalizeColumnToComparable(col: any): ComparableColumn {
-  // Detect enum surfaced as string+elements from server and normalize to enum for comparison
+  // Detect enum surfaced as string+elements or string+format:enum from server and normalize to enum for comparison
   let t = String((col?.type ?? col?.columnType ?? '')).toLowerCase();
   const hasElements = Array.isArray(col?.elements) && (col.elements as any[]).length > 0;
-  if (t === 'string' && hasElements) t = 'enum';
+  const hasEnumFormat = (col?.format === 'enum');
+  if (t === 'string' && (hasElements || hasEnumFormat)) {
+    t = 'enum';
+  }
   const base: ComparableColumn = {
     key: col?.key,
     type: t,
@@ -227,21 +230,29 @@ export function isIndexEqualToIndex(a: any, b: any): boolean {
   if (String(a.type).toLowerCase() !== String(b.type).toLowerCase()) return false;
 
   // Compare attributes as sets (order-insensitive)
-  const attrsA = Array.isArray(a.attributes) ? [...a.attributes].sort() : [];
-  const attrsB = Array.isArray(b.attributes) ? [...b.attributes].sort() : [];
+  // Support TablesDB which returns 'columns' instead of 'attributes'
+  const attrsAraw = Array.isArray(a.attributes)
+    ? a.attributes
+    : (Array.isArray((a as any).columns) ? (a as any).columns : []);
+  const attrsA = [...attrsAraw].sort();
+  const attrsB = Array.isArray(b.attributes)
+    ? [...b.attributes].sort()
+    : (Array.isArray((b as any).columns) ? [...(b as any).columns].sort() : []);
   if (attrsA.length !== attrsB.length) return false;
   for (let i = 0; i < attrsA.length; i++) if (attrsA[i] !== attrsB[i]) return false;
 
-  // Orders are only considered if BOTH have orders defined
-  const hasOrdersA = Array.isArray(a.orders) && a.orders.length > 0;
-  const hasOrdersB = Array.isArray(b.orders) && b.orders.length > 0;
-  if (hasOrdersA && hasOrdersB) {
-    const ordersA = [...a.orders].sort();
+  // Orders are only considered if CONFIG (b) has orders defined
+  // This prevents false positives when Appwrite returns orders but user didn't specify them
+  const hasConfigOrders = Array.isArray(b.orders) && b.orders.length > 0;
+  if (hasConfigOrders) {
+    // Some APIs may expose 'directions' instead of 'orders'
+    const ordersA = Array.isArray(a.orders)
+      ? [...a.orders].sort()
+      : (Array.isArray((a as any).directions) ? [...(a as any).directions].sort() : []);
     const ordersB = [...b.orders].sort();
     if (ordersA.length !== ordersB.length) return false;
     for (let i = 0; i < ordersA.length; i++) if (ordersA[i] !== ordersB[i]) return false;
   }
-  // If only one side has orders, treat as equal (orders unspecified by user)
   return true;
 }
 
@@ -255,6 +266,8 @@ function compareColumnProperties(
 ): ColumnPropertyChange[] {
   const changes: ColumnPropertyChange[] = [];
   const t = String(columnType || (newAttribute as any).type || '').toLowerCase();
+  const key = newAttribute?.key || 'unknown';
+
   const mutableProps = (MUTABLE_PROPERTIES as any)[t] || [];
   const immutableProps = (IMMUTABLE_PROPERTIES as any)[t] || [];
 
@@ -274,7 +287,9 @@ function compareColumnProperties(
     let newValue = getNewVal(prop);
     // Special-case: enum elements empty/missing should not trigger updates
     if (t === 'enum' && prop === 'elements') {
-      if (!Array.isArray(newValue) || newValue.length === 0) newValue = oldValue;
+      if (!Array.isArray(newValue) || newValue.length === 0) {
+        newValue = oldValue;
+      }
     }
     if (Array.isArray(oldValue) && Array.isArray(newValue)) {
       if (oldValue.length !== newValue.length || oldValue.some((v: any, i: number) => v !== newValue[i])) {
@@ -300,11 +315,11 @@ function compareColumnProperties(
   // Type change requires recreate (normalize string+elements to enum on old side)
   const oldTypeRaw = String(oldColumn?.type || oldColumn?.columnType || '').toLowerCase();
   const oldHasElements = Array.isArray(oldColumn?.elements) && (oldColumn.elements as any[]).length > 0;
-  const oldType = oldTypeRaw === 'string' && oldHasElements ? 'enum' : oldTypeRaw;
+  const oldHasEnumFormat = (oldColumn?.format === 'enum');
+  const oldType = oldTypeRaw === 'string' && (oldHasElements || oldHasEnumFormat) ? 'enum' : oldTypeRaw;
   if (oldType && t && oldType !== t && TYPE_CHANGE_REQUIRES_RECREATE.includes(oldType)) {
     changes.push({ property: 'type', oldValue: oldType, newValue: t, requiresRecreate: true });
   }
-
   return changes;
 }
 
@@ -348,32 +363,53 @@ function analyzeColumnChanges(
 /**
  * Enhanced version of columns diff with detailed change analysis
  * Order: desired first, then existing (matches internal usage here)
+ * Handles case-insensitive key matches as renames (recreates)
  */
 export function diffColumnsDetailed(
   desiredAttributes: Attribute[],
   existingColumns: any[]
 ): ColumnOperationPlan {
+  // Exact key lookup (case-sensitive)
   const byKey = new Map((existingColumns || []).map((col: any) => [col?.key, col] as const));
+  // Case-insensitive key lookup for detecting renames
+  const byKeyLower = new Map((existingColumns || []).map((col: any) => [col?.key?.toLowerCase(), col] as const));
 
   const toCreate: Attribute[] = [];
   const toUpdate: Array<{ attribute: Attribute; changes: ColumnPropertyChange[] }> = [];
   const toRecreate: Array<{ oldAttribute: any; newAttribute: Attribute }> = [];
   const unchanged: string[] = [];
+  const handledExistingKeys = new Set<string>(); // Track which existing columns we've handled
 
   for (const attr of desiredAttributes || []) {
     const key = (attr as any)?.key;
-    const existing = key ? byKey.get(key) : undefined;
-    if (!existing) {
-      toCreate.push(attr);
+    if (!key) continue;
+
+    // First try exact match
+    const exactMatch = byKey.get(key);
+    if (exactMatch) {
+      handledExistingKeys.add(key);
+      const analysis = analyzeColumnChanges(exactMatch, attr);
+      if (!analysis.hasChanges) unchanged.push(analysis.columnKey);
+      else if (analysis.requiresRecreate) toRecreate.push({ oldAttribute: exactMatch, newAttribute: attr });
+      else toUpdate.push({ attribute: attr, changes: analysis.changes });
       continue;
     }
-    const analysis = analyzeColumnChanges(existing, attr);
-    if (!analysis.hasChanges) unchanged.push(analysis.columnKey);
-    else if (analysis.requiresRecreate) toRecreate.push({ oldAttribute: existing, newAttribute: attr });
-    else toUpdate.push({ attribute: attr, changes: analysis.changes });
+
+    // Check for case-insensitive match (rename scenario like oAuthAccounts -> oauthAccounts)
+    const caseInsensitiveMatch = byKeyLower.get(key.toLowerCase());
+    if (caseInsensitiveMatch && caseInsensitiveMatch.key !== key) {
+      // This is a rename - treat as recreate (delete old, create new)
+      handledExistingKeys.add(caseInsensitiveMatch.key);
+      toRecreate.push({ oldAttribute: caseInsensitiveMatch, newAttribute: attr });
+      continue;
+    }
+
+    // No match - it's a new attribute
+    toCreate.push(attr);
   }
 
   // Note: we keep toDelete empty for now (conservative behavior)
+  // Deletions are handled separately in methods.ts
   return { toCreate, toUpdate, toRecreate, toDelete: [], unchanged };
 }
 
