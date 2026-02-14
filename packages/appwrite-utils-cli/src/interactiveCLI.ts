@@ -45,6 +45,7 @@ import { functionCommands } from "./cli/commands/functionCommands.js";
 import { storageCommands } from "./cli/commands/storageCommands.js";
 import { transferCommands } from "./cli/commands/transferCommands.js";
 import { schemaCommands } from "./cli/commands/schemaCommands.js";
+import { importFileCommands } from "./cli/commands/importFileCommands.js";
 
 enum CHOICES {
   MIGRATE_CONFIG = "🔄 Migrate TypeScript config to YAML (.appwrite structure)",
@@ -66,6 +67,7 @@ enum CHOICES {
   GENERATE_SCHEMAS = "🏗️ Generate schemas",
   GENERATE_CONSTANTS = "📋 Generate cross-language constants (TypeScript, Python, PHP, Dart, etc.)",
   IMPORT_DATA = "📥 Import data",
+  IMPORT_FILE = "📄 Import file (CSV/JSON) directly into a table",
   RELOAD_CONFIG = "🔄 Reload configuration files",
   UPDATE_FUNCTION_SPEC = "⚙️ Update function specifications",
   MANAGE_BUCKETS = "🪣 Manage storage buckets",
@@ -186,6 +188,10 @@ export class InteractiveCLI {
         case CHOICES.IMPORT_DATA:
           await this.initControllerIfNeeded();
           await schemaCommands.importData(this);
+          break;
+        case CHOICES.IMPORT_FILE:
+          await this.initControllerIfNeeded();
+          await importFileCommands.importFile(this);
           break;
         case CHOICES.RELOAD_CONFIG:
           await configCommands.reloadConfigWithSessionPreservation(this);
@@ -324,7 +330,8 @@ export class InteractiveCLI {
       },
     ]);
 
-    return selectedDatabases;
+    // "list" type returns a single value, "checkbox" returns an array — normalize to array
+    return Array.isArray(selectedDatabases) ? selectedDatabases : [selectedDatabases];
   }
 
   private async selectCollections(
@@ -406,7 +413,7 @@ export class InteractiveCLI {
     );
 
     // Enhanced choice display with type indicators
-    const choices = allCollections
+    const choices: { name: string; value: Models.Collection | string }[] = allCollections
       .sort((a, b) => {
         // Sort by type first (collections before tables), then by name
         const aIsTable = (a as any)._isFromTablesDir || false;

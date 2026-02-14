@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     branches:
-      - main
+      - "**"
     tags:
       - "cli-v*"
       - "v-*"
@@ -40,6 +40,10 @@ on:
 
 jobs:
   release:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,6 +90,15 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
+
+      - name: Verify workspace packages
+        run: |
+          for dir in packages/appwrite-utils packages/appwrite-utils-helpers packages/appwrite-utils-cli packages/appwrite-utils-mcp; do
+            if [[ ! -d "$dir" ]]; then
+              echo "Missing workspace directory: $dir" >&2
+              exit 1
+            fi
+          done
 
       - name: Set package versions (manual)
         if: github.event_name == 'workflow_dispatch'
@@ -154,17 +167,44 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils-mcp')
         run: bun --cwd packages/appwrite-utils-mcp run build
 
-      - name: Publish appwrite-utils
-        if: steps.check_utils.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
-        run: npm publish --access public
-        working-directory: packages/appwrite-utils
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+      - name: Prepare publish metadata
+        if: |
+          (steps.check_utils.outputs.should_publish == 'true' ||
+          steps.check_helpers.outputs.should_publish == 'true' ||
+          steps.check_cli.outputs.should_publish == 'true' ||
+          steps.check_mcp.outputs.should_publish == 'true') &&
+          (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        run: |
+          publish_packages=""
+          if [[ "${{ steps.check_utils.outputs.should_publish }}" == "true" ]]; then
+            publish_packages="${publish_packages},appwrite-utils"
+          fi
+          if [[ "${{ steps.check_helpers.outputs.should_publish }}" == "true" ]]; then
+            publish_packages="${publish_packages},appwrite-utils-helpers"
+          fi
+          if [[ "${{ steps.check_cli.outputs.should_publish }}" == "true" ]]; then
+            publish_packages="${publish_packages},appwrite-utils-cli"
+          fi
+          if [[ "${{ steps.check_mcp.outputs.should_publish }}" == "true" ]]; then
+            publish_packages="${publish_packages},appwrite-utils-mcp"
+          fi
+          publish_packages="${publish_packages#,}"
+          if [[ -z "$publish_packages" ]]; then
+            publish_packages="all"
+          fi
+          PUBLISH_PACKAGES="$publish_packages" node scripts/ci/prepare-publish.js
 
       - name: Publish appwrite-utils-helpers
         if: steps.check_helpers.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: npm publish --access public
         working-directory: packages/appwrite-utils-helpers
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+
+      - name: Publish appwrite-utils
+        if: steps.check_utils.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        run: npm publish --access public
+        working-directory: packages/appwrite-utils
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 

@@ -239,99 +239,137 @@ export const transferStorageLocalToRemote = async (
 // Remote document transfer functions moved to collections/methods.ts with enhanced UX
 
 /**
- * Transfers all collections and documents from one local database to another local database.
+ * Transfers all tables/collections and documents from one local database to another local database.
+ * Uses the DatabaseAdapter for unified TablesDB / legacy support.
  *
- * @param {Databases} localDb - The local database instance.
+ * @param {Databases} localDb - The local database instance (kept for signature compat).
  * @param {string} fromDbId - The ID of the source database.
  * @param {string} targetDbId - The ID of the target database.
+ * @param {string[]} collectionIds - Optional filter: specific table/collection IDs to transfer. undefined = all, empty array = none.
+ * @param {DatabaseAdapter} adapter - The database adapter (TablesDB or Legacy).
  * @return {Promise<void>} A promise that resolves when the transfer is complete.
  */
 export const transferDatabaseLocalToLocal = async (
   localDb: Databases,
   fromDbId: string,
-  targetDbId: string
+  targetDbId: string,
+  collectionIds?: string[],
+  adapter?: DatabaseAdapter
 ) => {
+  // If no adapter provided, fall back to creating a LegacyAdapter from the Databases client
+  const dbAdapter: DatabaseAdapter = adapter || new LegacyAdapter((localDb as any).client);
+
   MessageFormatter.info(
-    `Starting database transfer from ${fromDbId} to ${targetDbId}`,
-    { prefix: "Transfer" }
-  );
-  // Get all collections from source database
-  const sourceCollections = await fetchAllCollections(fromDbId, localDb);
-  MessageFormatter.info(
-    `Found ${sourceCollections.length} collections in source database`,
+    `Starting database transfer from ${fromDbId} to ${targetDbId} (mode: ${dbAdapter.getApiMode()})`,
     { prefix: "Transfer" }
   );
 
-  // Process each collection
-  for (const collection of sourceCollections) {
+  // Get all tables/collections from source database via adapter
+  const sourceListRes = await dbAdapter.listTables({ databaseId: fromDbId, queries: [Query.limit(500)] });
+  let sourceTables: any[] = sourceListRes.tables || sourceListRes.collections || sourceListRes.data || [];
+
+  // Filter by collectionIds if provided (match by $id or by name)
+  if (collectionIds !== undefined) {
+    if (collectionIds.length === 0) {
+      MessageFormatter.info("No tables/collections selected for transfer, skipping.", { prefix: "Transfer" });
+      return;
+    }
+    const idSet = new Set(collectionIds);
+    sourceTables = sourceTables.filter((c: any) => idSet.has(c.$id) || idSet.has(c.name));
+  }
+
+  MessageFormatter.info(
+    `Found ${sourceTables.length} tables/collections in source database`,
+    { prefix: "Transfer" }
+  );
+
+  // Process each table/collection
+  for (const table of sourceTables) {
     MessageFormatter.processing(
-      `Processing collection: ${collection.name} (${collection.$id})`,
+      `Processing table: ${table.name} (${table.$id})`,
       { prefix: "Transfer" }
     );
 
     try {
-      // Create or update collection in target
-      let targetCollection: Models.Collection;
-      const existingCollection = await tryAwaitWithRetry(async () =>
-        localDb.listCollections(targetDbId, [
-          Query.equal("$id", collection.$id),
-        ])
-      );
+      // Check if table exists in target via adapter
+      let targetTableId = table.$id;
+      let targetTableData: any;
 
-      if (existingCollection.collections.length > 0) {
-        targetCollection = existingCollection.collections[0];
-        MessageFormatter.info(
-          `Collection ${collection.name} exists in target database`,
-          { prefix: "Transfer" }
-        );
+      try {
+        const existingRes = await dbAdapter.getTable({ databaseId: targetDbId, tableId: table.$id });
+        targetTableData = existingRes.data || (existingRes.tables && existingRes.tables[0]);
 
-        // Update collection if needed
-        if (
-          targetCollection.name !== collection.name ||
-          targetCollection.$permissions !== collection.$permissions ||
-          targetCollection.documentSecurity !== collection.documentSecurity ||
-          targetCollection.enabled !== collection.enabled
-        ) {
-          targetCollection = await tryAwaitWithRetry(async () =>
-            localDb.updateCollection(
-              targetDbId,
-              collection.$id,
-              collection.name,
-              collection.$permissions,
-              collection.documentSecurity,
-              collection.enabled
-            )
-          );
-          MessageFormatter.success(
-            `Collection ${collection.name} updated`,
+        if (targetTableData) {
+          MessageFormatter.info(
+            `Table ${table.name} exists in target database`,
             { prefix: "Transfer" }
           );
+
+          // Update table if needed
+          const securityField = table.rowSecurity ?? table.documentSecurity ?? false;
+          const targetSecurity = targetTableData.rowSecurity ?? targetTableData.documentSecurity ?? false;
+          if (
+            targetTableData.name !== table.name ||
+            JSON.stringify(targetTableData.$permissions) !== JSON.stringify(table.$permissions) ||
+            targetSecurity !== securityField ||
+            targetTableData.enabled !== table.enabled
+          ) {
+            await tryAwaitWithRetry(async () =>
+              dbAdapter.updateTable({
+                databaseId: targetDbId,
+                id: table.$id,
+                name: table.name,
+                permissions: table.$permissions,
+                documentSecurity: table.documentSecurity,
+                rowSecurity: table.rowSecurity,
+                enabled: table.enabled,
+              })
+            );
+            MessageFormatter.success(
+              `Table ${table.name} updated`,
+              { prefix: "Transfer" }
+            );
+          }
         }
-      } else {
-        MessageFormatter.progress(
-          `Creating collection ${collection.name} in target database...`,
-          { prefix: "Transfer" }
-        );
-        targetCollection = await tryAwaitWithRetry(async () =>
-          localDb.createCollection(
-            targetDbId,
-            collection.$id,
-            collection.name,
-            collection.$permissions,
-            collection.documentSecurity,
-            collection.enabled
-          )
-        );
+      } catch {
+        // Table does not exist in target, create it
+        targetTableData = null;
       }
 
-      // Create attributes via local adapter (wrap the existing client)
-      const localAdapter: DatabaseAdapter = new LegacyAdapter((localDb as any).client);
-      MessageFormatter.info(`Creating attributes for ${collection.name} via adapter...`, { prefix: 'Transfer' });
-      const uniformAttrs = collection.attributes.map((attr) => parseAttribute(attr as any));
+      if (!targetTableData) {
+        MessageFormatter.progress(
+          `Creating table ${table.name} in target database...`,
+          { prefix: "Transfer" }
+        );
+        const createRes = await tryAwaitWithRetry(async () =>
+          dbAdapter.createTable({
+            databaseId: targetDbId,
+            id: table.$id,
+            name: table.name,
+            permissions: table.$permissions,
+            documentSecurity: table.documentSecurity,
+            rowSecurity: table.rowSecurity,
+            enabled: table.enabled,
+          })
+        );
+        targetTableData = createRes.data || (createRes.tables && createRes.tables[0]);
+      }
+
+      // Create attributes via adapter
+      MessageFormatter.info(`Creating attributes for ${table.name} via adapter...`, { prefix: 'Transfer' });
+
+      // Fetch existing attributes in target to skip already-created ones
+      const targetTableRes = await dbAdapter.getTable({ databaseId: targetDbId, tableId: targetTableId });
+      const targetInfo = targetTableRes.data || (targetTableRes.tables && targetTableRes.tables[0]);
+      const existingAttrs = targetInfo?.attributes || targetInfo?.columns || [];
+      const existingKeys = new Set(existingAttrs.map((a: any) => a.key || a.$id));
+
+      const uniformAttrs = (table.attributes || []).map((attr: any) => parseAttribute(attr as any));
       const nonRel = uniformAttrs.filter((a: any) => a.type !== 'relationship');
       for (const attr of nonRel) {
-        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetCollection.$id });
-        await localAdapter.createAttribute(params);
+        if (existingKeys.has(attr.key)) continue;
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetTableId });
+        await dbAdapter.createAttribute(params);
         await new Promise((r) => setTimeout(r, 150));
       }
 
@@ -341,8 +379,9 @@ export const transferDatabaseLocalToLocal = async (
         let lastStatus = '';
         while (Date.now() - start < maxWait) {
           try {
-            const tableRes = await localAdapter.getTable({ databaseId: targetDbId, tableId: targetCollection.$id });
-            const attrs = (tableRes as any).attributes || (tableRes as any).columns || [];
+            const tableRes = await dbAdapter.getTable({ databaseId: targetDbId, tableId: targetTableId });
+            const tInfo = tableRes.data || (tableRes.tables && tableRes.tables[0]);
+            const attrs = tInfo?.attributes || tInfo?.columns || [];
             const found = attrs.find((a: any) => a.key === attr.key);
             if (found) {
               if (found.status === 'available') break;
@@ -364,17 +403,18 @@ export const transferDatabaseLocalToLocal = async (
       // Relationship attributes
       const rels = uniformAttrs.filter((a: any) => a.type === 'relationship');
       for (const attr of rels) {
-        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetCollection.$id });
-        await localAdapter.createAttribute(params);
+        if (existingKeys.has(attr.key)) continue;
+        const params = mapToCreateAttributeParams(attr as any, { databaseId: targetDbId, tableId: targetTableId });
+        await dbAdapter.createAttribute(params);
         await new Promise((r) => setTimeout(r, 150));
       }
 
       // Handle indexes via adapter (create or update)
-      for (const idx of collection.indexes) {
+      for (const idx of (table.indexes || [])) {
         try {
-          await localAdapter.createIndex({
+          await dbAdapter.createIndex({
             databaseId: targetDbId,
-            tableId: targetCollection.$id,
+            tableId: targetTableId,
             key: (idx as any).key,
             type: (idx as any).type,
             attributes: (idx as any).attributes,
@@ -385,10 +425,10 @@ export const transferDatabaseLocalToLocal = async (
         } catch (e) {
           // Try update path by deleting and recreating if necessary
           try {
-            await localAdapter.deleteIndex({ databaseId: targetDbId, tableId: targetCollection.$id, key: (idx as any).key });
-            await localAdapter.createIndex({
+            await dbAdapter.deleteIndex({ databaseId: targetDbId, tableId: targetTableId, key: (idx as any).key });
+            await dbAdapter.createIndex({
               databaseId: targetDbId,
-              tableId: targetCollection.$id,
+              tableId: targetTableId,
               key: (idx as any).key,
               type: (idx as any).type,
               attributes: (idx as any).attributes,
@@ -402,20 +442,20 @@ export const transferDatabaseLocalToLocal = async (
         }
       }
 
-      // Transfer documents
+      // Transfer documents/rows via adapter
       const { transferDocumentsBetweenDbsLocalToLocal } = await import(
-        "../collections/methods.js"
+        "../collections/transferOperations.js"
       );
       await transferDocumentsBetweenDbsLocalToLocal(
-        localDb,
+        dbAdapter,
         fromDbId,
         targetDbId,
-        collection.$id,
-        targetCollection.$id
+        table.$id,
+        targetTableId
       );
     } catch (error) {
       MessageFormatter.error(
-        `Error processing collection ${collection.name}`,
+        `Error processing table ${table.name}`,
         error instanceof Error ? error : new Error(String(error)),
         { prefix: "Transfer" }
       );
@@ -429,13 +469,18 @@ export const transferDatabaseLocalToRemote = async (
   projectId: string,
   apiKey: string,
   fromDbId: string,
-  toDbId: string
+  toDbId: string,
+  collectionIds?: string[]
 ) => {
   const client = getAppwriteClient(endpoint, projectId, apiKey);
   const remoteDb = new Databases(client);
 
   // Get all collections from source database
-  const sourceCollections = await fetchAllCollections(fromDbId, localDb);
+  let sourceCollections = await fetchAllCollections(fromDbId, localDb);
+  if (collectionIds && collectionIds.length > 0) {
+    const idSet = new Set(collectionIds);
+    sourceCollections = sourceCollections.filter((c) => idSet.has(c.$id));
+  }
   MessageFormatter.info(
     `Found ${sourceCollections.length} collections in source database`,
     { prefix: "Transfer" }

@@ -1095,13 +1095,16 @@ export class UtilsController {
           options.transferProject!,
           options.transferKey!,
           fromDb.$id,
-          targetDb.$id
+          targetDb.$id,
+          options.collections
         );
       } else {
         await transferDatabaseLocalToLocal(
           sourceClient,
           fromDb.$id,
-          targetDb.$id
+          targetDb.$id,
+          options.collections,
+          this.adapter
         );
       }
     }

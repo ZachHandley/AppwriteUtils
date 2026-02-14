@@ -145,10 +145,7 @@ export const transferCommands = {
       fromDb,
       targetDb,
       isRemote,
-      collections:
-        selectedCollections.length > 0
-          ? selectedCollections.map((c: any) => c.$id)
-          : undefined,
+      collections: selectedCollections.map((c: any) => c.$id),
       sourceBucket,
       targetBucket,
     };

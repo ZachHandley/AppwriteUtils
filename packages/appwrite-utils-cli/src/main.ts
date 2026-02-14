@@ -78,6 +78,10 @@ interface CliOptions {
   schemaFormat?: 'zod' | 'json' | 'pydantic' | 'both' | 'all';
   schemaOutDir?: string;
   constantsInclude?: string;
+  // Direct file import
+  importFile?: string;
+  targetDb?: string;
+  targetTable?: string;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -602,6 +606,21 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Explicit session cookie to use for authentication",
   })
+  .option("importFile", {
+    alias: ["import-file"],
+    type: "string",
+    description: "Import a CSV or JSON file directly into a table (no config needed)",
+  })
+  .option("targetDb", {
+    alias: ["target-db"],
+    type: "string",
+    description: "Target database ID for --importFile (prompted if omitted)",
+  })
+  .option("targetTable", {
+    alias: ["target-table"],
+    type: "string",
+    description: "Target table ID for --importFile (prompted if omitted)",
+  })
   .parse() as ParsedArgv;
 
 async function main() {
@@ -657,6 +676,20 @@ async function main() {
     }
 
     const parsedArgv = argv;
+
+    if (argv.importFile) {
+      const { importFileFromPath, importFilePromptMissing } = await import("./cli/commands/importFileCommands.js");
+      if (!controller.adapter) {
+        MessageFormatter.error("No adapter available — check your credentials", undefined, { prefix: "Import" });
+        return;
+      }
+      if (parsedArgv.targetDb && parsedArgv.targetTable) {
+        await importFileFromPath(controller.adapter, argv.importFile, parsedArgv.targetDb, parsedArgv.targetTable);
+      } else {
+        await importFilePromptMissing(controller.adapter, controller.database, argv.importFile, parsedArgv.targetDb, parsedArgv.targetTable);
+      }
+      return;
+    }
 
     if (argv.setup) {
       await setupDirsFiles(false, process.cwd());
