@@ -18,7 +18,7 @@ import { MessageFormatter, mapToCreateAttributeParams } from "appwrite-utils-hel
 import { ProgressManager } from "../shared/progressManager.js";
 import { getClient, getAdapter } from "appwrite-utils-helpers";
 import { diffTableColumns } from "../collections/tableOperations.js";
-import { LegacyAdapter, type DatabaseAdapter } from "appwrite-utils-helpers";
+import { type DatabaseAdapter } from "appwrite-utils-helpers";
 
 export interface TransferOptions {
   fromDb: Models.Database | undefined;
@@ -256,8 +256,10 @@ export const transferDatabaseLocalToLocal = async (
   collectionIds?: string[],
   adapter?: DatabaseAdapter
 ) => {
-  // If no adapter provided, fall back to creating a LegacyAdapter from the Databases client
-  const dbAdapter: DatabaseAdapter = adapter || new LegacyAdapter((localDb as any).client);
+  if (!adapter) {
+    throw new Error("DatabaseAdapter is required for transferDatabaseLocalToLocal");
+  }
+  const dbAdapter: DatabaseAdapter = adapter;
 
   MessageFormatter.info(
     `Starting database transfer from ${fromDbId} to ${targetDbId} (mode: ${dbAdapter.getApiMode()})`,

@@ -40,61 +40,54 @@ export async function createOperationsTable(
 	db: DatabaseAdapter,
 	databaseId: string,
 ): Promise<void> {
-	// Check if table already exists
 	const exists = await tableExists(db, databaseId);
-	if (exists) {
-		logger.debug("Operations table already exists", {
+
+	if (!exists) {
+		logger.info("Creating operations tracking table", {
 			databaseId,
 			tableId: OPERATIONS_TABLE_ID,
 		});
-		return;
+
+		await tryAwaitWithRetry(async () => {
+			await db.createTable({
+				databaseId,
+				id: OPERATIONS_TABLE_ID,
+				name: OPERATIONS_TABLE_NAME,
+			});
+		});
 	}
 
-	logger.info("Creating operations tracking table", {
-		databaseId,
-		tableId: OPERATIONS_TABLE_ID,
-	});
-
-	// Create table
-	await tryAwaitWithRetry(async () => {
-		await db.createTable({
-			databaseId,
-			id: OPERATIONS_TABLE_ID,
-			name: OPERATIONS_TABLE_NAME,
-		});
-	});
-
-	// Create attributes with retry logic
+	// Always ensure attributes exist (handles partial creation from previous runs)
 	const attributes = [
 		{
 			key: "operationType",
 			type: "string",
-			size: 50,
+			size: 255,
 			required: true,
 		},
 		{
-			key: "targetCollection",
+			key: "targetTable",
 			type: "string",
-			size: 50,
+			size: 255,
 			required: false,
 		},
 		{
 			key: "status",
 			type: "enum",
 			elements: ["pending", "in_progress", "completed", "failed", "cancelled"],
-			required: true,
+			required: false,
 			default: "pending",
 		},
 		{
 			key: "progress",
 			type: "integer",
-			required: true,
+			required: false,
 			default: 0,
 		},
 		{
 			key: "total",
 			type: "integer",
-			required: true,
+			required: false,
 			default: 0,
 		},
 		{
@@ -106,22 +99,29 @@ export async function createOperationsTable(
 		{
 			key: "error",
 			type: "string",
-			size: 10000,
+			size: 65535,
 			required: false,
 		},
 	];
 
 	for (const attr of attributes) {
-		await tryAwaitWithRetry(async () => {
+		try {
 			await db.createAttribute({
 				databaseId,
 				tableId: OPERATIONS_TABLE_ID,
 				...attr,
 			});
-		});
+		} catch (error) {
+			// Attribute may already exist from a previous run — that's fine, skip it
+			const msg = error instanceof Error ? error.message : String(error);
+			if (msg.includes("already exists") || msg.includes("column_already_exists")) {
+				continue;
+			}
+			throw error;
+		}
 	}
 
-	logger.info("Operations tracking table created successfully", {
+	logger.info("Operations tracking table ready", {
 		databaseId,
 		tableId: OPERATIONS_TABLE_ID,
 		attributes: attributes.length,
@@ -148,8 +148,8 @@ export async function findOrCreateOperation(
 			Query.equal("status", "pending"),
 		];
 
-		if (params?.targetCollection) {
-			queries.push(Query.equal("targetCollection", params.targetCollection));
+		if (params?.targetTable) {
+			queries.push(Query.equal("targetTable", params.targetTable));
 		}
 
 		const response = await db.listRows({
@@ -175,7 +175,7 @@ export async function findOrCreateOperation(
 	// Create new operation
 	const newOperation = {
 		operationType,
-		targetCollection: params?.targetCollection,
+		targetTable: params?.targetTable,
 		status: "pending" as OperationStatus,
 		progress: params?.progress ?? 0,
 		total: params?.total ?? 0,
@@ -212,8 +212,8 @@ export async function updateOperation(
 
 	if (updates.operationType !== undefined)
 		updateData.operationType = updates.operationType;
-	if (updates.targetCollection !== undefined)
-		updateData.targetCollection = updates.targetCollection;
+	if (updates.targetTable !== undefined)
+		updateData.targetTable = updates.targetTable;
 	if (updates.status !== undefined) updateData.status = updates.status;
 	if (updates.progress !== undefined) updateData.progress = updates.progress;
 	if (updates.total !== undefined) updateData.total = updates.total;

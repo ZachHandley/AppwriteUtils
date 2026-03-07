@@ -162,7 +162,7 @@ export const findOrCreateOperation = async (
 ): Promise<any> => {
   // Use new operations table system
   return await findOrCreateOp(db, databaseId, operationType, {
-    targetCollection: collectionId,
+    targetTable: collectionId,
     data: data
   });
 };

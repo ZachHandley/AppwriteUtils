@@ -278,10 +278,11 @@ export class LegacyAdapter extends BaseAdapter {
         params.tableId
       );
 
+      const normalized = { ...result, columns: result.attributes || [] };
       return {
-        data: result,
-        tables: [result],
-        collections: [result]
+        data: normalized,
+        tables: [normalized],
+        collections: [normalized]
       };
     } catch (error) {
       throw new AdapterError(

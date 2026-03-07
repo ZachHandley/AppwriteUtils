@@ -63,7 +63,7 @@ enum CHOICES {
   COMPREHENSIVE_TRANSFER = "🚀 Comprehensive transfer (users → databases → buckets → functions)",
   BACKUP_DATABASE = "💾 Backup database",
   WIPE_DATABASE = "🧹 Wipe database",
-  WIPE_COLLECTIONS = "🧹 Wipe collections",
+  WIPE_COLLECTIONS = "🧹 Wipe tables",
   GENERATE_SCHEMAS = "🏗️ Generate schemas",
   GENERATE_CONSTANTS = "📋 Generate cross-language constants (TypeScript, Python, PHP, Dart, etc.)",
   IMPORT_DATA = "📥 Import data",
@@ -532,26 +532,26 @@ export class InteractiveCLI {
 
     // Provide context about what's available
     if (collectionsCount > 0 && tablesCount > 0) {
-      MessageFormatter.info(`\n📋 ${totalCount} total items available:`, { prefix: "Collections" });
-      MessageFormatter.info(`   Collections: ${collectionsCount} (from collections/ folder)`, { prefix: "Collections" });
-      MessageFormatter.info(`   Tables: ${tablesCount} (from tables/ folder)`, { prefix: "Collections" });
+      MessageFormatter.info(`\n${totalCount} total tables available:`, { prefix: "Tables" });
+      MessageFormatter.info(`   From collections/ folder: ${collectionsCount}`, { prefix: "Tables" });
+      MessageFormatter.info(`   From tables/ folder: ${tablesCount}`, { prefix: "Tables" });
     } else if (collectionsCount > 0) {
-      MessageFormatter.info(`📁 ${collectionsCount} collections available from collections/ folder`, { prefix: "Collections" });
+      MessageFormatter.info(`${collectionsCount} tables available from collections/ folder`, { prefix: "Tables" });
     } else if (tablesCount > 0) {
-      MessageFormatter.info(`📊 ${tablesCount} tables available from tables/ folder`, { prefix: "Collections" });
+      MessageFormatter.info(`${tablesCount} tables available from tables/ folder`, { prefix: "Tables" });
     }
 
     // Show current database context clearly before view mode selection
-    MessageFormatter.info(`DB: ${database.name}`, { prefix: "Collections" });
+    MessageFormatter.info(`DB: ${database.name}`, { prefix: "Tables" });
 
     // Ask user if they want to filter by database, show all, or reuse previous selection
     const choices: { name: string; value: string }[] = [
       {
-        name: `Show all available collections/tables (${totalCount} total) - You can push any collection to any database`,
+        name: `Show all available tables (${totalCount} total) - You can push any table to any database`,
         value: "all"
       },
       {
-        name: `Filter by database "${database.name}" - Show only related collections/tables`,
+        name: `Filter by database "${database.name}" - Show only related tables`,
         value: "filter"
       }
     ];
@@ -566,7 +566,7 @@ export class InteractiveCLI {
       {
         type: "list",
         name: "filterChoice",
-        message: chalk.blue("How would you like to view collections/tables?"),
+        message: chalk.blue("How would you like to view tables?"),
         choices,
         default: choices[0]?.value || "all"
       }
@@ -589,17 +589,17 @@ export class InteractiveCLI {
 
     // Show appropriate informational message
     if (userWantsFiltering) {
-      MessageFormatter.info(`ℹ️  Showing collections/tables related to database "${database.name}"`, { prefix: "Collections" });
+      MessageFormatter.info(`Showing tables related to database "${database.name}"`, { prefix: "Tables" });
       if (tablesCount > 0) {
         const filteredTables = configCollections.filter(c =>
           c._isFromTablesDir && (!c.databaseId || c.databaseId === database.$id)
         ).length;
         if (filteredTables !== tablesCount) {
-          MessageFormatter.info(`   ${filteredTables}/${tablesCount} tables match this database`, { prefix: "Collections" });
+          MessageFormatter.info(`   ${filteredTables}/${tablesCount} tables match this database`, { prefix: "Tables" });
         }
       }
     } else {
-      MessageFormatter.info(`ℹ️  Showing all available collections/tables - you can push any collection to any database\n`, { prefix: "Collections" });
+      MessageFormatter.info(`Showing all available tables - you can push any table to any database\n`, { prefix: "Tables" });
     }
 
     const result = await this.selectCollections(

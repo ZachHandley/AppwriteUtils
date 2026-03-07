@@ -15,191 +15,221 @@ import type { InteractiveCLI } from "../../interactiveCLI.js";
 
 export const databaseCommands = {
   async syncDb(cli: InteractiveCLI): Promise<void> {
-    MessageFormatter.progress("Pushing local configuration to Appwrite...", { prefix: "Database" });
+    MessageFormatter.progress("Pushing local configuration to Appwrite...", { prefix: "Push" });
 
     try {
       // Initialize controller
       await (cli as any).controller!.init();
 
-      // Get available databases from server and configured databases from local config
-      const serverDatabases = await fetchAllDatabases((cli as any).controller!.database!);
-      const configuredDatabases = (cli as any).controller!.config?.databases || [];
-
-      // For PUSH operations: Merge local configured databases with server databases
-      // This allows pushing databases that don't exist on the server yet
-      const serverDbIds = new Set(serverDatabases.map(db => db.$id));
-      const mergedDatabases = [...serverDatabases];
-
-      // Add locally configured databases that don't exist on server yet
-      for (const configDb of configuredDatabases) {
-        const dbId = configDb.$id;
-        if (dbId && !serverDbIds.has(dbId)) {
-          // Create a pseudo-database object for selection
-          mergedDatabases.push({
-            $id: dbId,
-            name: configDb.name || dbId,
-            $createdAt: new Date().toISOString(),
-            $updatedAt: new Date().toISOString(),
-            enabled: true,
-            _isLocalOnly: true, // Mark as not yet on server
-          } as any);
-          MessageFormatter.info(`Including local database "${configDb.name || dbId}" (not yet on server)`, { prefix: "Database" });
-        }
-      }
-
-      // Get local collections for selection
-      const localCollections = (cli as any).getLocalCollections();
-
-      // Push operations always use local configuration as source of truth
-
-      // Select databases (now includes locally configured databases that don't exist on server)
-      const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
-        mergedDatabases,
-        configuredDatabases,
-        { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
-      );
-
-      if (selectedDatabaseIds.length === 0) {
-        MessageFormatter.warning("No databases selected. Skipping database sync.", { prefix: "Database" });
-        return;
-      }
-
-      // Select tables/collections for each database using the existing method
-      const tableSelectionsMap = new Map<string, string[]>();
-      const availableTablesMap = new Map<string, any[]>();
-
-      for (const databaseId of selectedDatabaseIds) {
-        const database = mergedDatabases.find(db => db.$id === databaseId)!;
-
-        // Use the existing selectCollectionsAndTables method
-        const selectedCollections = await (cli as any).selectCollectionsAndTables(
-          database,
-          (cli as any).controller!.database!,
-          chalk.blue(`Select collections/tables to push to "${database.name}":`),
-          true,  // multiSelect
-          true,  // prefer local
-          true   // shouldFilterByDatabase
-        );
-
-        // Map selected collections to table IDs
-        const selectedTableIds = selectedCollections.map((c: any) => c.$id || c.id);
-
-        // Store selections
-        tableSelectionsMap.set(databaseId, selectedTableIds);
-        availableTablesMap.set(databaseId, selectedCollections);
-
-        if (selectedCollections.length === 0) {
-          MessageFormatter.warning(`No collections selected for database "${database.name}". Skipping.`, { prefix: "Database" });
-          continue;
-        }
-      }
-
-      // Ask if user wants to select buckets
-      const { selectBuckets } = await inquirer.prompt([
+      // Ask what to push first
+      const { pushTargets } = await inquirer.prompt([
         {
-          type: "confirm",
-          name: "selectBuckets",
-          message: "Do you want to select storage buckets to sync as well?",
-          default: false,
+          type: "checkbox",
+          name: "pushTargets",
+          message: chalk.blue("What would you like to push to Appwrite?"),
+          choices: [
+            { name: "Databases & Tables", value: "databases" },
+            { name: "Storage Buckets", value: "buckets" },
+            { name: "Functions", value: "functions" },
+          ],
+          validate: (input: string[]) => {
+            if (input.length === 0) {
+              return "Please select at least one item to push.";
+            }
+            return true;
+          },
         },
       ]);
 
-      let bucketSelections: BucketSelection[] = [];
+      const pushDatabases = pushTargets.includes("databases");
+      const pushBuckets = pushTargets.includes("buckets");
+      const pushFunctions = pushTargets.includes("functions");
 
-      if (selectBuckets) {
-        // Get available and configured buckets
+      let databaseSelections: DatabaseSelection[] = [];
+      let bucketSelections: BucketSelection[] = [];
+      let mergedDatabases: any[] = [];
+
+      // --- Databases & Tables sub-flow ---
+      if (pushDatabases) {
+        const serverDatabases = await fetchAllDatabases((cli as any).controller!.database!);
+        const configuredDatabases = (cli as any).controller!.config?.databases || [];
+
+        const serverDbIds = new Set(serverDatabases.map(db => db.$id));
+        mergedDatabases = [...serverDatabases];
+
+        for (const configDb of configuredDatabases) {
+          const dbId = configDb.$id;
+          if (dbId && !serverDbIds.has(dbId)) {
+            mergedDatabases.push({
+              $id: dbId,
+              name: configDb.name || dbId,
+              $createdAt: new Date().toISOString(),
+              $updatedAt: new Date().toISOString(),
+              enabled: true,
+              _isLocalOnly: true,
+            } as any);
+            MessageFormatter.info(`Including local database "${configDb.name || dbId}" (not yet on server)`, { prefix: "Database" });
+          }
+        }
+
+        const selectedDatabaseIds = await SelectionDialogs.selectDatabases(
+          mergedDatabases,
+          configuredDatabases,
+          { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
+        );
+
+        if (selectedDatabaseIds.length === 0) {
+          MessageFormatter.warning("No databases selected.", { prefix: "Database" });
+        } else {
+          const tableSelectionsMap = new Map<string, string[]>();
+          const availableTablesMap = new Map<string, any[]>();
+
+          for (const databaseId of selectedDatabaseIds) {
+            const database = mergedDatabases.find(db => db.$id === databaseId)!;
+
+            const selectedCollections = await (cli as any).selectCollectionsAndTables(
+              database,
+              (cli as any).controller!.database!,
+              chalk.blue(`Select tables to push to "${database.name}":`),
+              true,
+              true,
+              true
+            );
+
+            const selectedTableIds = selectedCollections.map((c: any) => c.$id || c.id);
+            tableSelectionsMap.set(databaseId, selectedTableIds);
+            availableTablesMap.set(databaseId, selectedCollections);
+
+            if (selectedCollections.length === 0) {
+              MessageFormatter.warning(`No tables selected for database "${database.name}". Skipping.`, { prefix: "Database" });
+            }
+          }
+
+          databaseSelections = SelectionDialogs.createDatabaseSelection(
+            selectedDatabaseIds,
+            mergedDatabases,
+            tableSelectionsMap,
+            configuredDatabases,
+            availableTablesMap
+          );
+        }
+      }
+
+      // --- Storage Buckets sub-flow ---
+      if (pushBuckets) {
         try {
-          const availableBucketsResponse = await listBuckets((cli as any).controller!.storage!);
-          const availableBuckets = availableBucketsResponse.buckets || [];
+          let remoteBuckets: any[] = [];
+          try {
+            const remoteBucketsResponse = await listBuckets((cli as any).controller!.storage!);
+            remoteBuckets = remoteBucketsResponse.buckets || [];
+          } catch (error) {
+            MessageFormatter.warning("Could not fetch remote buckets, showing local buckets only.", { prefix: "Buckets" });
+          }
+
           const configuredBuckets = (cli as any).controller!.config?.buckets || [];
 
-          if (availableBuckets.length === 0) {
-            MessageFormatter.warning("No storage buckets available in remote instance.", { prefix: "Database" });
+          // Merge local + remote buckets
+          const remoteBucketIds = new Set(remoteBuckets.map((b: any) => b.$id));
+          const localBucketIds = new Set(configuredBuckets.map((b: any) => b.$id));
+
+          const mergedBuckets: any[] = [];
+
+          for (const rb of remoteBuckets) {
+            mergedBuckets.push({
+              ...rb,
+              _isLocalOnly: false,
+              _isRemoteOnly: !localBucketIds.has(rb.$id),
+            });
+          }
+
+          for (const lb of configuredBuckets) {
+            if (!remoteBucketIds.has(lb.$id)) {
+              mergedBuckets.push({
+                $id: lb.$id,
+                name: lb.name,
+                enabled: lb.enabled,
+                maximumFileSize: lb.maximumFileSize,
+                allowedFileExtensions: lb.allowedFileExtensions || [],
+                compression: lb.compression || 'none',
+                encryption: lb.encryption || false,
+                antivirus: lb.antivirus || false,
+                fileSecurity: lb.fileSecurity || false,
+                permissions: lb.permissions || [],
+                $permissions: [],
+                _isLocalOnly: true,
+                _isRemoteOnly: false,
+              });
+            }
+          }
+
+          if (mergedBuckets.length === 0) {
+            MessageFormatter.warning("No storage buckets found (local or remote).", { prefix: "Buckets" });
           } else {
-            // Select buckets using SelectionDialogs
-            const selectedBucketIds = await SelectionDialogs.selectBucketsForDatabases(
-              selectedDatabaseIds,
-              availableBuckets,
+            const selectedBucketIds = await SelectionDialogs.selectBucketsForPush(
+              mergedBuckets,
               configuredBuckets,
-              { showSelectAll: false, groupByDatabase: true, defaultSelected: [] }
             );
 
             if (selectedBucketIds.length > 0) {
-              // Create BucketSelection objects
               bucketSelections = SelectionDialogs.createBucketSelection(
                 selectedBucketIds,
-                availableBuckets,
+                mergedBuckets,
                 configuredBuckets,
                 mergedDatabases
               );
-
-              MessageFormatter.info(`Selected ${bucketSelections.length} storage bucket(s)`, { prefix: "Database" });
+              MessageFormatter.info(`Selected ${bucketSelections.length} storage bucket(s)`, { prefix: "Buckets" });
             }
           }
         } catch (error) {
-          MessageFormatter.warning("Failed to fetch storage buckets. Continuing with databases only.", { prefix: "Database" });
-          logger.warn("Storage bucket fetch failed during syncDb", { error: error instanceof Error ? error.message : String(error) });
+          MessageFormatter.warning("Failed during bucket selection.", { prefix: "Buckets" });
+          logger.warn("Bucket selection failed during syncDb", { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
-      // Create DatabaseSelection objects
-      const databaseSelections = SelectionDialogs.createDatabaseSelection(
-        selectedDatabaseIds,
-        mergedDatabases,
-        tableSelectionsMap,
-        configuredDatabases,
-        availableTablesMap
-      );
-
-      // Show confirmation summary
-      const selectionSummary = SelectionDialogs.createSyncSelectionSummary(
-        databaseSelections,
-        bucketSelections
-      );
-
-      const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary, 'push');
-
-      if (!confirmed) {
-        MessageFormatter.info("Push operation cancelled by user", { prefix: "Database" });
-        return;
-      }
-
-      // Perform selective push using the controller
-      MessageFormatter.progress("Starting selective push...", { prefix: "Database" });
-      await (cli as any).controller!.selectivePush(databaseSelections, bucketSelections);
-
-      MessageFormatter.success("\n✅ All database configurations pushed successfully!", { prefix: "Database" });
-
-      // Then handle functions if requested
-      const { syncFunctions } = await inquirer.prompt([
-        {
-          type: "confirm",
-          name: "syncFunctions",
-          message: "Do you want to push local functions to remote?",
-          default: false,
-        },
-      ]);
-
-      if (syncFunctions && (cli as any).controller!.config?.functions?.length) {
-        const functions = await (cli as any).selectFunctions(
-          chalk.blue("Select local functions to push:"),
-          true,
-          true // prefer local
+      // --- Confirmation ---
+      if (databaseSelections.length > 0 || bucketSelections.length > 0) {
+        const selectionSummary = SelectionDialogs.createSyncSelectionSummary(
+          databaseSelections,
+          bucketSelections
         );
 
-        for (const func of functions) {
-          try {
-            await (cli as any).controller!.deployFunction(func.name);
-            MessageFormatter.success(`Function ${func.name} deployed successfully`, { prefix: "Functions" });
-          } catch (error) {
-            MessageFormatter.error(`Failed to deploy function ${func.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+        const confirmed = await SelectionDialogs.confirmSyncSelection(selectionSummary, 'push');
+
+        if (!confirmed) {
+          MessageFormatter.info("Push operation cancelled by user", { prefix: "Push" });
+          return;
+        }
+
+        MessageFormatter.progress("Starting selective push...", { prefix: "Push" });
+        await (cli as any).controller!.selectivePush(databaseSelections, bucketSelections);
+        MessageFormatter.success("Configuration pushed successfully!", { prefix: "Push" });
+      }
+
+      // --- Functions sub-flow ---
+      if (pushFunctions) {
+        if (!(cli as any).controller!.config?.functions?.length) {
+          MessageFormatter.warning("No functions defined in local config.", { prefix: "Functions" });
+        } else {
+          const functions = await (cli as any).selectFunctions(
+            chalk.blue("Select local functions to push:"),
+            true,
+            true
+          );
+
+          for (const func of functions) {
+            try {
+              await (cli as any).controller!.deployFunction(func.name);
+              MessageFormatter.success(`Function ${func.name} deployed successfully`, { prefix: "Functions" });
+            } catch (error) {
+              MessageFormatter.error(`Failed to deploy function ${func.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+            }
           }
         }
       }
 
-      MessageFormatter.success("Local configuration push completed successfully!", { prefix: "Database" });
+      MessageFormatter.success("Push operation completed!", { prefix: "Push" });
     } catch (error) {
-      MessageFormatter.error("Failed to push local configuration", error instanceof Error ? error : new Error(String(error)), { prefix: "Database" });
+      MessageFormatter.error("Failed to push local configuration", error instanceof Error ? error : new Error(String(error)), { prefix: "Push" });
       throw error;
     }
   },
@@ -213,7 +243,7 @@ export const databaseCommands = {
       {
         type: "confirm",
         name: "syncDatabases",
-        message: "Do you want to synchronize databases, collections, and their buckets?",
+        message: "Do you want to synchronize databases, tables, and their buckets?",
         default: true,
       },
     ]);
@@ -243,7 +273,7 @@ export const databaseCommands = {
       (cli as any).controller!.config = configWithBuckets;
 
       // Now synchronize configurations with the updated config that includes bucket selections
-      MessageFormatter.progress("Pulling collections and generating collection files...", { prefix: "Collections" });
+      MessageFormatter.progress("Pulling tables and generating table files...", { prefix: "Tables" });
       await (cli as any).controller!.synchronizeConfigurations(remoteDatabases, configWithBuckets);
     }
 
@@ -494,7 +524,7 @@ export const databaseCommands = {
         choices: [
           { name: "Comprehensive (ALL databases + ALL buckets)", value: "comprehensive" },
           { name: "Selective databases (choose specific databases)", value: "selective-databases" },
-          { name: "Selective collections (choose specific collections)", value: "selective-collections" }
+          { name: "Selective tables (choose specific tables)", value: "selective-tables" }
         ]
       }
     ]);
@@ -543,11 +573,11 @@ export const databaseCommands = {
       };
     }
 
-    if (scopeType === "selective-collections") {
+    if (scopeType === "selective-tables") {
       const databases = await fetchAllDatabases((cli as any).controller!.database);
       const selectedDatabase = await (cli as any).selectDatabases(
         databases,
-        "Select database containing collections:",
+        "Select database containing tables:",
         false // single selection
       );
 
@@ -559,14 +589,14 @@ export const databaseCommands = {
       const collections = await (cli as any).selectCollectionsAndTables(
         db,
         (cli as any).controller!.database!,
-        "Select collections to backup:",
+        "Select tables to backup:",
         true,
         true,
         true
       );
 
       return {
-        type: "selective-collections",
+        type: "selective-tables",
         databaseId: db.$id,
         databaseName: db.name,
         collections: collections
@@ -588,9 +618,9 @@ export const databaseCommands = {
       if (scope.buckets.length > 0) {
         summary += `  • ${scope.buckets.length} selected buckets\n`;
       }
-    } else if (scope.type === "selective-collections") {
+    } else if (scope.type === "selective-tables") {
       summary += `  • Database: ${scope.databaseName}\n`;
-      summary += `  • ${scope.collections.length} selected collections\n`;
+      summary += `  • ${scope.collections.length} selected tables\n`;
     }
 
     console.log(summary);
@@ -644,7 +674,7 @@ export const databaseCommands = {
           { parallelDownloads: 10 }
         );
       }
-    } else if (scope.type === "selective-collections") {
+    } else if (scope.type === "selective-tables") {
       const { backupCollections } = await import("../../backups/operations/collectionBackup.js");
 
       await backupCollections(
@@ -729,7 +759,7 @@ export const databaseCommands = {
     const databases = await fetchAllDatabases((cli as any).controller!.database);
     const selectedDatabases = await (cli as any).selectDatabases(
       databases,
-      "Select the database(s) containing the collections to wipe:",
+      "Select the database(s) containing the tables to wipe:",
       true
     );
 
@@ -737,7 +767,7 @@ export const databaseCommands = {
       const collections = await (cli as any).selectCollectionsAndTables(
         database,
         (cli as any).controller!.database,
-        `Select collections/tables to wipe from ${database.name}:`,
+        `Select tables to wipe from ${database.name}:`,
         true,
         undefined,
         true
@@ -751,13 +781,13 @@ export const databaseCommands = {
 
       if (confirmed) {
         MessageFormatter.info(
-          `Wiping selected collections from ${database.name}...`,
+          `Wiping selected tables from ${database.name}...`,
           { prefix: "Wipe" }
         );
         for (const collection of collections) {
           await (cli as any).controller!.wipeCollection(database, collection);
           MessageFormatter.success(
-            `Collection ${collection.name} wiped successfully`,
+            `Table ${collection.name} wiped successfully`,
             { prefix: "Wipe" }
           );
         }
@@ -768,7 +798,7 @@ export const databaseCommands = {
         );
       }
     }
-    MessageFormatter.success("Wipe collections operation completed", { prefix: "Wipe" });
+    MessageFormatter.success("Wipe tables operation completed", { prefix: "Wipe" });
   },
 
   async wipeTablesData(cli: InteractiveCLI): Promise<void> {

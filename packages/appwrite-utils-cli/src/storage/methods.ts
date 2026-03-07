@@ -105,6 +105,97 @@ export const deleteFile = async (
   return await storage.deleteFile(bucketId, fileId);
 };
 
+/**
+ * Convert permission objects ({permission, target}) to Appwrite Permission strings.
+ */
+export const buildPermissionStrings = (
+  permissions: Array<{ permission: string; target: string }> | undefined
+): string[] => {
+  const result: string[] = [];
+  if (!permissions || permissions.length === 0) return result;
+  for (const p of permissions) {
+    switch (p.permission) {
+      case 'read': result.push(Permission.read(p.target)); break;
+      case 'create': result.push(Permission.create(p.target)); break;
+      case 'update': result.push(Permission.update(p.target)); break;
+      case 'delete': result.push(Permission.delete(p.target)); break;
+      case 'write': result.push(Permission.write(p.target)); break;
+      default: break;
+    }
+  }
+  return result;
+};
+
+/**
+ * Check if a bucket's current state differs from desired config.
+ */
+const bucketDiffers = (existing: Models.Bucket, desired: any, permissions: string[]): boolean => {
+  return (
+    existing.name !== desired.name ||
+    JSON.stringify(existing.$permissions || []) !== JSON.stringify(permissions) ||
+    !!existing.fileSecurity !== !!desired.fileSecurity ||
+    !!existing.enabled !== !!desired.enabled ||
+    (existing.maximumFileSize ?? undefined) !== (desired.maximumFileSize ?? undefined) ||
+    JSON.stringify(existing.allowedFileExtensions || []) !== JSON.stringify(desired.allowedFileExtensions || []) ||
+    String(existing.compression || 'none') !== String(desired.compression || 'none') ||
+    !!existing.encryption !== !!desired.encryption ||
+    !!existing.antivirus !== !!desired.antivirus
+  );
+};
+
+/**
+ * Create or update a single bucket to match desired config.
+ */
+const ensureSingleBucketExists = async (
+  storage: Storage,
+  desired: any
+): Promise<void> => {
+  const permissions = buildPermissionStrings(desired.permissions);
+  try {
+    const existing = await storage.getBucket(desired.$id);
+    if (bucketDiffers(existing, desired, permissions)) {
+      try {
+        await storage.updateBucket(
+          desired.$id,
+          desired.name,
+          permissions,
+          desired.fileSecurity,
+          desired.enabled,
+          desired.maximumFileSize,
+          desired.allowedFileExtensions,
+          desired.compression as Compression,
+          desired.encryption,
+          desired.antivirus
+        );
+        MessageFormatter.info(`Updated bucket ${desired.$id} to match config`, { prefix: 'Buckets' });
+      } catch (updateErr) {
+        MessageFormatter.warning(`Failed to update bucket ${desired.$id}: ${updateErr instanceof Error ? updateErr.message : String(updateErr)}`, { prefix: 'Buckets' });
+      }
+    } else {
+      MessageFormatter.debug(`Bucket ${desired.$id} up-to-date`, undefined, { prefix: 'Buckets' });
+    }
+  } catch (_e) {
+    // Bucket doesn't exist, create it
+    try {
+      await storage.createBucket(
+        desired.$id,
+        desired.name,
+        permissions,
+        desired.fileSecurity,
+        desired.enabled,
+        desired.maximumFileSize,
+        desired.allowedFileExtensions,
+        desired.compression as Compression,
+        desired.encryption,
+        desired.antivirus
+      );
+      MessageFormatter.success(`Bucket ${desired.$id} created`, { prefix: 'Buckets' });
+    } catch (createError) {
+      MessageFormatter.error(`Failed to create bucket ${desired.$id}`, createError instanceof Error ? createError : new Error(String(createError)), { prefix: 'Buckets' });
+    }
+  }
+};
+
 export const ensureDatabaseConfigBucketsExist = async (
   storage: Storage,
   config: AppwriteConfig,
@@ -113,104 +204,26 @@ export const ensureDatabaseConfigBucketsExist = async (
   for (const db of databases) {
     const database = config.databases?.find((d) => d.$id === db.$id);
     if (database?.bucket) {
-      try {
-        const existing = await storage.getBucket(database.bucket.$id);
-        // Compare and update if needed
-        const desired = database.bucket;
-        // Build desired permissions via Permission helper
-        const permissions: string[] = [];
-        if (desired.permissions && desired.permissions.length > 0) {
-          for (const p of desired.permissions as any[]) {
-            switch (p.permission) {
-              case 'read': permissions.push(Permission.read(p.target)); break;
-              case 'create': permissions.push(Permission.create(p.target)); break;
-              case 'update': permissions.push(Permission.update(p.target)); break;
-              case 'delete': permissions.push(Permission.delete(p.target)); break;
-              case 'write': permissions.push(Permission.write(p.target)); break;
-              default: break;
-            }
-          }
-        }
-        const diff = (
-          existing.name !== desired.name ||
-          JSON.stringify(existing.$permissions || []) !== JSON.stringify(permissions) ||
-          !!existing.fileSecurity !== !!desired.fileSecurity ||
-          !!existing.enabled !== !!desired.enabled ||
-          (existing.maximumFileSize ?? undefined) !== (desired.maximumFileSize ?? undefined) ||
-          JSON.stringify(existing.allowedFileExtensions || []) !== JSON.stringify(desired.allowedFileExtensions || []) ||
-          String(existing.compression || 'none') !== String(desired.compression || 'none') ||
-          !!existing.encryption !== !!desired.encryption ||
-          !!existing.antivirus !== !!desired.antivirus
-        );
-        if (diff) {
-          try {
-            await storage.updateBucket(
-              desired.$id,
-              desired.name,
-              permissions,
-              desired.fileSecurity,
-              desired.enabled,
-              desired.maximumFileSize,
-              desired.allowedFileExtensions,
-              desired.compression as Compression,
-              desired.encryption,
-              desired.antivirus
-            );
-            MessageFormatter.info(`Updated bucket ${desired.$id} to match config`, { prefix: 'Buckets' });
-          } catch (updateErr) {
-            MessageFormatter.warning(`Failed to update bucket ${desired.$id}: ${updateErr instanceof Error ? updateErr.message : String(updateErr)}`, { prefix: 'Buckets' });
-          }
-        } else {
-          MessageFormatter.debug(`Bucket ${desired.$id} up-to-date`, undefined, { prefix: 'Buckets' });
-        }
-      } catch (e) {
-        const permissions: string[] = [];
-        if (
-          database.bucket.permissions &&
-          database.bucket.permissions.length > 0
-        ) {
-          for (const permission of database.bucket.permissions) {
-            switch (permission.permission) {
-              case "read":
-                permissions.push(Permission.read(permission.target));
-                break;
-              case "create":
-                permissions.push(Permission.create(permission.target));
-                break;
-              case "update":
-                permissions.push(Permission.update(permission.target));
-                break;
-              case "delete":
-                permissions.push(Permission.delete(permission.target));
-                break;
-              case "write":
-                permissions.push(Permission.write(permission.target));
-                break;
-              default:
-                console.warn(`Unknown permission: ${permission.permission}`);
-                break;
-            }
-          }
-        }
-        try {
-          await storage.createBucket(
-            database.bucket.$id,
-            database.bucket.name,
-            permissions,
-            database.bucket.fileSecurity,
-            database.bucket.enabled,
-            database.bucket.maximumFileSize,
-            database.bucket.allowedFileExtensions,
-            database.bucket.compression as Compression,
-            database.bucket.encryption,
-            database.bucket.antivirus
-          );
-          MessageFormatter.success(`Bucket ${database.bucket.$id} created`, { prefix: 'Buckets' });
-        } catch (createError) {
-          MessageFormatter.error(`Failed to create bucket ${database.bucket.$id}`, createError instanceof Error ? createError : new Error(String(createError)), { prefix: 'Buckets' });
-        }
-      }
+      await ensureSingleBucketExists(storage, database.bucket);
     }
+  }
+};
+
+/**
+ * Ensure global/root-level buckets from config.buckets[] exist on remote.
+ * Optionally filter to only push selected bucket IDs.
+ */
+export const ensureGlobalBucketsExist = async (
+  storage: Storage,
+  config: AppwriteConfig,
+  selectedBucketIds?: string[]
+) => {
+  const globalBuckets = config.buckets || [];
+  for (const bucket of globalBuckets) {
+    if (selectedBucketIds && !selectedBucketIds.includes(bucket.$id)) {
+      continue;
+    }
+    await ensureSingleBucketExists(storage, bucket);
   }
 };
 

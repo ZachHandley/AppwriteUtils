@@ -18,7 +18,7 @@ import { convertObjectByAttributeMappings } from "appwrite-utils-helpers";
 import { z } from "zod";
 import { checkForCollection } from "../collections/methods.js";
 import { ID, Users, type Databases } from "node-appwrite";
-import { logger, LegacyAdapter, MessageFormatter } from "appwrite-utils-helpers";
+import { logger, AdapterFactory, type DatabaseAdapter, MessageFormatter } from "appwrite-utils-helpers";
 import { findOrCreateOperation, updateOperation } from "../shared/migrationHelpers.js";
 import { AuthUserCreateSchema } from "../schemas/authUser.js";
 import { UsersController } from "../users/methods.js";
@@ -67,6 +67,15 @@ export class DataLoader {
   private userIdSet = new Set<string>();
   userExistsMap = new Map<string, boolean>();
   private shouldWriteFile = false;
+  private _adapter: DatabaseAdapter | null = null;
+
+  private async getAdapter(): Promise<DatabaseAdapter> {
+    if (!this._adapter) {
+      const { adapter } = await AdapterFactory.createFromConfig(this.config);
+      this._adapter = adapter;
+    }
+    return this._adapter;
+  }
 
   // Constructor to initialize the DataLoader with necessary configurations
   constructor(
@@ -279,7 +288,7 @@ export class DataLoader {
     );
   }
 
-  async setupMaps(dbId: string) {
+  async setupMaps(dbId: string, specificCollections?: string[]) {
     // Initialize the users collection in the import map
     this.importMap.set(this.getCollectionKey("users"), {
       data: [],
@@ -294,6 +303,11 @@ export class DataLoader {
       for (let index = 0; index < this.config.collections.length; index++) {
         const collectionConfig = this.config.collections[index];
         let collection = CollectionCreateSchema.parse(collectionConfig);
+        // Skip collections not in the specific list if one was provided
+        if (specificCollections && specificCollections.length > 0 &&
+            !specificCollections.includes(collection.name)) {
+          continue;
+        }
         // Check if the collection exists in the database
         const collectionExists = await checkForCollection(
           this.database,
@@ -311,19 +325,25 @@ export class DataLoader {
         collectionConfig.$id = collectionExists.$id;
         collection.$id = collectionExists.$id;
         this.config.collections[index] = collectionConfig;
-        // Find or create an import operation for the collection
-        const adapter = new LegacyAdapter(this.database.client);
-        const collectionImportOperation = await findOrCreateOperation(
-          adapter,
-          dbId,
-          "importData",
-          collection.$id!
-        );
-        // Store the operation ID in the map
-        this.collectionImportOperations.set(
-          this.getCollectionKey(collection.name),
-          collectionImportOperation.$id
-        );
+        // Find or create an import operation for the collection (non-fatal)
+        try {
+          const adapter = await this.getAdapter();
+          const collectionImportOperation = await findOrCreateOperation(
+            adapter,
+            dbId,
+            "importData",
+            collection.$id!
+          );
+          this.collectionImportOperations.set(
+            this.getCollectionKey(collection.name),
+            collectionImportOperation.$id
+          );
+        } catch (error) {
+          MessageFormatter.warning(
+            `Operations tracking unavailable for ${collection.name}, import will proceed without it`,
+            { prefix: "Import" }
+          );
+        }
         // Initialize the collection in the import map
         this.importMap.set(this.getCollectionKey(collection.name), {
           collection: collection,
@@ -373,17 +393,22 @@ export class DataLoader {
   }
 
   // Main method to start the data loading process for a given database ID
-  async start(dbId: string) {
+  async start(dbId: string, specificCollections?: string[]) {
     MessageFormatter.divider();
     MessageFormatter.info(`Starting data setup for database: ${dbId}`, { prefix: "Data" });
     MessageFormatter.divider();
-    await this.setupMaps(dbId);
-    const allUsers = await this.getAllUsers();
-    MessageFormatter.info(
-      `Fetched ${allUsers.length} users, waiting a few seconds to let the program catch up...`,
-      { prefix: "Data" }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    // Only fetch users if we're importing users or no specific collections specified
+    const needsUsers = !specificCollections || specificCollections.length === 0 ||
+      specificCollections.some(c =>
+        this.getCollectionKey(c) === this.getCollectionKey(this.config.usersCollectionName)
+      );
+    if (needsUsers) {
+      const allUsers = await this.getAllUsers();
+      MessageFormatter.info(
+        `Fetched ${allUsers.length} users`,
+        { prefix: "Data" }
+      );
+    }
     // Iterate over the configured databases to find the matching one
     for (const db of this.config.databases) {
       if (db.$id !== dbId) {
@@ -395,6 +420,11 @@ export class DataLoader {
       // Iterate over the configured collections to process each
       for (const collectionConfig of this.config.collections) {
         const collection = collectionConfig;
+        // Skip collections not in the specific list
+        if (specificCollections && specificCollections.length > 0 &&
+            !specificCollections.includes(collection.name)) {
+          continue;
+        }
         // Determine if this is the users collection
         let isUsersCollection =
           this.getCollectionKey(this.config.usersCollectionName) ===
@@ -954,7 +984,7 @@ export class DataLoader {
       this.oldIdToNewIdPerCollectionMap
         .set(this.getCollectionKey(collection.name), oldIdToNewIdMap)
         .get(this.getCollectionKey(collection.name));
-    const adapter = new LegacyAdapter(this.database.client);
+    const adapter = await this.getAdapter();
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         adapter,
@@ -971,7 +1001,7 @@ export class DataLoader {
     }
     if (operationId) {
       await updateOperation(adapter, db.$id, operationId, {
-        status: "ready",
+        status: "in_progress",
         total: rawData.length,
       });
     }
@@ -1185,7 +1215,7 @@ export class DataLoader {
     let operationId = this.collectionImportOperations.get(
       this.getCollectionKey(collection.name)
     );
-    const adapter = new LegacyAdapter(this.database.client);
+    const adapter = await this.getAdapter();
     if (!operationId) {
       const collectionImportOperation = await findOrCreateOperation(
         adapter,
@@ -1202,7 +1232,7 @@ export class DataLoader {
     }
     if (operationId) {
       await updateOperation(adapter, db.$id, operationId, {
-        status: "ready",
+        status: "in_progress",
         total: rawData.length,
       });
     }

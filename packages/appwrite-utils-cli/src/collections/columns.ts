@@ -26,6 +26,11 @@ const EXTREME_MAX_INTEGER = 9223372036854776000;
 const EXTREME_MIN_FLOAT = -1.7976931348623157e308;
 const EXTREME_MAX_FLOAT = 1.7976931348623157e308;
 
+/** Get columns/attributes array, preferring modern 'columns' over legacy 'attributes' */
+function getColumns(obj: any): any[] {
+  return obj.columns || obj.attributes || [];
+}
+
 /**
  * Type guard to check if an attribute has min/max properties
  */
@@ -833,7 +838,7 @@ const waitForAttributeAvailable = async (
       const collection = isDatabaseAdapter(db)
         ? (await db.getTable({ databaseId: dbId, tableId: collectionId })).data
         : await db.getCollection(dbId, collectionId);
-      const attribute = (collection.attributes as any[]).find(
+      const attribute = (getColumns(collection) as any[]).find(
         (attr: AttributeWithStatus) => attr.key === attributeKey
       ) as AttributeWithStatus | undefined;
 
@@ -1449,7 +1454,7 @@ export const createOrUpdateAttribute = async (
   const updateEnabled = true;
   let finalAttribute: any = attribute;
   try {
-    const collectionAttr = collection.attributes.find(
+    const collectionAttr = getColumns(collection).find(
       (attr: any) => attr.key === attribute.key
     ) as unknown as any;
     foundAttribute = parseAttribute(collectionAttr);
@@ -1478,9 +1483,11 @@ export const createOrUpdateAttribute = async (
         await db.deleteAttribute(dbId, collection.$id, attribute.key);
       }
       // Remove from local collection metadata so downstream logic treats it as new
-      collection.attributes = collection.attributes.filter(
+      const filtered = getColumns(collection).filter(
         (attr: any) => attr.key !== attribute.key
       );
+      if ('columns' in collection) (collection as any).columns = filtered;
+      if ('attributes' in collection) (collection as any).attributes = filtered;
       foundAttribute = undefined;
     } catch (deleteError) {
       MessageFormatter.error(
@@ -1715,7 +1722,7 @@ export const createUpdateCollectionAttributesWithStatusCheck = async (
   attributes: Attribute[]
 ): Promise<boolean> => {
   const existingAttributes: Attribute[] =
-    collection.attributes.map((attr) => parseAttribute(attr as any)) || [];
+    getColumns(collection).map((attr) => parseAttribute(attr as any)) || [];
 
   const attributesToRemove = existingAttributes.filter(
     (attr) => !attributes.some((a) => a.key === attr.key)
@@ -1935,7 +1942,7 @@ export const createUpdateCollectionAttributes = async (
   );
 
   const existingAttributes: Attribute[] =
-    collection.attributes.map((attr) => parseAttribute(attr as any)) || [];
+    getColumns(collection).map((attr) => parseAttribute(attr as any)) || [];
 
   const attributesToRemove = existingAttributes.filter(
     (attr) => !attributes.some((a) => a.key === attr.key)

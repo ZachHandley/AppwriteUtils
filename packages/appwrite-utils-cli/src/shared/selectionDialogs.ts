@@ -523,6 +523,55 @@ export class SelectionDialogs {
   }
 
   /**
+   * Shows bucket selection for push operations with merged local+remote buckets.
+   * Unlike selectBucketsForDatabases, this shows all buckets as a flat list
+   * with source indicators (Local only, Remote only, Configured).
+   */
+  static async selectBucketsForPush(
+    mergedBuckets: any[],
+    configuredBuckets: any[],
+    options: BucketSelectionOptions = {}
+  ): Promise<string[]> {
+    MessageFormatter.section("Storage Bucket Selection");
+
+    if (mergedBuckets.length === 0) {
+      MessageFormatter.warning("No storage buckets found (local or remote).", { skipLogging: true });
+      return [];
+    }
+
+    const choices: any[] = mergedBuckets.map(bucket => {
+      let status: string;
+      let suffix: string = '';
+
+      if (bucket._isLocalOnly) {
+        status = chalk.yellow('*');
+        suffix = chalk.yellow(' (Local only - will be created)');
+      } else if (bucket._isRemoteOnly) {
+        status = chalk.blue('○');
+        suffix = chalk.blue(' (Remote only)');
+      } else {
+        status = chalk.green('✅');
+        suffix = chalk.green(' (Configured)');
+      }
+
+      return {
+        name: `${status} ${bucket.name} (${bucket.$id})${suffix}`,
+        value: bucket.$id,
+        short: bucket.name,
+      };
+    });
+
+    const { selectedBucketIds } = await inquirer.prompt([{
+      type: 'checkbox',
+      name: 'selectedBucketIds',
+      message: 'Select storage buckets to push:',
+      choices,
+    }]);
+
+    return selectedBucketIds || [];
+  }
+
+  /**
    * Shows final confirmation dialog with sync selection summary
    */
   static async confirmSyncSelection(
@@ -572,7 +621,7 @@ export class SelectionDialogs {
     }
 
     // Table summary
-    console.log(chalk.bold.cyan("\n📋 Tables/Collections:"));
+    console.log(chalk.bold.cyan("\n📋 Tables:"));
     console.log(`  Total: ${selectionSummary.totalTables}`);
     console.log(`  ${chalk.green('✅ Configured')}: ${selectionSummary.existingItems.tables}`);
     console.log(`  ${chalk.blue('○ New')}: ${selectionSummary.newItems.tables}`);
@@ -699,9 +748,12 @@ export class SelectionDialogs {
     const configuredIds = new Set(configuredBuckets.map(bucket => bucket.$id || bucket.id));
 
     return selectedBucketIds.map(bucketId => {
-      const bucket = availableBuckets.find(b => b.$id === bucketId);
+      // Look up in availableBuckets first, then fall back to configuredBuckets
+      // (handles merged lists where local-only buckets may only be in configuredBuckets)
+      const bucket = availableBuckets.find(b => b.$id === bucketId)
+        || configuredBuckets.find(b => (b.$id || b.id) === bucketId);
       if (!bucket) {
-        throw new Error(`Bucket with ID ${bucketId} not found in available buckets`);
+        throw new Error(`Bucket with ID ${bucketId} not found in available or configured buckets`);
       }
 
       const database = bucket.databaseId ?
@@ -712,7 +764,7 @@ export class SelectionDialogs {
         bucketName: bucket.name,
         databaseId: bucket.databaseId,
         databaseName: database?.name,
-        isNew: !configuredIds.has(bucketId)
+        isNew: bucket._isLocalOnly || !configuredIds.has(bucketId)
       };
     });
   }

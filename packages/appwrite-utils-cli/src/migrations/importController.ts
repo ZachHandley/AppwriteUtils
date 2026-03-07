@@ -17,7 +17,7 @@ import { areCollectionNamesSame, tryAwaitWithRetry } from "appwrite-utils-helper
 import type { SetupOptions } from "../utilsController.js";
 import { resolveAndUpdateRelationships } from "./relationships.js";
 import { UsersController } from "../users/methods.js";
-import { logger, LegacyAdapter } from "appwrite-utils-helpers";
+import { logger, AdapterFactory, type DatabaseAdapter } from "appwrite-utils-helpers";
 import { updateOperation } from "../shared/migrationHelpers.js";
 import {
   BatchSchema,
@@ -48,6 +48,15 @@ export class ImportController {
     attributeMappings: AttributeMappings;
   }[] = [];
   private databasesToRun: Models.Database[];
+  private _adapter: DatabaseAdapter | null = null;
+
+  private async getAdapter(): Promise<DatabaseAdapter> {
+    if (!this._adapter) {
+      const { adapter } = await AdapterFactory.createFromConfig(this.config);
+      this._adapter = adapter;
+    }
+    return this._adapter;
+  }
 
   constructor(
     config: AppwriteConfig,
@@ -95,8 +104,8 @@ export class ImportController {
           this.config,
           this.setupOptions.shouldWriteFile
         );
-        await dataLoader.setupMaps(db.$id);
-        await dataLoader.start(db.$id);
+        await dataLoader.setupMaps(db.$id, specificCollections);
+        await dataLoader.start(db.$id, specificCollections);
         await this.importCollections(db, dataLoader, specificCollections);
         await resolveAndUpdateRelationships(db.$id, this.database, this.config);
         await this.executePostImportActions(
@@ -277,21 +286,22 @@ export class ImportController {
           }
         }
 
-        if (!importOperationId) {
-          // Skip further processing if no import operation is found
-          continue;
-        }
-
         let importOperation: any = null;
-        importOperation = await this.database.getDocument(
-          "migrations",
-          "currentOperations",
-          importOperationId
-        );
-        const adapter = new LegacyAdapter(this.database.client);
-        await updateOperation(adapter, db.$id, importOperation.$id, {
-          status: "in_progress",
-        });
+        if (importOperationId) {
+          try {
+            importOperation = await this.database.getDocument(
+              "migrations",
+              "currentOperations",
+              importOperationId
+            );
+            const adapter = await this.getAdapter();
+            await updateOperation(adapter, db.$id, importOperation.$id, {
+              status: "in_progress",
+            });
+          } catch {
+            importOperation = null;
+          }
+        }
         
         const collectionData = dataLoader.importMap.get(
           dataLoader.getCollectionKey(collection.name)
@@ -348,18 +358,21 @@ export class ImportController {
           await Promise.all(batchPromises);
           MessageFormatter.success(`Completed batch ${i + 1} of ${dataSplit.length}`, { prefix: "Import" });
           if (importOperation) {
-            const adapter = new LegacyAdapter(this.database.client);
-            await updateOperation(adapter, db.$id, importOperation.$id, {
-              progress: processedItems,
-            });
+            try {
+              const opAdapter = await this.getAdapter();
+              await updateOperation(opAdapter, db.$id, importOperation.$id, {
+                progress: processedItems,
+              });
+            } catch { /* operations tracking is non-fatal */ }
           }
         }
-        // After all batches are processed, update the operation status to completed
         if (importOperation) {
-          const adapter = new LegacyAdapter(this.database.client);
-          await updateOperation(adapter, db.$id, importOperation.$id, {
-            status: "completed",
-          });
+          try {
+            const opAdapter = await this.getAdapter();
+            await updateOperation(opAdapter, db.$id, importOperation.$id, {
+              status: "completed",
+            });
+          } catch { /* operations tracking is non-fatal */ }
         }
       }
     }

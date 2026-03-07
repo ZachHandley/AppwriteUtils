@@ -37,6 +37,7 @@ import { wipeAllTables, wipeTableRows } from "./collections/methods.js";
 import {
   backupDatabase,
   ensureDatabaseConfigBucketsExist,
+  ensureGlobalBucketsExist,
   wipeDocumentStorage,
 } from "./storage/methods.js";
 import path from "path";
@@ -358,6 +359,19 @@ export class UtilsController {
       this.config,
       databases
     );
+  }
+
+  async pushGlobalBuckets(selectedBucketIds?: string[]) {
+    await this.init();
+    if (!this.storage) {
+      MessageFormatter.error("Storage not initialized", undefined, { prefix: "Controller" });
+      return;
+    }
+    if (!this.config) {
+      MessageFormatter.error("Config not initialized", undefined, { prefix: "Controller" });
+      return;
+    }
+    await ensureGlobalBucketsExist(this.storage, this.config, selectedBucketIds);
   }
 
   async ensureDatabasesExist(databases?: Models.Database[]) {
@@ -945,70 +959,62 @@ export class UtilsController {
       }
     }
 
-    if (selectedDatabases.length === 0) {
-      MessageFormatter.warning("No valid databases selected for push", { prefix: "Controller" });
+    if (selectedDatabases.length === 0 && (!bucketSelections || bucketSelections.length === 0)) {
+      MessageFormatter.warning("No valid databases or buckets selected for push", { prefix: "Controller" });
       return;
     }
 
-    // Log bucket selections if provided
+    // Push global/root-level buckets if any were selected
     if (bucketSelections && bucketSelections.length > 0) {
       MessageFormatter.info(`Selected ${bucketSelections.length} buckets:`, { prefix: "Controller" });
       for (const bucketSelection of bucketSelections) {
         const dbInfo = bucketSelection.databaseId ? ` (DB: ${bucketSelection.databaseId})` : '';
         MessageFormatter.info(`  - ${bucketSelection.bucketName} (${bucketSelection.bucketId})${dbInfo}`, { prefix: "Controller" });
       }
+      const selectedGlobalBucketIds = bucketSelections.map(bs => bs.bucketId);
+      await this.pushGlobalBuckets(selectedGlobalBucketIds);
     }
 
-    // PUSH OPERATION: Push local configuration to Appwrite
-    // Build database-specific collection mappings from databaseSelections
-    const databaseCollectionsMap = new Map<string, any[]>();
+    // Database + tables push
+    if (selectedDatabases.length > 0) {
+      const databaseCollectionsMap = new Map<string, any[]>();
 
-    // Get all collections/tables from config (they're at the root level, not nested in databases)
-    const allCollections = [
-      ...(this.config?.collections || []),
-      ...(this.config?.tables || [])
-    ];
+      const allCollections = [
+        ...(this.config?.collections || []),
+        ...(this.config?.tables || [])
+      ];
 
-    // Create database-specific collection mapping to preserve relationships
-    for (const dbSelection of databaseSelections) {
-      const collectionsForDatabase: any[] = [];
+      for (const dbSelection of databaseSelections) {
+        const collectionsForDatabase: any[] = [];
 
-      MessageFormatter.info(`Processing collections for database: ${dbSelection.databaseId}`, { prefix: "Controller" });
-
-      // Filter collections that were selected for THIS specific database
-      for (const collection of allCollections) {
-        const collectionId = collection.$id || (collection as any).id;
-
-        // Check if this collection was selected for THIS database
-        if (dbSelection.tableIds.includes(collectionId)) {
-          collectionsForDatabase.push(collection);
-          const source = (collection as any)._isFromTablesDir ? 'tables/' : 'collections/';
-          MessageFormatter.info(`  - Selected collection: ${collection.name || collectionId} for database ${dbSelection.databaseId} [source: ${source}]`, { prefix: "Controller" });
+        for (const collection of allCollections) {
+          const collectionId = collection.$id || (collection as any).id;
+          if (dbSelection.tableIds.includes(collectionId)) {
+            collectionsForDatabase.push(collection);
+            const source = (collection as any)._isFromTablesDir ? 'tables/' : 'collections/';
+            MessageFormatter.info(`  - Selected: ${collection.name || collectionId} → ${dbSelection.databaseId} [${source}]`, { prefix: "Controller" });
+          }
         }
+
+        databaseCollectionsMap.set(dbSelection.databaseId, collectionsForDatabase);
       }
 
-      databaseCollectionsMap.set(dbSelection.databaseId, collectionsForDatabase);
-      MessageFormatter.info(`Database ${dbSelection.databaseId}: ${collectionsForDatabase.length} collections selected`, { prefix: "Controller" });
-    }
+      const totalSelectedCollections = Array.from(databaseCollectionsMap.values())
+        .reduce((total, collections) => total + collections.length, 0);
 
-    // Calculate total collections for logging
-    const totalSelectedCollections = Array.from(databaseCollectionsMap.values())
-      .reduce((total, collections) => total + collections.length, 0);
+      MessageFormatter.info(`Pushing ${totalSelectedCollections} selected tables to ${databaseCollectionsMap.size} databases`, { prefix: "Controller" });
 
-    MessageFormatter.info(`Pushing ${totalSelectedCollections} selected tables/collections to ${databaseCollectionsMap.size} databases`, { prefix: "Controller" });
+      await this.ensureDatabasesExist(selectedDatabases);
+      await this.ensureDatabaseConfigBucketsExist(selectedDatabases);
 
-    // Ensure databases exist
-    await this.ensureDatabasesExist(selectedDatabases);
-    await this.ensureDatabaseConfigBucketsExist(selectedDatabases);
-
-    // Create/update collections with database-specific context
-    for (const database of selectedDatabases) {
-      const collectionsForThisDatabase = databaseCollectionsMap.get(database.$id) || [];
-      if (collectionsForThisDatabase.length > 0) {
-        MessageFormatter.info(`Pushing ${collectionsForThisDatabase.length} collections to database ${database.$id} (${database.name})`, { prefix: "Controller" });
-        await this.createOrUpdateCollections(database, undefined, collectionsForThisDatabase);
-      } else {
-        MessageFormatter.info(`No collections selected for database ${database.$id} (${database.name})`, { prefix: "Controller" });
+      for (const database of selectedDatabases) {
+        const collectionsForThisDatabase = databaseCollectionsMap.get(database.$id) || [];
+        if (collectionsForThisDatabase.length > 0) {
+          MessageFormatter.info(`Pushing ${collectionsForThisDatabase.length} tables to database ${database.$id} (${database.name})`, { prefix: "Controller" });
+          await this.createOrUpdateCollections(database, undefined, collectionsForThisDatabase);
+        } else {
+          MessageFormatter.info(`No tables selected for database ${database.$id} (${database.name})`, { prefix: "Controller" });
+        }
       }
     }
 

@@ -1,6 +1,6 @@
 import { Query, type Databases, type Models } from "node-appwrite";
 import type { Attribute } from "appwrite-utils";
-import { createOrUpdateAttributeWithStatusCheck } from "../collections/attributes.js";
+import { createOrUpdateAttributeWithStatusCheck } from "../collections/columns.js";
 import { fetchAndCacheCollectionByName } from "../collections/methods.js";
 import { tryAwaitWithRetry } from "appwrite-utils-helpers";
 import type { DatabaseAdapter } from "appwrite-utils-helpers";

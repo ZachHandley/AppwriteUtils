@@ -114,19 +114,21 @@ export const checkForCollection = async (
   collection: Partial<CollectionCreate>
 ): Promise<Models.Collection | null> => {
   try {
-    MessageFormatter.progress(`Checking for collection with name: ${collection.name}`, { prefix: "Collections" });
+    const isLegacy = isLegacyDatabases(db);
+    const entityType = isLegacy ? "Collection" : "Table";
+    MessageFormatter.progress(`Checking for ${entityType.toLowerCase()} with name: ${collection.name}`, { prefix: entityType + "s" });
     const response = await tryAwaitWithRetry(
-      async () => isLegacyDatabases(db) ?
+      async () => isLegacy ?
         await db.listCollections(dbId, [Query.equal("name", collection.name!)]) :
         await db.listTables({ databaseId: dbId, queries: [Query.equal("name", collection.name!)] })
     );
-    const items = isLegacyDatabases(db) ? response.collections : ((response as any).tables || response.collections);
+    const items = isLegacy ? response.collections : ((response as any).tables || response.collections);
     if (items && items.length > 0) {
-      MessageFormatter.info(`Collection found: ${items[0].$id}`, { prefix: "Collections" });
+      MessageFormatter.info(`${entityType} found: ${items[0].$id}`, { prefix: entityType + "s" });
       // Return remote collection for update operations (don't merge local config over it)
       return items[0] as Models.Collection;
     } else {
-      MessageFormatter.info(`No collection found with name: ${collection.name}`, { prefix: "Collections" });
+      MessageFormatter.info(`No ${entityType.toLowerCase()} found with name: ${collection.name}`, { prefix: entityType + "s" });
       return null;
     }
   } catch (error) {
@@ -148,29 +150,31 @@ export const fetchAndCacheCollectionByName = async (
   dbId: string,
   collectionName: string
 ): Promise<Models.Collection | undefined> => {
+  const isLegacy = isLegacyDatabases(db);
+  const entityType = isLegacy ? "Collection" : "Table";
   if (nameToIdMapping.has(collectionName)) {
     const collectionId = nameToIdMapping.get(collectionName);
-    MessageFormatter.debug(`Collection found in cache: ${collectionId}`, undefined, { prefix: "Collections" });
+    MessageFormatter.debug(`${entityType} found in cache: ${collectionId}`, undefined, { prefix: entityType + "s" });
     return await tryAwaitWithRetry(
-      async () => isLegacyDatabases(db) ?
+      async () => isLegacy ?
         await db.getCollection(dbId, collectionId!) :
         await db.getTable({ databaseId: dbId, tableId: collectionId! })
     ) as Models.Collection;
   } else {
-    MessageFormatter.progress(`Fetching collection by name: ${collectionName}`, { prefix: "Collections" });
+    MessageFormatter.progress(`Fetching ${entityType.toLowerCase()} by name: ${collectionName}`, { prefix: entityType + "s" });
     const collectionsPulled = await tryAwaitWithRetry(
-      async () => isLegacyDatabases(db) ?
+      async () => isLegacy ?
         await db.listCollections(dbId, [Query.equal("name", collectionName)]) :
         await db.listTables({ databaseId: dbId, queries: [Query.equal("name", collectionName)] })
     );
-    const items = isLegacyDatabases(db) ? collectionsPulled.collections : ((collectionsPulled as any).tables || collectionsPulled.collections);
+    const items = isLegacy ? collectionsPulled.collections : ((collectionsPulled as any).tables || collectionsPulled.collections);
     if ((collectionsPulled.total || items?.length) > 0) {
       const collection = items[0];
-      MessageFormatter.info(`Collection found: ${collection.$id}`, { prefix: "Collections" });
+      MessageFormatter.info(`${entityType} found: ${collection.$id}`, { prefix: entityType + "s" });
       nameToIdMapping.set(collectionName, collection.$id);
       return collection;
     } else {
-      MessageFormatter.warning(`Collection not found by name: ${collectionName}`, { prefix: "Collections" });
+      MessageFormatter.warning(`${entityType} not found by name: ${collectionName}`, { prefix: entityType + "s" });
       return undefined;
     }
   }

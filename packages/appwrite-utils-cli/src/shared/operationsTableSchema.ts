@@ -12,7 +12,7 @@ export interface OperationRecord {
   $createdAt: string;
   $updatedAt: string;
   operationType: string;        // 'import', 'export', 'transfer', 'backup', etc.
-  targetCollection?: string;    // Optional: which collection is being operated on
+  targetTable?: string;    // Optional: which collection is being operated on
   status: OperationStatus;
   progress: number;             // Current progress count
   total: number;                // Total items to process
@@ -48,7 +48,7 @@ export const OperationRecordSchema = z.object({
   $createdAt: z.string(),
   $updatedAt: z.string(),
   operationType: z.string(),
-  targetCollection: z.string().optional(),
+  targetTable: z.string().optional(),
   status: OperationStatusSchema,
   progress: z.number(),
   total: z.number(),
@@ -56,5 +56,5 @@ export const OperationRecordSchema = z.object({
   error: z.string().optional()
 });
 
-export const OPERATIONS_TABLE_ID = "_appwrite_operations";
+export const OPERATIONS_TABLE_ID = "appwrite_operations";
 export const OPERATIONS_TABLE_NAME = "Operations Tracking";

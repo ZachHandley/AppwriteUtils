@@ -28,7 +28,7 @@ import { MessageFormatter } from 'appwrite-utils-helpers';
 import { ProgressManager } from "../../shared/progressManager.js";
 import { tryAwaitWithRetry } from "appwrite-utils-helpers";
 import { updateOperation, findOrCreateOperation } from "../../shared/migrationHelpers.js";
-import { LegacyAdapter } from 'appwrite-utils-helpers';
+import { AdapterFactory, type DatabaseAdapter } from 'appwrite-utils-helpers';
 import { resolveAndUpdateRelationships } from "../relationships.js";
 
 // Enhanced rate limiting configuration - now managed by RateLimitManager
@@ -61,6 +61,15 @@ export class ImportOrchestrator {
   private collectionImportOperations = new Map<string, string>();
   private hasImportedUsers = false;
   private batchLimit: number = 50; // Preserve existing batch size
+  private _adapter: DatabaseAdapter | null = null;
+
+  private async getAdapter(): Promise<DatabaseAdapter> {
+    if (!this._adapter) {
+      const { adapter } = await AdapterFactory.createFromConfig(this.config);
+      this._adapter = adapter;
+    }
+    return this._adapter;
+  }
 
   constructor(
     config: AppwriteConfig,
@@ -203,7 +212,7 @@ export class ImportOrchestrator {
         this.config.collections[index] = collectionConfig;
 
         // Find or create an import operation for the collection
-        const adapter = new LegacyAdapter(this.database.client);
+        const adapter = await this.getAdapter();
         const collectionImportOperation = await findOrCreateOperation(
           adapter,
           dbId,
@@ -501,7 +510,7 @@ export class ImportOrchestrator {
     logger.info(`Importing collection: ${collection.name} (${collectionData.data.length} items)`);
 
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
-    const adapter = new LegacyAdapter(this.database.client);
+    const adapter = await this.getAdapter();
     if (operationId) {
       await updateOperation(adapter, db.$id, operationId, { status: "in_progress" });
     }
@@ -638,7 +647,7 @@ export class ImportOrchestrator {
     const operationId = this.collectionImportOperations.get(this.getCollectionKey(collection.name));
     if (operationId) {
       const updateData = total ? { status, total } : { status };
-      const adapter = new LegacyAdapter(this.database.client);
+      const adapter = await this.getAdapter();
       await updateOperation(adapter, db.$id, operationId, updateData);
     }
   }
