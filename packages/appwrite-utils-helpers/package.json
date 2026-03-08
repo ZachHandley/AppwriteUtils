@@ -1,0 +1,43 @@
+{
+  "name": "appwrite-utils-helpers",
+  "version": "0.1.1",
+  "description": "Helper utilities for Appwrite - clients, config, schemas, adapters, and more.",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zachhandley/AppwriteUtils"
+  },
+  "keywords": [
+    "appwrite",
+    "utils",
+    "helper"
+  ],
+  "scripts": {
+    "build": "bun run tsc",
+    "deploy": "bun run build && npm publish --access public"
+  },
+  "dependencies": {
+    "appwrite-utils": "workspace:*",
+    "chalk": "^5.4.1",
+    "decimal.js": "^10.6.0",
+    "es-toolkit": "^1.39.4",
+    "find-up": "^8.0.0",
+    "js-yaml": "^4.1.0",
+    "node-appwrite": "^20.2.1",
+    "p-limit": "^6.2.0",
+    "tar": "^7.4.3",
+    "tsx": "^4.20.3",
+    "ulidx": "^2.4.1",
+    "winston": "^3.17.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "@types/json-schema": "^7.0.15",
+    "typescript": "^5.8.3"
+  }
+}

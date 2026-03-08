@@ -128,7 +128,10 @@ dist
 
 packages/appwrite-utils-cli/src/appwrite/appwriteConfig.yaml
 appwriteConfig.yaml
+# Ignore generated/config JSON inside packages, but not package.json or tsconfig.json
 packages/*/**/*.json
+!packages/*/package.json
+!packages/*/tsconfig.json
 packages/*/**/zlogs
 .claude
 .treesummary

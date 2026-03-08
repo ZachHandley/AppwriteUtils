@@ -1,8 +1,32 @@
-import { Client } from "node-appwrite";
+import { Client, Users, Query } from "node-appwrite";
 import type { AppwriteConfig } from "appwrite-utils";
 import { AdapterFactory } from "../adapters/AdapterFactory.js";
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { logger } from "../shared/logging.js";
+
+/**
+ * Test that the client is actually authenticated by making a lightweight API call.
+ * Throws a clear error if auth is invalid instead of letting confusing "guests missing scopes" errors through.
+ */
+async function verifyAuthentication(client: Client): Promise<void> {
+  const users = new Users(client);
+  try {
+    await users.list([Query.limit(1)]);
+  } catch (error: any) {
+    const msg = error?.message || String(error);
+    if (msg.includes("missing scope") || msg.includes("role: guests") || msg.includes("unauthorized") || error?.code === 401) {
+      throw new Error(
+        "Authentication failed — your API key or session is invalid or expired.\n\n" +
+        "Either:\n" +
+        "  - Run 'appwrite login' to create/refresh a session\n" +
+        "  - Provide a valid API key via --apiKey flag or appwriteKey in your config\n" +
+        "  - Set the APPWRITE_API_KEY environment variable"
+      );
+    }
+    // Non-auth errors (network, etc.) — let them through
+    throw error;
+  }
+}
 
 /**
  * Factory for creating authenticated Appwrite clients and database adapters.
@@ -150,6 +174,9 @@ export class ClientFactory {
         throw error;
       }
     }
+
+    // Verify the authentication actually works before proceeding
+    await verifyAuthentication(client);
 
     // Create adapter with version detection
     // AdapterFactory uses internal caching, so repeated calls are fast
