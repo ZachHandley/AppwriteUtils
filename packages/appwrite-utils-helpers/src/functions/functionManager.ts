@@ -252,7 +252,7 @@ export class FunctionManager {
   ): Promise<Models.Deployment> {
     const {
       activate = true,
-      entrypoint = functionConfig.entrypoint || "index.js",
+      entrypoint = functionConfig.entrypoint || "main.js",
       commands = functionConfig.commands || "npm install",
       ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
@@ -419,7 +419,7 @@ export class FunctionManager {
     codePath: string,
     options: FunctionDeploymentOptions & { verbose?: boolean } = {}
   ): Promise<Models.Deployment> {
-    const { activate = true, entrypoint = "index.js", commands = "npm install", ignored = [], verbose = false } = options;
+    const { activate = true, entrypoint = "main.js", commands = "npm install", ignored = [], verbose = false } = options;
 
     const { InputFile } = await import("node-appwrite/file");
     const { create: createTarball } = await import("tar");

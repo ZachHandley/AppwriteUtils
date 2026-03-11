@@ -31,7 +31,7 @@ const deployFunctionSchema = z.object({
   functionId: z.string().min(1, 'Function ID is required'),
   path: z.string().optional().describe('Path to function source code (default: searches standard locations)'),
   activate: z.boolean().optional().default(true).describe('Whether to activate the deployment'),
-  entrypoint: z.string().optional().describe('Function entrypoint file (e.g., index.js)'),
+  entrypoint: z.string().optional().describe('Function entrypoint file (e.g., main.js)'),
   commands: z.string().optional().describe('Build commands (e.g., npm install)'),
 });
 

@@ -98,7 +98,7 @@ export class SchemaGenerator {
         name: func.name,
         runtime: func.runtime,
         path: func.dirPath || `functions/${func.name}`,
-        entrypoint: func.entrypoint || "src/index.ts",
+        entrypoint: func.entrypoint || "src/main.ts",
         execute: func.execute,
         events: func.events || [],
         schedule: func.schedule || "",
@@ -313,7 +313,7 @@ const appwriteConfig: AppwriteConfig = {
       name: func.name,
       runtime: func.runtime,
       dirPath: func.dirPath || "functions/" + func.name,
-      entrypoint: func.entrypoint || "src/index.ts",
+      entrypoint: func.entrypoint || "src/main.ts",
       execute: func.execute || [],
       events: func.events || [],
       schedule: func.schedule || "",
@@ -470,12 +470,19 @@ export default appwriteConfig;
 
     let schemaString = `${imports}\n`;
 
+    // Determine if we're in tables mode for the entity ID field
+    const isTablesMode = this.getVersionAwareCollectionsDirectory() === 'tables';
+    const entityIdField = isTablesMode ? '$tableId' : '$collectionId';
+
     // Single object schema with recursive getters (Zod v4)
     schemaString += `export const ${pascalName}Schema = z.object({\n`;
     schemaString += `  $id: z.string(),\n`;
     schemaString += `  $createdAt: z.string(),\n`;
     schemaString += `  $updatedAt: z.string(),\n`;
     schemaString += `  $permissions: z.array(z.string()),\n`;
+    schemaString += `  $databaseId: z.string(),\n`;
+    schemaString += `  ${entityIdField}: z.string(),\n`;
+    schemaString += `  $sequence: z.number().nullish(),\n`;
     for (const attribute of attributes) {
       if (attribute.type === "relationship") continue;
       schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;

@@ -619,19 +619,19 @@ export class InteractiveCLI {
     const defaults = {
       "typescript-node": {
         runtime: "node-21.0" as Runtime,
-        entrypoint: "src/index.ts",
+        entrypoint: "src/main.ts",
         commands: "npm install && npm run build",
         specification: "s-0.5vcpu-512mb" as Specification,
       },
       "hono-typescript": {
         runtime: "node-21.0" as Runtime,
-        entrypoint: "src/index.ts",
+        entrypoint: "src/main.ts",
         commands: "npm install && npm run build",
         specification: "s-0.5vcpu-512mb" as Specification,
       },
       "uv": {
         runtime: "python-3.12" as Runtime,
-        entrypoint: "src/index.py",
+        entrypoint: "src/main.py",
         commands: "uv sync && uv build",
         specification: "s-0.5vcpu-512mb" as Specification,
       },
@@ -795,7 +795,7 @@ export class InteractiveCLI {
       ignore: f.ignore,
       enabled: f.enabled !== false,
       logging: f.logging !== false,
-      entrypoint: f.entrypoint || "src/index.ts",
+      entrypoint: f.entrypoint || "src/main.ts",
       commands: f.commands || "npm install",
       scopes: f.scopes || [], // Add scopes
       path: f.dirPath || `functions/${f.name}`,

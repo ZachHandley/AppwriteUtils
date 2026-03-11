@@ -600,7 +600,7 @@ export class AppwriteToX {
         timeout: func.timeout || 15,
         enabled: func.enabled !== false,
         logging: func.logging !== false,
-        entrypoint: func.entrypoint || "src/index.ts",
+        entrypoint: func.entrypoint || "src/main.ts",
         commands: func.commands || "npm install",
         scopes: Array.isArray(func.scopes) ? func.scopes : [],
         dirPath: `functions/${func.name}`,

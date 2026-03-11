@@ -2,9 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import { MessageFormatter } from './messageFormatter.js';
 import type { AppwriteConfig, Attribute } from 'appwrite-utils';
+import { getVersionAwareDirectory } from 'appwrite-utils';
 
-// Embedded template for base Pydantic model (always written as base.py)
-const BASE_PYDANTIC_TEMPLATE = `"""
+function getBasePydanticTemplate(isTablesMode: boolean): string {
+  const entityIdField = isTablesMode ? 'table_id' : 'collection_id';
+  const entityIdAlias = isTablesMode ? '$tableId' : '$collectionId';
+  const entityIdDesc = isTablesMode ? 'Appwrite table ID' : 'Appwrite collection ID';
+  const entityClassVar = isTablesMode ? 'tableId' : 'collectionId';
+  const entityDocLine = isTablesMode ? '    - table_id -> $tableId' : '    - collection_id -> $collectionId';
+  const entityClassVarComment = isTablesMode
+    ? '    # Optional class-level defaults for database/table identifiers'
+    : '    # Optional class-level defaults for database/collection identifiers';
+
+  return `"""
 Appwrite-compatible Pydantic base models for SmartScraper.
 
 Provides clean base classes for all Appwrite document models without SQLAlchemy dependencies.
@@ -27,13 +37,13 @@ class BaseAppwriteModel(BaseModel):
     - updated_at -> $updatedAt
     - permissions -> $permissions
     - database_id -> $databaseId
-    - collection_id -> $collectionId
+${entityDocLine}
     - sequence -> $sequence
     """
 
-    # Optional class-level defaults for database/collection identifiers
+${entityClassVarComment}
     databaseId: ClassVar[str | None] = None
-    collectionId: ClassVar[str | None] = None
+    ${entityClassVar}: ClassVar[str | None] = None
 
     rid: str = Field(..., alias="$id", description="Appwrite document ID")
     created_at: datetime = Field(..., alias="$createdAt", description="Document creation timestamp")
@@ -44,7 +54,7 @@ class BaseAppwriteModel(BaseModel):
         default_factory=list, alias="$permissions", description="Document permissions"
     )
     database_id: str = Field(..., alias="$databaseId", description="Appwrite database ID")
-    collection_id: str = Field(..., alias="$collectionId", description="Appwrite collection ID")
+    ${entityIdField}: str = Field(..., alias="${entityIdAlias}", description="${entityIdDesc}")
     sequence: int | None = Field(None, alias="$sequence", description="Document sequence number")
 
     class Config:
@@ -106,8 +116,8 @@ class CreateBase(BaseModel):
     database_id: str | None = Field(
         None, alias="$databaseId", description="Auto-set database ID"
     )
-    collection_id: str | None = Field(
-        None, alias="$collectionId", description="Auto-set collection ID"
+    ${entityIdField}: str | None = Field(
+        None, alias="${entityIdAlias}", description="Auto-set ${isTablesMode ? 'table' : 'collection'} ID"
     )
     sequence: int | None = Field(
         None, alias="$sequence", description="Auto-generated sequence number"
@@ -150,8 +160,8 @@ class CreateBase(BaseModel):
             "$permissions",
             "database_id",
             "$databaseId",
-            "collection_id",
-            "$collectionId",
+            "${entityIdField}",
+            "${entityIdAlias}",
             "sequence",
             "$sequence",
         }
@@ -212,7 +222,7 @@ def strip_appwrite_keys(data: dict[str, Any]) -> dict[str, Any]:
         "$updatedAt",
         "$permissions",
         "$databaseId",
-        "$collectionId",
+        "${entityIdAlias}",
         "$sequence",
     }
     return {k: v for k, v in data.items() if k not in excluded_keys}
@@ -471,9 +481,15 @@ def batch_prepare_documents(
 
     return batches
 `;
+}
 
 export class PydanticModelGenerator {
-  constructor(private config: AppwriteConfig, private appwriteFolderPath: string) {}
+  private isTablesMode: boolean;
+
+  constructor(private config: AppwriteConfig, private appwriteFolderPath: string) {
+    this.isTablesMode = this.config.apiMode === 'tablesdb'
+      || getVersionAwareDirectory(this.config, this.appwriteFolderPath) === 'tables';
+  }
 
   generatePydanticModels(options: { baseOutputDirectory: string; verbose?: boolean }) {
     const { baseOutputDirectory, verbose = false } = options;
@@ -501,8 +517,7 @@ export class PydanticModelGenerator {
 
   private writeBase(pyDir: string, verbose: boolean) {
     const basePath = path.join(pyDir, 'base.py');
-    // Always write embedded template content
-    fs.writeFileSync(basePath, BASE_PYDANTIC_TEMPLATE, { encoding: 'utf-8' });
+    fs.writeFileSync(basePath, getBasePydanticTemplate(this.isTablesMode), { encoding: 'utf-8' });
     if (verbose) MessageFormatter.success(`Base Pydantic model written to ${basePath}`, { prefix: 'Schema' });
   }
 

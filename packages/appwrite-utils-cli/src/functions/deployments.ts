@@ -23,7 +23,7 @@ export const deployFunction = async (
   functionId: string,
   codePath: string,
   activate: boolean = true,
-  entrypoint: string = "index.js",
+  entrypoint: string = "main.js",
   commands: string = "npm install",
   ignored: string[] = [
     "node_modules",
