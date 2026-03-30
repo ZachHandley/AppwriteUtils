@@ -739,28 +739,11 @@ export class SessionAuthService {
       }
 
       if (useTables) {
-        const databases = new Databases(client);
-        let dbId: string | undefined;
-
-        // Fetch one database ID to test TablesDB
-        const dbList: any = await databases.list([Query.limit(1)]);
-        dbId = dbList?.databases?.[0]?.$id || dbList?.databases?.[0]?.id || dbList?.[0]?.$id;
-
-        if (!dbId) {
-          logger.debug("Session test succeeded; no databases found to test TablesDB", {
-            prefix: "Session",
-            endpoint,
-            projectId
-          });
-          return true;
-        }
-
         const tables = new TablesDB(client);
-        await tables.listTables({ databaseId: dbId, queries: [Query.limit(1)] });
+        await tables.list({ queries: [Query.limit(1)] });
       } else {
         const databases = new Databases(client);
-        // Attempt to list databases as a test
-        await databases.list();
+        await databases.list({ queries: [Query.limit(1)] });
       }
 
       logger.debug("Session test successful", {
