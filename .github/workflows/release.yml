@@ -91,6 +91,29 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Detect [release] in commit message
+        id: commit_release
+        if: github.event_name == 'push'
+        run: |
+          msg="$(git log -1 --format=%B)"
+          is_release=false
+          bump_type=""
+          if echo "$msg" | grep -qiF '[release:major]'; then
+            is_release=true
+            bump_type=major
+          elif echo "$msg" | grep -qiF '[release]'; then
+            is_release=true
+            bump_type=minor
+          fi
+          echo "is_release=$is_release" >> "$GITHUB_OUTPUT"
+          echo "bump_type=$bump_type" >> "$GITHUB_OUTPUT"
+
+      - name: Bump versions ([release])
+        if: steps.commit_release.outputs.is_release == 'true'
+        run: node scripts/ci/bump-versions.js
+        env:
+          BUMP_TYPE: ${{ steps.commit_release.outputs.bump_type }}
+
       - name: Verify workspace packages
         run: |
           for dir in packages/appwrite-utils packages/appwrite-utils-helpers packages/appwrite-utils-cli packages/appwrite-utils-mcp; do
@@ -125,7 +148,7 @@ jobs:
         run: bash scripts/ci/check-publish.sh packages/appwrite-utils appwrite-utils
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-          FORCE_PUBLISH: ${{ steps.manual.outputs.force }}
+          FORCE_PUBLISH: ${{ steps.commit_release.outputs.is_release == 'true' && 'true' || steps.manual.outputs.force }}
 
       - name: Check appwrite-utils-helpers publish
         id: check_helpers
@@ -133,7 +156,7 @@ jobs:
         run: bash scripts/ci/check-publish.sh packages/appwrite-utils-helpers appwrite-utils-helpers
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-          FORCE_PUBLISH: ${{ steps.manual.outputs.force }}
+          FORCE_PUBLISH: ${{ steps.commit_release.outputs.is_release == 'true' && 'true' || steps.manual.outputs.force }}
 
       - name: Check appwrite-utils-cli publish
         id: check_cli
@@ -141,7 +164,7 @@ jobs:
         run: bash scripts/ci/check-publish.sh packages/appwrite-utils-cli appwrite-utils-cli
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-          FORCE_PUBLISH: ${{ steps.manual.outputs.force }}
+          FORCE_PUBLISH: ${{ steps.commit_release.outputs.is_release == 'true' && 'true' || steps.manual.outputs.force }}
 
       - name: Check appwrite-utils-mcp publish
         id: check_mcp
@@ -149,7 +172,7 @@ jobs:
         run: bash scripts/ci/check-publish.sh packages/appwrite-utils-mcp appwrite-utils-mcp
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-          FORCE_PUBLISH: ${{ steps.manual.outputs.force }}
+          FORCE_PUBLISH: ${{ steps.commit_release.outputs.is_release == 'true' && 'true' || steps.manual.outputs.force }}
 
       - name: Build appwrite-utils
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils')
@@ -173,7 +196,7 @@ jobs:
           steps.check_helpers.outputs.should_publish == 'true' ||
           steps.check_cli.outputs.should_publish == 'true' ||
           steps.check_mcp.outputs.should_publish == 'true') &&
-          (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+          (steps.commit_release.outputs.is_release == 'true' || github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: |
           publish_packages=""
           if [[ "${{ steps.check_utils.outputs.should_publish }}" == "true" ]]; then
@@ -195,28 +218,28 @@ jobs:
           PUBLISH_PACKAGES="$publish_packages" node scripts/ci/prepare-publish.js
 
       - name: Publish appwrite-utils-helpers
-        if: steps.check_helpers.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        if: steps.check_helpers.outputs.should_publish == 'true' && (steps.commit_release.outputs.is_release == 'true' || github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: npm publish --access public
         working-directory: packages/appwrite-utils-helpers
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
       - name: Publish appwrite-utils
-        if: steps.check_utils.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        if: steps.check_utils.outputs.should_publish == 'true' && (steps.commit_release.outputs.is_release == 'true' || github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: npm publish --access public
         working-directory: packages/appwrite-utils
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
       - name: Publish appwrite-utils-cli
-        if: steps.check_cli.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        if: steps.check_cli.outputs.should_publish == 'true' && (steps.commit_release.outputs.is_release == 'true' || github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: npm publish --access public
         working-directory: packages/appwrite-utils-cli
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
       - name: Publish appwrite-utils-mcp
-        if: steps.check_mcp.outputs.should_publish == 'true' && (github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
+        if: steps.check_mcp.outputs.should_publish == 'true' && (steps.commit_release.outputs.is_release == 'true' || github.event_name != 'workflow_dispatch' || steps.manual.outputs.publish == 'true')
         run: npm publish --access public
         working-directory: packages/appwrite-utils-mcp
         env:
