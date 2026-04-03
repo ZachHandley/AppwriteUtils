@@ -18,6 +18,17 @@ if [[ -n "$before" && "$before" != "0000000000000000000000000000000000000000" ]]
 fi
 
 local_version="$(node -p "require('./${pkg_dir}/package.json').version")"
+
+# Dev placeholder — not a real version, skip publish
+if [[ "$local_version" == *"awu-dev"* ]]; then
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "should_publish=false" >> "$GITHUB_OUTPUT"
+  else
+    echo "should_publish=false"
+  fi
+  exit 0
+fi
+
 remote_version="$(npm view "$pkg_name" version 2>/dev/null || echo "0.0.0")"
 compare="$(node scripts/ci/compare-semver.js "$local_version" "$remote_version")"
 

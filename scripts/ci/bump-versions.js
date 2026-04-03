@@ -1,8 +1,10 @@
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
 const root = process.cwd();
 const bumpType = (process.env.BUMP_TYPE || "minor").toLowerCase();
+const PLACEHOLDER = "0.0.0-awu-dev";
 
 if (bumpType !== "minor" && bumpType !== "major") {
   console.error(`Invalid BUMP_TYPE: ${bumpType}. Must be "minor" or "major".`);
@@ -10,24 +12,39 @@ if (bumpType !== "minor" && bumpType !== "major") {
 }
 
 const packages = [
-  "packages/appwrite-utils/package.json",
-  "packages/appwrite-utils-helpers/package.json",
-  "packages/appwrite-utils-cli/package.json",
-  "packages/appwrite-utils-mcp/package.json",
+  { dir: "packages/appwrite-utils", name: "appwrite-utils" },
+  { dir: "packages/appwrite-utils-helpers", name: "appwrite-utils-helpers" },
+  { dir: "packages/appwrite-utils-cli", name: "appwrite-utils-cli" },
+  { dir: "packages/appwrite-utils-mcp", name: "appwrite-utils-mcp" },
 ];
 
-for (const rel of packages) {
-  const filePath = path.join(root, rel);
-  const pkg = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  const [major, minor, patch] = pkg.version.split(".").map(Number);
-
-  const oldVersion = pkg.version;
-  if (bumpType === "major") {
-    pkg.version = `${major + 1}.0.0`;
-  } else {
-    pkg.version = `${major}.${minor + 1}.0`;
+function getRemoteVersion(pkgName) {
+  try {
+    return execSync(`npm view ${pkgName} version`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "0.0.0";
   }
+}
 
-  fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + "\n");
-  console.log(`${pkg.name}: ${oldVersion} -> ${pkg.version}`);
+function bumpVersion(version, type) {
+  const [major, minor] = version.split(".").map(Number);
+  if (type === "major") {
+    return `${major + 1}.0.0`;
+  }
+  return `${major}.${minor + 1}.0`;
+}
+
+for (const pkg of packages) {
+  const filePath = path.join(root, pkg.dir, "package.json");
+  const remoteVersion = getRemoteVersion(pkg.name);
+  const newVersion = bumpVersion(remoteVersion, bumpType);
+
+  let content = fs.readFileSync(filePath, "utf8");
+  content = content.replace(PLACEHOLDER, newVersion);
+  fs.writeFileSync(filePath, content);
+
+  console.log(`${pkg.name}: ${remoteVersion} (npm) -> ${newVersion}`);
 }

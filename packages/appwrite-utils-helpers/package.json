@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils-helpers",
-  "version": "0.1.1",
+  "version": "0.0.0-awu-dev",
   "description": "Helper utilities for Appwrite - clients, config, schemas, adapters, and more.",
   "module": "dist/index.js",
   "main": "dist/index.js",

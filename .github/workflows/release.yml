@@ -176,19 +176,19 @@ jobs:
 
       - name: Build appwrite-utils
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils')
-        run: bun --cwd packages/appwrite-utils run build
+        run: cd packages/appwrite-utils && bun run build
 
       - name: Build appwrite-utils-helpers
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils-helpers')
-        run: bun --cwd packages/appwrite-utils-helpers run build
+        run: cd packages/appwrite-utils-helpers && bun run build
 
       - name: Build appwrite-utils-cli
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils-cli')
-        run: bun --cwd packages/appwrite-utils-cli run build
+        run: cd packages/appwrite-utils-cli && bun run build
 
       - name: Build appwrite-utils-mcp
         if: github.event_name != 'workflow_dispatch' || steps.manual.outputs.packages == 'all' || contains(steps.manual.outputs.packages, 'appwrite-utils-mcp')
-        run: bun --cwd packages/appwrite-utils-mcp run build
+        run: cd packages/appwrite-utils-mcp && bun run build
 
       - name: Prepare publish metadata
         if: |

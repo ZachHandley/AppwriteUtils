@@ -1,6 +1,6 @@
 {
   "name": "appwrite-utils-mcp",
-  "version": "0.1.0",
+  "version": "0.0.0-awu-dev",
   "description": "MCP Server for Appwrite utilities.",
   "module": "dist/index.js",
   "main": "dist/index.js",
