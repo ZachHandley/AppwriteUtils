@@ -265,6 +265,48 @@ export const relationshipAttributeSchema = extendBase({
   }
 });
 
+// Text variant attribute schemas (node-appwrite v22+)
+export const varcharAttributeSchema = extendBase({
+  type: z.literal("varchar").describe("The type of the attribute"),
+  size: z.number().optional().describe("The max length of the attribute"),
+  xdefault: z.string().nullish().describe("The default value of the attribute"),
+  encrypt: z.boolean().optional().describe("Whether the attribute is encrypted or not"),
+});
+
+export const textAttributeSchema = extendBase({
+  type: z.literal("text").describe("The type of the attribute"),
+  xdefault: z.string().nullish().describe("The default value of the attribute"),
+  encrypt: z.boolean().optional().describe("Whether the attribute is encrypted or not"),
+});
+
+export const mediumtextAttributeSchema = extendBase({
+  type: z.literal("mediumtext").describe("The type of the attribute"),
+  xdefault: z.string().nullish().describe("The default value of the attribute"),
+  encrypt: z.boolean().optional().describe("Whether the attribute is encrypted or not"),
+});
+
+export const longtextAttributeSchema = extendBase({
+  type: z.literal("longtext").describe("The type of the attribute"),
+  xdefault: z.string().nullish().describe("The default value of the attribute"),
+  encrypt: z.boolean().optional().describe("Whether the attribute is encrypted or not"),
+});
+
+// Geospatial attribute schemas (node-appwrite v22+)
+export const pointAttributeSchema = extendBase({
+  type: z.literal("point").describe("The type of the attribute"),
+  xdefault: z.array(z.any()).nullish().describe("The default value of the attribute"),
+});
+
+export const lineAttributeSchema = extendBase({
+  type: z.literal("line").describe("The type of the attribute"),
+  xdefault: z.array(z.any()).nullish().describe("The default value of the attribute"),
+});
+
+export const polygonAttributeSchema = extendBase({
+  type: z.literal("polygon").describe("The type of the attribute"),
+  xdefault: z.array(z.any()).nullish().describe("The default value of the attribute"),
+});
+
 const attributeVariants = z.discriminatedUnion("type", [
   stringAttributeSchema,
   integerAttributeSchema,
@@ -277,12 +319,20 @@ const attributeVariants = z.discriminatedUnion("type", [
   urlAttributeSchema,
   enumAttributeSchema,
   relationshipAttributeSchema,
+  varcharAttributeSchema,
+  textAttributeSchema,
+  mediumtextAttributeSchema,
+  longtextAttributeSchema,
+  pointAttributeSchema,
+  lineAttributeSchema,
+  polygonAttributeSchema,
 ]);
 
 const attributeDefaultValueSchema = z.union([
   z.string(),
   z.number(),
   z.boolean(),
+  z.array(z.any()),
   z.null(),
 ]);
 
@@ -299,8 +349,8 @@ const attributeNormalizerSchema = z
     xdefault: attributeDefaultValueSchema.optional(),
     format: z.string().optional(),
     size: z.union([z.number(), z.string()]).optional(),
-    min: z.union([z.number(), z.string()]).optional(),
-    max: z.union([z.number(), z.string()]).optional(),
+    min: z.union([z.number(), z.string(), z.bigint()]).optional(),
+    max: z.union([z.number(), z.string(), z.bigint()]).optional(),
     elements: z.array(z.string()).optional(),
     encrypt: z.boolean().optional(),
     relatedCollection: z.string().optional(),
@@ -365,6 +415,15 @@ const attributeNormalizerSchema = z
     const toNumber = (value: unknown): number | undefined => {
       if (value === undefined || value === null) {
         return undefined;
+      }
+
+      // Handle bigint values from node-appwrite v23+
+      if (typeof value === 'bigint') {
+        const num = Number(value);
+        if (Math.abs(num) >= MIN_MAX_THRESHOLD) {
+          return undefined;
+        }
+        return num;
       }
 
       // Handle string values that might be too large for Number()
@@ -481,6 +540,13 @@ export type IpAttribute = z.infer<typeof ipAttributeSchema>;
 export type UrlAttribute = z.infer<typeof urlAttributeSchema>;
 export type EnumAttribute = z.infer<typeof enumAttributeSchema>;
 export type RelationshipAttribute = z.infer<typeof relationshipAttributeSchema>;
+export type VarcharAttribute = z.infer<typeof varcharAttributeSchema>;
+export type TextAttribute = z.infer<typeof textAttributeSchema>;
+export type MediumtextAttribute = z.infer<typeof mediumtextAttributeSchema>;
+export type LongtextAttribute = z.infer<typeof longtextAttributeSchema>;
+export type PointAttribute = z.infer<typeof pointAttributeSchema>;
+export type LineAttribute = z.infer<typeof lineAttributeSchema>;
+export type PolygonAttribute = z.infer<typeof polygonAttributeSchema>;
 
 export const attributesSchema = z.array(attributeSchema);
 
