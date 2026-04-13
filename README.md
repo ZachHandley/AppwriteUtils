@@ -1,4 +1,4 @@
-# Appwrite Utils Packages Repo
+# Appwrite Utils Packages
 
 This repository contains two distinct packages designed to enhance your experience with Appwrite: `appwrite-utils` and `appwrite-utils-cli`. These packages provide a range of utilities for managing data migrations, schema updates, data conversion, and more, tailored for Appwrite projects.
 
