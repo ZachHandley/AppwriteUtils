@@ -1002,10 +1002,15 @@ export function generateAppwriteConfigSchema(): any {
               "type": "string",
               "description": "Template branch"
             },
-            "specification": {
+            "buildSpecification": {
               "type": "string",
               "default": "s-0.5vcpu-512mb",
-              "description": "Function specification"
+              "description": "Function build specification"
+            },
+            "runtimeSpecification": {
+              "type": "string",
+              "default": "s-0.5vcpu-512mb",
+              "description": "Function runtime specification"
             },
             "dirPath": {
               "type": "string",

@@ -1,5 +1,5 @@
 import { indexSchema, type Index } from "appwrite-utils";
-import { Databases, IndexType, Query, type Models } from "node-appwrite";
+import { Databases, DatabasesIndexType, OrderBy, Query, type Models } from "node-appwrite";
 import type { DatabaseAdapter } from "appwrite-utils-helpers";
 import { delay, tryAwaitWithRetry, calculateExponentialBackoff, isLegacyDatabases, MessageFormatter } from "appwrite-utils-helpers";
 
@@ -318,14 +318,14 @@ export const createOrUpdateIndex = async (
     // Ensure orders array exists and matches attributes length
     // Default to "asc" for each attribute if not specified
     const orders = index.orders && index.orders.length === index.attributes.length
-      ? index.orders
-      : index.attributes.map(() => "asc");
+      ? index.orders.map(o => o === 'desc' ? OrderBy.Desc : OrderBy.Asc)
+      : index.attributes.map(() => OrderBy.Asc);
 
     newIndex = await db.createIndex(
       dbId,
       collectionId,
       index.key,
-      index.type as IndexType,
+      index.type as DatabasesIndexType,
       index.attributes,
       orders
     );

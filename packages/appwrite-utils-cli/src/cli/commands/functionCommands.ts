@@ -73,7 +73,7 @@ export const functionCommands = {
             value: s.slug,
           })),
         ],
-        default: templateDefaults.specification,
+        default: templateDefaults.buildSpecification,
       },
     ]);
 
@@ -87,7 +87,8 @@ export const functionCommands = {
       logging: true,
       entrypoint: templateDefaults.entrypoint,
       commands: templateDefaults.commands,
-      specification: specification || templateDefaults.specification,
+      buildSpecification: specification || templateDefaults.buildSpecification,
+      runtimeSpecification: specification || templateDefaults.runtimeSpecification,
       scopes: [],
       timeout: 15,
       schedule: "",
@@ -396,7 +397,7 @@ export const functionCommands = {
       {
         type: "list",
         name: "specification",
-        message: "Select new specification:",
+        message: "Select new specification (applies to both build and runtime):",
         choices: specifications.specifications.map((s: any) => ({
           name: `${s.slug}`,
           value: s.slug,
@@ -408,9 +409,10 @@ export const functionCommands = {
       for (const functionId of functionsToUpdate.functionId) {
         await (cli as any).controller!.updateFunctionSpecifications(
           functionId,
+          specification,
           specification
         );
-        MessageFormatter.success(`Successfully updated function specification to ${specification}`, { prefix: "Functions" });
+        MessageFormatter.success(`Successfully updated function build & runtime specification to ${specification}`, { prefix: "Functions" });
       }
     } catch (error) {
       MessageFormatter.error("Error updating function specification", error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });

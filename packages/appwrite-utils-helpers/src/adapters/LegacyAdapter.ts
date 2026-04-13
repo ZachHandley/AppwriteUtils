@@ -7,7 +7,7 @@
  * older Appwrite instances.
  */
 
-import { Client, Databases, IndexType, Query, type Models, RelationshipType, RelationMutate } from "node-appwrite";
+import { Client, Databases, DatabasesIndexType, OrderBy, Query, type Models, RelationshipType, RelationMutate } from "node-appwrite";
 import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
@@ -326,9 +326,9 @@ export class LegacyAdapter extends BaseAdapter {
         params.databaseId,
         params.tableId,
         params.key,
-        params.type as IndexType,
+        params.type as DatabasesIndexType,
         params.attributes,
-        params.orders || []
+        (params.orders || []).map(o => o === 'desc' ? OrderBy.Desc : OrderBy.Asc)
       );
 
       return { data: result };

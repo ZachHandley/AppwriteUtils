@@ -4,6 +4,7 @@ import {
   Functions,
   Query,
   Runtime,
+  type Scopes,
 } from "node-appwrite";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,12 +138,14 @@ export const createFunction = async (
     functionConfig.logging,
     functionConfig.entrypoint,
     functionConfig.commands,
-    functionConfig.scopes,
+    functionConfig.scopes as Scopes[],
     functionConfig.installationId,
     functionConfig.providerRepositoryId,
     functionConfig.providerBranch,
     functionConfig.providerSilentMode,
-    functionConfig.providerRootDirectory
+    functionConfig.providerRootDirectory,
+    functionConfig.buildSpecification,
+    functionConfig.runtimeSpecification
   );
   return functionResponse;
 };
@@ -150,7 +153,8 @@ export const createFunction = async (
 export const updateFunctionSpecifications = async (
   client: Client,
   functionId: string,
-  specification: Specification
+  buildSpecification: Specification,
+  runtimeSpecification: Specification
 ) => {
   const curFunction = await listFunctions(client, [
     Query.equal("$id", functionId),
@@ -164,7 +168,8 @@ export const updateFunctionSpecifications = async (
       ...functionFound,
       runtime: functionFound.runtime as AppwriteUtilsRuntime,
       scopes: functionFound.scopes as FunctionScope[],
-      specification: specification,
+      buildSpecification,
+      runtimeSpecification,
     });
     return functionResponse;
   } catch (error) {
@@ -217,13 +222,14 @@ export const updateFunction = async (
     functionConfig.logging,
     functionConfig.entrypoint,
     functionConfig.commands,
-    functionConfig.scopes,
+    functionConfig.scopes as Scopes[],
     functionConfig.installationId,
     functionConfig.providerRepositoryId,
     functionConfig.providerBranch,
     functionConfig.providerSilentMode,
     functionConfig.providerRootDirectory,
-    functionConfig.specification
+    functionConfig.buildSpecification,
+    functionConfig.runtimeSpecification
   );
   return functionResponse;
 };

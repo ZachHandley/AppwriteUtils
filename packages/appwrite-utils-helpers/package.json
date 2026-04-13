@@ -27,7 +27,7 @@
     "es-toolkit": "^1.39.4",
     "find-up": "^8.0.0",
     "js-yaml": "^4.1.0",
-    "node-appwrite": "^20.2.1",
+    "node-appwrite": "^23.1.0",
     "p-limit": "^6.2.0",
     "tar": "^7.4.3",
     "tsx": "^4.20.3",

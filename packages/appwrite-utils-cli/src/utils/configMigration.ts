@@ -262,7 +262,8 @@ function convertToYAMLConfig(config: AppwriteConfigTS): AppwriteConfigYAML {
       entrypoint: func.entrypoint || "src/main.js",
       commands: func.commands || "",
       scopes: func.scopes || [],
-      specification: func.specification || "s-1vcpu-512mb"
+      buildSpecification: func.specification || "s-1vcpu-512mb",
+      runtimeSpecification: func.specification || "s-1vcpu-512mb"
     }))
   };
 

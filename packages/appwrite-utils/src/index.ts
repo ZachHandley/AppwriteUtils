@@ -146,3 +146,7 @@ export { FunctionScopes, type FunctionScope } from "./schemas/functionScopes.js"
 export { FunctionSpecifications, type FunctionSpecification } from "./schemas/functionSpecifications.js";
 export { RuntimeSchema, type Runtime } from "./schemas/runtime.js";
 export { EventTypeSchema, DocumentEventTypeSchema, type EventType, type DocumentEventType } from "./schemas/eventTypes.js";
+export { AppwriteSiteSchema, type AppwriteSite } from "./schemas/sites.js";
+export { FrameworkSchema, type Framework } from "./schemas/framework.js";
+export { AdapterSchema, type Adapter } from "./schemas/adapter.js";
+export { BuildRuntimeSchema, type BuildRuntime } from "./schemas/buildRuntime.js";

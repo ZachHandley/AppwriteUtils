@@ -351,7 +351,8 @@ export const databaseCommands = {
               providerBranch: remoteFunction.providerBranch,
               providerSilentMode: remoteFunction.providerSilentMode,
               providerRootDirectory: remoteFunction.providerRootDirectory,
-              specification: remoteFunction.specification,
+              buildSpecification: (remoteFunction as any).buildSpecification,
+              runtimeSpecification: (remoteFunction as any).runtimeSpecification,
             };
 
             const existingIndex = (cli as any).controller!.config!.functions!.findIndex(
@@ -427,7 +428,8 @@ export const databaseCommands = {
               providerBranch: remoteFunction.providerBranch,
               providerSilentMode: remoteFunction.providerSilentMode,
               providerRootDirectory: remoteFunction.providerRootDirectory,
-              specification: remoteFunction.specification,
+              buildSpecification: (remoteFunction as any).buildSpecification,
+              runtimeSpecification: (remoteFunction as any).runtimeSpecification,
             };
 
             (cli as any).controller!.config!.functions =

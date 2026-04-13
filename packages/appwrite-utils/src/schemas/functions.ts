@@ -27,7 +27,8 @@ import { EventTypeSchema } from "./eventTypes.js";
  * providerBranch?: string,
  * providerSilentMode?: boolean,
  * providerRootDirectory?: string,
- * specification?: string
+ * buildSpecification?: string,
+ * runtimeSpecification?: string
  */
 export const AppwriteFunctionSchema = z.object({
   dirPath: z.string().optional(),
@@ -55,7 +56,8 @@ export const AppwriteFunctionSchema = z.object({
   templateOwner: z.string().optional(),
   templateRootDirectory: z.string().optional(),
   templateVersion: z.string().optional(),
-  specification: FunctionSpecifications.optional(),
+  buildSpecification: FunctionSpecifications.optional(),
+  runtimeSpecification: FunctionSpecifications.optional(),
 });
 
 export type AppwriteFunction = z.infer<typeof AppwriteFunctionSchema>;

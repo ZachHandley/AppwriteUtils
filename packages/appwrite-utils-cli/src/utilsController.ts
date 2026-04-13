@@ -1187,22 +1187,24 @@ export class UtilsController {
 
   async updateFunctionSpecifications(
     functionId: string,
-    specification: Specification
+    buildSpecification: Specification,
+    runtimeSpecification: Specification
   ) {
     await this.init();
     if (!this.appwriteServer)
       throw new Error("Appwrite server not initialized");
     MessageFormatter.progress(
-      `Updating function specifications for ${functionId} to ${specification}`,
+      `Updating function specifications for ${functionId} to build=${buildSpecification}, runtime=${runtimeSpecification}`,
       { prefix: "Functions" }
     );
     await updateFunctionSpecifications(
       this.appwriteServer,
       functionId,
-      specification
+      buildSpecification,
+      runtimeSpecification
     );
     MessageFormatter.success(
-      `Successfully updated function specifications for ${functionId} to ${specification}`,
+      `Successfully updated function specifications for ${functionId} to build=${buildSpecification}, runtime=${runtimeSpecification}`,
       { prefix: "Functions" }
     );
   }

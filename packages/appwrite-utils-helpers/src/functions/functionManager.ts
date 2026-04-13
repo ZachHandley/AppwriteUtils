@@ -1,4 +1,4 @@
-import { Client, Functions, Runtime, type Models } from "node-appwrite";
+import { Client, Functions, Runtime, type Models, type Scopes } from "node-appwrite";
 import { type AppwriteFunction, EventTypeSchema } from "appwrite-utils";
 import { join, relative, resolve, basename } from "node:path";
 import fs from "node:fs";
@@ -332,12 +332,14 @@ export class FunctionManager {
         functionConfig.logging !== false,
         functionConfig.entrypoint,
         functionConfig.commands,
-        functionConfig.scopes || [],
+        (functionConfig.scopes || []) as Scopes[],
         functionConfig.installationId,
         functionConfig.providerRepositoryId,
         functionConfig.providerBranch,
         functionConfig.providerSilentMode,
-        functionConfig.providerRootDirectory
+        functionConfig.providerRootDirectory,
+        functionConfig.buildSpecification,
+        functionConfig.runtimeSpecification
       );
     });
   }
@@ -365,13 +367,14 @@ export class FunctionManager {
         functionConfig.logging !== false,
         functionConfig.entrypoint,
         functionConfig.commands,
-        functionConfig.scopes || [],
+        (functionConfig.scopes || []) as Scopes[],
         functionConfig.installationId,
         functionConfig.providerRepositoryId,
         functionConfig.providerBranch,
         functionConfig.providerSilentMode,
         functionConfig.providerRootDirectory,
-        functionConfig.specification
+        functionConfig.buildSpecification,
+        functionConfig.runtimeSpecification
       );
     });
   }

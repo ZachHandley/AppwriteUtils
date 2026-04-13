@@ -6,7 +6,7 @@
  * and returns Models.Row instead of Models.Document.
  */
 
-import { IndexType, Query, RelationMutate, RelationshipType, type Models } from "node-appwrite";
+import { TablesDBIndexType, OrderBy, Query, RelationMutate, RelationshipType, type Models } from "node-appwrite";
 import { chunk } from "es-toolkit";
 import {
   BaseAdapter,
@@ -282,9 +282,9 @@ export class TablesDBAdapter extends BaseAdapter {
         databaseId: params.databaseId,
         tableId: params.tableId,
         key: params.key,
-        type: params.type as IndexType,
+        type: params.type as TablesDBIndexType,
         columns: params.attributes,
-        orders: params.orders || [],
+        orders: (params.orders || []).map(o => o === 'desc' ? OrderBy.Desc : OrderBy.Asc),
         lengths: params.lengths || [],
       });
       return { data: result };

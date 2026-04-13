@@ -112,7 +112,8 @@ export class SchemaGenerator {
         providerBranch: func.providerBranch,
         providerSilentMode: func.providerSilentMode,
         providerRootDirectory: func.providerRootDirectory,
-        specification: func.specification,
+        buildSpecification: func.buildSpecification,
+        runtimeSpecification: func.runtimeSpecification,
         ...(func.predeployCommands
           ? { predeployCommands: func.predeployCommands }
           : {}),
@@ -327,7 +328,8 @@ const appwriteConfig: AppwriteConfig = {
       providerBranch: func.providerBranch,
       providerSilentMode: func.providerSilentMode,
       providerRootDirectory: func.providerRootDirectory,
-      specification: func.specification,
+      buildSpecification: func.buildSpecification,
+      runtimeSpecification: func.runtimeSpecification,
     })),
     null,
     4
@@ -482,7 +484,7 @@ export default appwriteConfig;
     schemaString += `  $permissions: z.array(z.string()),\n`;
     schemaString += `  $databaseId: z.string(),\n`;
     schemaString += `  ${entityIdField}: z.string(),\n`;
-    schemaString += `  $sequence: z.number().nullish(),\n`;
+    schemaString += `  $sequence: z.string().nullish(),\n`;
     for (const attribute of attributes) {
       if (attribute.type === "relationship") continue;
       schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;

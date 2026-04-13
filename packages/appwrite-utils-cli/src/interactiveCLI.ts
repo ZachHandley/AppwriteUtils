@@ -46,6 +46,7 @@ import { storageCommands } from "./cli/commands/storageCommands.js";
 import { transferCommands } from "./cli/commands/transferCommands.js";
 import { schemaCommands } from "./cli/commands/schemaCommands.js";
 import { importFileCommands } from "./cli/commands/importFileCommands.js";
+import { siteCommands } from "./cli/commands/siteCommands.js";
 
 enum CHOICES {
   MIGRATE_CONFIG = "🔄 Migrate TypeScript config to YAML (.appwrite structure)",
@@ -55,6 +56,9 @@ enum CHOICES {
   CREATE_FUNCTION = "⚡ Create a new function, from scratch or using a template",
   DEPLOY_FUNCTION = "🚀 Deploy function(s)",
   DELETE_FUNCTION = "🗑️ Delete function",
+  CREATE_SITE = "🌐 Create a new site",
+  DEPLOY_SITES = "🚀 Deploy site(s)",
+  DELETE_SITE = "🗑️ Delete site",
   SETUP_DIRS_FILES = "📁 Setup directories and files",
   SETUP_DIRS_FILES_WITH_EXAMPLE_DATA = "📁✨ Setup directories and files with example data",
   SYNC_DB = "⬆️ Push local config to Appwrite",
@@ -143,6 +147,18 @@ export class InteractiveCLI {
         case CHOICES.DELETE_FUNCTION:
           await this.initControllerIfNeeded();
           await functionCommands.deleteFunction(this);
+          break;
+        case CHOICES.CREATE_SITE:
+          await this.initControllerIfNeeded();
+          await siteCommands.createSite(this);
+          break;
+        case CHOICES.DEPLOY_SITES:
+          await this.initControllerIfNeeded();
+          await siteCommands.deploySite(this);
+          break;
+        case CHOICES.DELETE_SITE:
+          await this.initControllerIfNeeded();
+          await siteCommands.deleteSite(this);
           break;
         case CHOICES.SETUP_DIRS_FILES:
           await schemaCommands.setupDirsFiles(this, false);
@@ -387,7 +403,8 @@ export class InteractiveCLI {
         const existsInRemoteDb = remoteCollections.some((rc) => rc.name === c.name || rc.$id === c.$id);
 
         // Include if local metadata claims it belongs to this database
-        const hasMatchingLocalMetadata = c.databaseId === database.$id;
+        const hasMatchingLocalMetadata = c.databaseId === database.$id
+          || (c.databaseIds && c.databaseIds.includes(database.$id));
 
         return existsInRemoteDb || hasMatchingLocalMetadata;
       });
@@ -621,33 +638,38 @@ export class InteractiveCLI {
         runtime: "node-21.0" as Runtime,
         entrypoint: "src/main.ts",
         commands: "npm install && npm run build",
-        specification: "s-0.5vcpu-512mb" as Specification,
+        buildSpecification: "s-0.5vcpu-512mb" as Specification,
+        runtimeSpecification: "s-0.5vcpu-512mb" as Specification,
       },
       "hono-typescript": {
         runtime: "node-21.0" as Runtime,
         entrypoint: "src/main.ts",
         commands: "npm install && npm run build",
-        specification: "s-0.5vcpu-512mb" as Specification,
+        buildSpecification: "s-0.5vcpu-512mb" as Specification,
+        runtimeSpecification: "s-0.5vcpu-512mb" as Specification,
       },
       "uv": {
         runtime: "python-3.12" as Runtime,
         entrypoint: "src/main.py",
         commands: "uv sync && uv build",
-        specification: "s-0.5vcpu-512mb" as Specification,
+        buildSpecification: "s-0.5vcpu-512mb" as Specification,
+        runtimeSpecification: "s-0.5vcpu-512mb" as Specification,
       },
       "count-docs-in-collection": {
         runtime: "node-21.0" as Runtime,
         entrypoint: "src/main.ts",
         commands: "npm install && npm run build",
-        specification: "s-1vcpu-512mb" as Specification,
+        buildSpecification: "s-1vcpu-512mb" as Specification,
+        runtimeSpecification: "s-1vcpu-512mb" as Specification,
       },
     };
-    
+
     return defaults[template as keyof typeof defaults] || {
       runtime: "node-21.0" as Runtime,
       entrypoint: "",
       commands: "",
-      specification: "s-0.5vcpu-512mb" as Specification,
+      buildSpecification: "s-0.5vcpu-512mb" as Specification,
+      runtimeSpecification: "s-0.5vcpu-512mb" as Specification,
     };
   }
 
@@ -805,7 +827,8 @@ export class InteractiveCLI {
       providerBranch: f.providerBranch || "",
       providerSilentMode: f.providerSilentMode || false,
       providerRootDirectory: f.providerRootDirectory || "",
-      ...(f.specification ? { specification: f.specification } : {}),
+      ...(f.buildSpecification ? { buildSpecification: f.buildSpecification } : {}),
+      ...(f.runtimeSpecification ? { runtimeSpecification: f.runtimeSpecification } : {}),
       ...(f.predeployCommands
         ? { predeployCommands: f.predeployCommands }
         : {}),
@@ -1069,6 +1092,8 @@ export class InteractiveCLI {
         compression: bucketCompressionType as Compression,
         encryption: bucketEncryption,
         antivirus: bucketAntivirus,
+        transformations: false,
+        totalSize: 0,
       },
       bucketId.length > 0 ? bucketId : ulid()
     );
@@ -1080,6 +1105,7 @@ export class InteractiveCLI {
     _isFromTablesDir?: boolean;
     _sourceFolder?: string;
     databaseId?: string;
+    databaseIds?: string[];
   })[] {
     const configCollections = [
       ...(this.controller!.config?.collections || []),
@@ -1097,6 +1123,7 @@ export class InteractiveCLI {
       indexes: c.indexes || [],
       $permissions: PermissionToAppwritePermission(c.$permissions) || [],
       databaseId: c.databaseId,
+      databaseIds: (c as any).databaseIds,
       _isFromTablesDir: (c as any)._isFromTablesDir || false,
       _sourceFolder: (c as any)._isFromTablesDir ? 'tables' : 'collections',
     }));
@@ -1111,6 +1138,8 @@ export class InteractiveCLI {
       name: db.name,
       enabled: true,
       type: "tablesdb" as DatabaseType,
+      policies: [],
+      archives: [],
     }));
   }
 

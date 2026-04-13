@@ -10,6 +10,9 @@ export * from "./schemas/index.js";
 // Function utilities for managing Appwrite functions
 export * from "./functions/index.js";
 
+// Site utilities for managing Appwrite sites
+export * from "./sites/index.js";
+
 // Version detection utilities for API compatibility
 export * from "./utils/index.js";
 

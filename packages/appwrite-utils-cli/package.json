@@ -54,7 +54,7 @@
     "jszip": "^3.10.1",
     "luxon": "^3.6.1",
     "nanostores": "^0.10.3",
-    "node-appwrite": "^20.2.1",
+    "node-appwrite": "^23.1.0",
     "p-limit": "^6.2.0",
     "papaparse": "^5.5.3",
     "tar": "^7.4.3",

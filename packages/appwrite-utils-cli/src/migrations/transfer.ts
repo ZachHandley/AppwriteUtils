@@ -2,7 +2,7 @@ import { converterFunctions, tryAwaitWithRetry } from "appwrite-utils";
 import {
   Client,
   Databases,
-  IndexType,
+  DatabasesIndexType,
   Query,
   Storage,
   Users,

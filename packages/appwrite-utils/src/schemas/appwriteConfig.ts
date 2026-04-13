@@ -47,6 +47,7 @@ import {
 } from "./table.js";
 import { BucketSchema } from "./bucket.js";
 import { AppwriteFunctionSchema } from "./functions.js";
+import { AppwriteSiteSchema } from "./sites.js";
 
 export const AppwriteConfigSchema = z.object({
   appwriteEndpoint: z.string().default("https://cloud.appwrite.io/v1"),
@@ -166,6 +167,10 @@ export const AppwriteConfigSchema = z.object({
     .array(AppwriteFunctionSchema)
     .optional()
     .describe("Functions to create"),
+  sites: z
+    .array(AppwriteSiteSchema)
+    .optional()
+    .describe("Sites to create"),
   apiMode: z
     .enum(["auto", "legacy", "tablesdb"])
     .default("auto")

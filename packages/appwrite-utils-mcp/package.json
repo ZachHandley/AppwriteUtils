@@ -27,7 +27,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "appwrite-utils": "workspace:*",
     "appwrite-utils-helpers": "workspace:*",
-    "node-appwrite": "^20.2.1",
+    "node-appwrite": "^23.1.0",
     "ulidx": "^2.4.1",
     "yargs": "^18.0.0",
     "zod": "^4.0.0"

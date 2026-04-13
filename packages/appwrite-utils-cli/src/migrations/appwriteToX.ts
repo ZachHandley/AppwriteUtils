@@ -604,7 +604,8 @@ export class AppwriteToX {
         commands: func.commands || "npm install",
         scopes: Array.isArray(func.scopes) ? func.scopes : [],
         dirPath: `functions/${func.name}`,
-        specification: func.specification as Specification,
+        buildSpecification: func.buildSpecification as Specification,
+        runtimeSpecification: func.runtimeSpecification as Specification,
       })
     );
 

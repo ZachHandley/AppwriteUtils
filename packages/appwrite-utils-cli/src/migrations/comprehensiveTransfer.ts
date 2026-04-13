@@ -1268,7 +1268,8 @@ export class ComprehensiveTransfer {
               providerBranch: func.providerBranch,
               providerSilentMode: func.providerSilentMode,
               providerRootDirectory: func.providerRootDirectory,
-              specification: func.specification as any,
+              buildSpecification: func.buildSpecification as any,
+              runtimeSpecification: func.runtimeSpecification as any,
               dirPath: functionPath,
             };
 

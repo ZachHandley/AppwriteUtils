@@ -27,6 +27,7 @@ import { usersToolGroup } from './tools/users/index.js';
 import { transferToolGroup } from './tools/transfer/index.js';
 import { schemasToolGroup } from './tools/schemas/index.js';
 import { configToolGroup } from './tools/config/index.js';
+import { sitesToolGroup } from './tools/sites/index.js';
 
 /**
  * AppwriteMCPServer - Main MCP server for Appwrite utilities
@@ -86,6 +87,7 @@ export class AppwriteMCPServer {
     this.toolRegistry.registerGroup(transferToolGroup);
     this.toolRegistry.registerGroup(schemasToolGroup);
     this.toolRegistry.registerGroup(configToolGroup);
+    this.toolRegistry.registerGroup(sitesToolGroup);
 
     // Create MCP server instance
     this.server = new Server(
@@ -131,6 +133,7 @@ Authentication priority:
 Available operations:
 - Database: List, create, sync, backup, restore databases and collections
 - Functions: List, create, deploy, delete, execute Appwrite functions
+- Sites: List, create, deploy, delete sites and manage site variables
 - Storage: Manage buckets, upload/download files
 - Users: List, create, update, delete users and sessions
 - Transfer: Backup, restore, migrate data between instances

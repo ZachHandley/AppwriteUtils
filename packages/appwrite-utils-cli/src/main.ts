@@ -62,7 +62,8 @@ interface CliOptions {
   setup?: boolean;
   updateFunctionSpec?: boolean;
   functionId?: string;
-  specification?: string;
+  buildSpecification?: string;
+  runtimeSpecification?: string;
   migrateConfig?: boolean;
   generateConstants?: boolean;
   constantsLanguages?: string;
@@ -535,9 +536,23 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Function ID to update",
   })
-  .option("specification", {
+  .option("buildSpecification", {
     type: "string",
-    description: "New function specification (e.g., 's-1vcpu-1gb')",
+    description: "New function build specification (e.g., 's-1vcpu-1gb')",
+    choices: [
+      "s-0.5vcpu-512mb",
+      "s-1vcpu-1gb",
+      "s-2vcpu-2gb",
+      "s-2vcpu-4gb",
+      "s-4vcpu-4gb",
+      "s-4vcpu-8gb",
+      "s-8vcpu-4gb",
+      "s-8vcpu-8gb",
+    ],
+  })
+  .option("runtimeSpecification", {
+    type: "string",
+    description: "New function runtime specification (e.g., 's-1vcpu-1gb')",
     choices: [
       "s-0.5vcpu-512mb",
       "s-1vcpu-1gb",
@@ -916,25 +931,32 @@ async function main() {
     };
 
     if (parsedArgv.updateFunctionSpec) {
-      if (!parsedArgv.functionId || !parsedArgv.specification) {
+      if (!parsedArgv.functionId || (!parsedArgv.buildSpecification && !parsedArgv.runtimeSpecification)) {
         throw new Error(
-          "Function ID and specification are required for updating function specs"
+          "Function ID and at least one of buildSpecification/runtimeSpecification are required for updating function specs"
         );
       }
+      const buildSpec = parsedArgv.buildSpecification || parsedArgv.runtimeSpecification!;
+      const runtimeSpec = parsedArgv.runtimeSpecification || parsedArgv.buildSpecification!;
       MessageFormatter.info(
-        `Updating function specification for ${parsedArgv.functionId} to ${parsedArgv.specification}`,
+        `Updating function specification for ${parsedArgv.functionId} to build=${buildSpec}, runtime=${runtimeSpec}`,
         { prefix: "Functions" }
       );
       const specifications = await listSpecifications(
         controller.appwriteServer!
       );
-      if (
-        !specifications.specifications.some(
-          (s: { slug: string }) => s.slug === parsedArgv.specification
-        )
-      ) {
+      const validSlugs = specifications.specifications.map((s: { slug: string }) => s.slug);
+      if (!validSlugs.includes(buildSpec)) {
         MessageFormatter.error(
-          `Specification ${parsedArgv.specification} not found`,
+          `Build specification ${buildSpec} not found`,
+          undefined,
+          { prefix: "Functions" }
+        );
+        return;
+      }
+      if (!validSlugs.includes(runtimeSpec)) {
+        MessageFormatter.error(
+          `Runtime specification ${runtimeSpec} not found`,
           undefined,
           { prefix: "Functions" }
         );
@@ -942,7 +964,8 @@ async function main() {
       }
       await controller.updateFunctionSpecifications(
         parsedArgv.functionId,
-        parsedArgv.specification as Specification
+        buildSpec as Specification,
+        runtimeSpec as Specification
       );
     }
 
@@ -1202,10 +1225,29 @@ async function main() {
         return;
       }
 
-      // Fetch available DBs
-      const availableDatabases = await fetchAllDatabases(controller.database);
+      // Fetch available DBs from remote, then merge in local-only databases
+      const remoteDatabases = await fetchAllDatabases(controller.database);
+      const configuredDatabases = controller.config.databases || [];
+      const remoteDbIds = new Set(remoteDatabases.map((db: any) => db.$id));
+      const availableDatabases = [...remoteDatabases];
+
+      for (const configDb of configuredDatabases) {
+        const dbId = configDb.$id;
+        if (dbId && !remoteDbIds.has(dbId)) {
+          availableDatabases.push({
+            $id: dbId,
+            name: configDb.name || dbId,
+            $createdAt: new Date().toISOString(),
+            $updatedAt: new Date().toISOString(),
+            enabled: true,
+            _isLocalOnly: true,
+          } as any);
+          MessageFormatter.info(`Including local database "${configDb.name || dbId}" (not yet on server)`, { prefix: "Push" });
+        }
+      }
+
       if (availableDatabases.length === 0) {
-        MessageFormatter.warning("No databases found in remote project", { prefix: "Push" });
+        MessageFormatter.warning("No databases found in remote project or local config", { prefix: "Push" });
         return;
       }
 
@@ -1216,7 +1258,7 @@ async function main() {
       } else {
         selectedDbIds = await SelectionDialogs.selectDatabases(
           availableDatabases,
-          controller.config.databases || [],
+          configuredDatabases,
           { showSelectAll: false, allowNewOnly: false, defaultSelected: [] }
         );
       }

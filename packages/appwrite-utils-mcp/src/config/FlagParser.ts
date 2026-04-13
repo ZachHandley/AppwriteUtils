@@ -17,6 +17,7 @@ export interface ServerFlags {
   transfer: boolean;
   schemas: boolean;
   config: boolean;
+  sites: boolean;
   all: boolean;
 
   // Configuration flags
@@ -69,6 +70,11 @@ export function parseFlags(argv: string[]): ServerFlags {
       description: 'Enable config tools',
       default: false,
     })
+    .option('sites', {
+      type: 'boolean',
+      description: 'Enable sites tools',
+      default: false,
+    })
     .option('all', {
       type: 'boolean',
       description: 'Enable all tools',
@@ -108,6 +114,7 @@ export function parseFlags(argv: string[]): ServerFlags {
     transfer: parsed.transfer,
     schemas: parsed.schemas,
     config: parsed.config,
+    sites: parsed.sites,
     all: parsed.all,
     endpoint: parsed.endpoint,
     projectId: parsed.projectId,
@@ -125,7 +132,7 @@ export function parseFlags(argv: string[]): ServerFlags {
 export function getEnabledToolGroups(flags: ServerFlags): string[] {
   // If --all is specified, enable all tool groups
   if (flags.all) {
-    return ['databases', 'functions', 'storage', 'users', 'transfer', 'schemas', 'config'];
+    return ['databases', 'functions', 'storage', 'users', 'transfer', 'schemas', 'config', 'sites'];
   }
 
   const enabled: string[] = [];
@@ -137,6 +144,7 @@ export function getEnabledToolGroups(flags: ServerFlags): string[] {
   if (flags.transfer) enabled.push('transfer');
   if (flags.schemas) enabled.push('schemas');
   if (flags.config) enabled.push('config');
+  if (flags.sites) enabled.push('sites');
 
   return enabled;
 }

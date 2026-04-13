@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { Client } from "node-appwrite";
-import type { AppwriteConfig, Collection, CollectionCreate, AppwriteFunction } from "appwrite-utils";
+import type { AppwriteConfig, Collection, CollectionCreate, AppwriteFunction, AppwriteSite } from "appwrite-utils";
 import {
   ConfigDiscoveryService,
   ConfigLoaderService,
@@ -1127,6 +1127,22 @@ export class ConfigManager {
   public getFunctions(): AppwriteFunction[] {
     const config = this.getConfig();
     return config.functions || [];
+  }
+
+  /**
+   * Get sites from the configuration.
+   *
+   * @returns Array of sites
+   *
+   * @example
+   * ```typescript
+   * const sites = configManager.getSites();
+   * console.log(`Found ${sites.length} sites`);
+   * ```
+   */
+  public getSites(): AppwriteSite[] {
+    const config = this.getConfig();
+    return config.sites || [];
   }
 
   // ──────────────────────────────────────────────────

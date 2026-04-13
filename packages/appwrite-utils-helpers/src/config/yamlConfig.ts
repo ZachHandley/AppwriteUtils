@@ -2,7 +2,7 @@ import { z } from "zod";
 import yaml from "js-yaml";
 import fs from "fs";
 import path from "path";
-import { AppwriteConfigSchema, type AppwriteConfig, RuntimeSchema, FunctionScopes, FunctionSpecifications, permissionsSchema, PermissionToAppwritePermission, type AppwriteFunction } from "appwrite-utils";
+import { AppwriteConfigSchema, type AppwriteConfig, RuntimeSchema, FunctionScopes, FunctionSpecifications, permissionsSchema, PermissionToAppwritePermission, type AppwriteFunction, type AppwriteSite, FrameworkSchema, AdapterSchema, BuildRuntimeSchema } from "appwrite-utils";
 import { shouldIgnoreDirectory } from "../utils/directoryUtils.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 
@@ -142,13 +142,45 @@ const YamlConfigSchema = z.object({
         templateOwner: z.string().optional(),
         templateRootDirectory: z.string().optional(),
         templateBranch: z.string().optional(),
-        specification: FunctionSpecifications.optional(),
+        specification: FunctionSpecifications.optional(), // backwards compat with old YAML files
+        buildSpecification: FunctionSpecifications.optional(),
+        runtimeSpecification: FunctionSpecifications.optional(),
         // Critical missing fields for function deployment
         dirPath: z.string().optional(),
         predeployCommands: z.array(z.string()).optional(),
         deployDir: z.string().optional(),
         ignore: z.array(z.string()).optional(),
         templateVersion: z.string().optional(),
+      })
+    )
+    .optional()
+    .default([]),
+  sites: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        framework: FrameworkSchema,
+        buildRuntime: BuildRuntimeSchema,
+        enabled: z.boolean().optional(),
+        logging: z.boolean().optional(),
+        timeout: z.number().optional(),
+        installCommand: z.string().optional(),
+        buildCommand: z.string().optional(),
+        outputDirectory: z.string().optional(),
+        adapter: AdapterSchema.optional(),
+        fallbackFile: z.string().optional(),
+        installationId: z.string().optional(),
+        providerRepositoryId: z.string().optional(),
+        providerBranch: z.string().optional(),
+        providerSilentMode: z.boolean().optional(),
+        providerRootDirectory: z.string().optional(),
+        buildSpecification: FunctionSpecifications.optional(),
+        runtimeSpecification: FunctionSpecifications.optional(),
+        dirPath: z.string().optional(),
+        predeployCommands: z.array(z.string()).optional(),
+        deployDir: z.string().optional(),
+        ignore: z.array(z.string()).optional(),
       })
     )
     .optional()
@@ -241,13 +273,39 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
       templateOwner: func.templateOwner || "",
       templateRootDirectory: func.templateRootDirectory || "",
       templateBranch: func.templateBranch || "",
-      specification: func.specification || "s-0.5vcpu-512mb",
+      buildSpecification: func.buildSpecification || func.specification || "s-0.5vcpu-512mb",
+      runtimeSpecification: func.runtimeSpecification || func.specification || "s-0.5vcpu-512mb",
       // Include critical missing fields for function deployment
       dirPath: func.dirPath,
       predeployCommands: func.predeployCommands,
       deployDir: func.deployDir,
       ignore: func.ignore,
       templateVersion: func.templateVersion,
+    })),
+    sites: yamlConfig.sites?.map((site) => ({
+      $id: site.id,
+      name: site.name,
+      framework: site.framework,
+      buildRuntime: site.buildRuntime,
+      enabled: site.enabled !== false,
+      logging: site.logging !== false,
+      timeout: site.timeout,
+      installCommand: site.installCommand || "",
+      buildCommand: site.buildCommand || "",
+      outputDirectory: site.outputDirectory || "",
+      adapter: site.adapter,
+      fallbackFile: site.fallbackFile || "",
+      installationId: site.installationId || "",
+      providerRepositoryId: site.providerRepositoryId || "",
+      providerBranch: site.providerBranch || "",
+      providerSilentMode: site.providerSilentMode || false,
+      providerRootDirectory: site.providerRootDirectory || "",
+      buildSpecification: site.buildSpecification || "s-0.5vcpu-512mb",
+      runtimeSpecification: site.runtimeSpecification || "s-0.5vcpu-512mb",
+      dirPath: site.dirPath,
+      predeployCommands: site.predeployCommands,
+      deployDir: site.deployDir,
+      ignore: site.ignore,
     })),
     collections: [], // Note: Collections are managed separately in YAML configs via individual collection files
   };
@@ -466,6 +524,7 @@ export const generateYamlConfigTemplate = (outputPath: string) => {
     ],
     buckets: [],
     functions: [],
+    sites: [],
   };
 
   let yamlContent = yaml.dump(template, {
@@ -604,13 +663,39 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
         templateRepository: func.templateRepository,
         templateOwner: func.templateOwner,
         templateRootDirectory: func.templateRootDirectory,
-        specification: func.specification,
+        buildSpecification: func.buildSpecification,
+        runtimeSpecification: func.runtimeSpecification,
         // Include critical fields for function deployment
         dirPath: func.dirPath,
         predeployCommands: func.predeployCommands,
         deployDir: func.deployDir,
         ignore: func.ignore,
         templateVersion: func.templateVersion,
+      })) || [],
+      sites: config.sites?.map(site => ({
+        id: site.$id,
+        name: site.name,
+        framework: site.framework,
+        buildRuntime: site.buildRuntime,
+        enabled: site.enabled,
+        logging: site.logging,
+        timeout: site.timeout,
+        installCommand: site.installCommand,
+        buildCommand: site.buildCommand,
+        outputDirectory: site.outputDirectory,
+        adapter: site.adapter,
+        fallbackFile: site.fallbackFile,
+        installationId: site.installationId,
+        providerRepositoryId: site.providerRepositoryId,
+        providerBranch: site.providerBranch,
+        providerSilentMode: site.providerSilentMode,
+        providerRootDirectory: site.providerRootDirectory,
+        buildSpecification: site.buildSpecification,
+        runtimeSpecification: site.runtimeSpecification,
+        dirPath: site.dirPath,
+        predeployCommands: site.predeployCommands,
+        deployDir: site.deployDir,
+        ignore: site.ignore,
       })) || [],
     };
 
@@ -680,7 +765,8 @@ export const addFunctionToYamlConfig = async (configPath: string, newFunction: A
       entrypoint: newFunction.entrypoint || "",
       commands: newFunction.commands || "",
       scopes: newFunction.scopes || [],
-      specification: newFunction.specification || "s-0.5vcpu-512mb",
+      buildSpecification: newFunction.buildSpecification || "s-0.5vcpu-512mb",
+      runtimeSpecification: newFunction.runtimeSpecification || "s-0.5vcpu-512mb",
       // Include critical fields for function deployment if they exist
       ...(newFunction.dirPath && { dirPath: newFunction.dirPath }),
       ...(newFunction.predeployCommands && { predeployCommands: newFunction.predeployCommands }),
@@ -717,6 +803,76 @@ export const addFunctionToYamlConfig = async (configPath: string, newFunction: A
 };
 
 /**
+ * Adds a new site to the YAML config file
+ * @param configPath Path to the YAML config file
+ * @param newSite The site configuration to add
+ */
+export const addSiteToYamlConfig = async (configPath: string, newSite: AppwriteSite): Promise<void> => {
+  try {
+    // Read current config
+    const fileContent = fs.readFileSync(configPath, "utf8");
+    const yamlData = yaml.load(fileContent) as any;
+
+    // Initialize sites array if it doesn't exist
+    if (!yamlData.sites) {
+      yamlData.sites = [];
+    }
+
+    // Convert AppwriteSite to YAML format
+    const yamlSite = {
+      id: newSite.$id,
+      name: newSite.name,
+      framework: newSite.framework,
+      buildRuntime: newSite.buildRuntime,
+      enabled: newSite.enabled !== false,
+      logging: newSite.logging !== false,
+      timeout: newSite.timeout,
+      installCommand: newSite.installCommand || "",
+      buildCommand: newSite.buildCommand || "",
+      outputDirectory: newSite.outputDirectory || "",
+      buildSpecification: newSite.buildSpecification || "s-0.5vcpu-512mb",
+      runtimeSpecification: newSite.runtimeSpecification || "s-0.5vcpu-512mb",
+      ...(newSite.adapter && { adapter: newSite.adapter }),
+      ...(newSite.fallbackFile && { fallbackFile: newSite.fallbackFile }),
+      ...(newSite.installationId && { installationId: newSite.installationId }),
+      ...(newSite.providerRepositoryId && { providerRepositoryId: newSite.providerRepositoryId }),
+      ...(newSite.providerBranch && { providerBranch: newSite.providerBranch }),
+      ...(newSite.providerSilentMode && { providerSilentMode: newSite.providerSilentMode }),
+      ...(newSite.providerRootDirectory && { providerRootDirectory: newSite.providerRootDirectory }),
+      ...(newSite.dirPath && { dirPath: newSite.dirPath }),
+      ...(newSite.predeployCommands && { predeployCommands: newSite.predeployCommands }),
+      ...(newSite.deployDir && { deployDir: newSite.deployDir }),
+      ...(newSite.ignore && { ignore: newSite.ignore }),
+    };
+
+    // Add new site
+    yamlData.sites.push(yamlSite);
+
+    // Write back to file
+    const updatedYamlContent = yaml.dump(yamlData, {
+      indent: 2,
+      lineWidth: 120,
+      sortKeys: false,
+    });
+
+    // Preserve schema reference if it exists
+    const lines = fileContent.split('\n');
+    const schemaLine = lines.find(line => line.startsWith('# yaml-language-server:'));
+    let finalContent = updatedYamlContent;
+
+    if (schemaLine) {
+      finalContent = schemaLine + '\n' + updatedYamlContent;
+    }
+
+    fs.writeFileSync(configPath, finalContent, "utf8");
+    MessageFormatter.success(`Added site "${newSite.name}" to YAML config`, { prefix: "Config" });
+  } catch (error) {
+    MessageFormatter.error("Error adding site to YAML config", error instanceof Error ? error : undefined, { prefix: "Config" });
+    throw error;
+  }
+};
+
+/**
  * Extract session options from AppwriteConfig for YAML operations
  * Useful for preserving session state during config reloads
  */
@@ -746,6 +902,7 @@ export const createSessionPreservingYamlConfig = (configPath: string, sessionOpt
       return writeYamlConfig(configPath, enhancedConfig);
     },
     addFunction: (func: AppwriteFunction) => addFunctionToYamlConfig(configPath, func),
+    addSite: (site: AppwriteSite) => addSiteToYamlConfig(configPath, site),
   };
 };
 
