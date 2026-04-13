@@ -595,13 +595,24 @@ export class SessionAuthService {
       return null;
     }
 
-    const candidates = this.getSessionsForEndpoint(prefs, endpoint);
+    let candidates = this.getSessionsForEndpoint(prefs, endpoint);
     if (candidates.length === 0) {
-      logger.debug("No candidate sessions found for endpoint", {
+      logger.debug("No endpoint-matched sessions, trying all sessions as cross-endpoint fallback", {
         prefix: "Session",
         endpoint,
         normalizedEndpoint: this.normalizeEndpoint(endpoint)
       });
+      // Fallback: try ALL sessions regardless of endpoint (handles custom domains like
+      // appwrite.socialaize.com pointing to cloud.appwrite.io)
+      candidates = Object.entries(prefs)
+        .filter(([key, data]) =>
+          key !== 'current' &&
+          typeof data === 'object' &&
+          data?.endpoint &&
+          data?.cookie
+        ) as typeof candidates;
+    }
+    if (candidates.length === 0) {
       return null;
     }
 
