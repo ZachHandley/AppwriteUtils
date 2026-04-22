@@ -484,7 +484,7 @@ export default appwriteConfig;
     schemaString += `  $permissions: z.array(z.string()),\n`;
     schemaString += `  $databaseId: z.string(),\n`;
     schemaString += `  ${entityIdField}: z.string(),\n`;
-    schemaString += `  $sequence: z.string().nullish(),\n`;
+    schemaString += `  $sequence: z.number().nullish(),\n`;
     for (const attribute of attributes) {
       if (attribute.type === "relationship") continue;
       schemaString += `  ${attribute.key}: ${this.typeToZod(attribute)},\n`;
