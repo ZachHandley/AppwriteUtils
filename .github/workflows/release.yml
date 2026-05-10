@@ -91,6 +91,9 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Install
+        run: bun install --frozen-lockfile
+
       - name: Detect [release] in commit message
         id: commit_release
         if: github.event_name == 'push'
@@ -138,9 +141,6 @@ jobs:
           if [[ -n "${{ steps.manual.outputs.version_mcp }}" ]]; then
             npm --prefix packages/appwrite-utils-mcp version "${{ steps.manual.outputs.version_mcp }}" --no-git-tag-version
           fi
-
-      - name: Install
-        run: bun install --frozen-lockfile
 
       - name: Check appwrite-utils publish
         id: check_utils
