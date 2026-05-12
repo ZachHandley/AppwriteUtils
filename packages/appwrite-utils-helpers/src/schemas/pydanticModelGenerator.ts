@@ -55,7 +55,7 @@ ${entityClassVarComment}
     )
     database_id: str = Field(..., alias="$databaseId", description="Appwrite database ID")
     ${entityIdField}: str = Field(..., alias="${entityIdAlias}", description="${entityIdDesc}")
-    sequence: int | None = Field(None, alias="$sequence", description="Document sequence number")
+    sequence: str = Field(..., alias="$sequence", description="Document sequence number")
 
     class Config:
         """Pydantic configuration for Appwrite compatibility"""
@@ -119,7 +119,7 @@ class CreateBase(BaseModel):
     ${entityIdField}: str | None = Field(
         None, alias="${entityIdAlias}", description="Auto-set ${isTablesMode ? 'table' : 'collection'} ID"
     )
-    sequence: int | None = Field(
+    sequence: str | None = Field(
         None, alias="$sequence", description="Auto-generated sequence number"
     )
 
