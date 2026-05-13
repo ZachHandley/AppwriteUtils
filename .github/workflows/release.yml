@@ -94,6 +94,9 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - name: Install tsx globally
+        run: npm install -g tsx
+
       - name: Detect [release] in commit message
         id: commit_release
         if: github.event_name == 'push'
