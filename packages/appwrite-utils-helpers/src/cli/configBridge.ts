@@ -408,3 +408,142 @@ export function mergePulledConfig(
     appwrite: pulledOfficial,
   };
 }
+
+// ============================================================================
+// Extension stub sync
+// ============================================================================
+
+/**
+ * Resource keys recognised by `ResourceExtensionsSchema` (i.e. resources that
+ * can carry per-`$id` extension fields in the sidecar). A strict subset of
+ * `TOP_LEVEL_RESOURCE_KEYS` — notably excludes `databases`, which is not
+ * represented in the extensions map.
+ */
+const EXTENSION_RESOURCE_KEYS = [
+  "functions",
+  "sites",
+  "buckets",
+  "collections",
+  "tablesDB",
+  "tables",
+  "teams",
+  "webhooks",
+  "topics",
+  "messages",
+] as const;
+
+type ExtensionResourceKey = (typeof EXTENSION_RESOURCE_KEYS)[number];
+
+export interface SyncExtensionStubsResult {
+  /** New extension config (may be the same reference if nothing was added). */
+  ext: AppwriteUtilsExtension;
+  /** `<resource>:<$id>` entries newly stubbed into `ext.extensions`. */
+  added: string[];
+  /**
+   * `<resource>:<$id>` entries present in `ext.extensions` but absent from
+   * `official`. Preserved (never deleted) — surfaced so callers can warn.
+   */
+  orphaned: string[];
+}
+
+/**
+ * For each `$id` present in the official config but missing from
+ * `ext.extensions.<resource>`, add an empty stub `{}` so users have a typed
+ * landing spot to attach extension fields (importDefs, transforms, etc.)
+ * without hand-editing.
+ *
+ * Pure function — performs no I/O. Mutates nothing; returns a new
+ * `AppwriteUtilsExtension` if any stubs were added (otherwise the input is
+ * returned by reference).
+ *
+ * Path-mode resources (where `ext.extensions.<resource>` is a string pointing
+ * at an external YAML file) are skipped entirely — we have no way to safely
+ * mutate the externalised file from here.
+ *
+ * Orphans (entries under `ext.extensions.<resource>.<$id>` whose `$id` no
+ * longer appears in the official config) are surfaced but NOT removed —
+ * deleting them would risk destroying user data attached to a renamed `$id`.
+ */
+export function syncExtensionStubsFromOfficial(
+  ext: AppwriteUtilsExtension,
+  official: AppwriteOfficialConfig,
+): SyncExtensionStubsResult {
+  const added: string[] = [];
+  const orphaned: string[] = [];
+
+  const stubAdditions = new Map<ExtensionResourceKey, Record<string, unknown>>();
+
+  for (const resource of EXTENSION_RESOURCE_KEYS) {
+    const officialIds = new Set<string>();
+    const officialArray = (official as Record<string, unknown>)[resource];
+    if (Array.isArray(officialArray)) {
+      for (const entry of officialArray) {
+        if (
+          isRecord(entry) &&
+          typeof entry.$id === "string" &&
+          entry.$id.length > 0
+        ) {
+          officialIds.add(entry.$id);
+        }
+      }
+    }
+
+    const existing = (ext.extensions as Record<string, unknown> | undefined)?.[
+      resource
+    ];
+
+    if (typeof existing === "string") {
+      // Path mode — user externalised this resource's extensions. Skip.
+      continue;
+    }
+
+    const existingRecord: Record<string, unknown> = isRecord(existing)
+      ? existing
+      : {};
+
+    // Orphan detection (no mutation).
+    for (const id of Object.keys(existingRecord)) {
+      if (!officialIds.has(id)) {
+        orphaned.push(`${resource}:${id}`);
+      }
+    }
+
+    // Stub additions.
+    const stubsToAdd: string[] = [];
+    for (const id of officialIds) {
+      if (!(id in existingRecord)) {
+        stubsToAdd.push(id);
+      }
+    }
+
+    if (stubsToAdd.length > 0) {
+      const merged: Record<string, unknown> = { ...existingRecord };
+      for (const id of stubsToAdd) {
+        merged[id] = {};
+        added.push(`${resource}:${id}`);
+      }
+      stubAdditions.set(resource, merged);
+    }
+  }
+
+  if (stubAdditions.size === 0) {
+    return { ext, added, orphaned };
+  }
+
+  const mergedExtensions: Record<string, unknown> = {
+    ...((ext.extensions as Record<string, unknown> | undefined) ?? {}),
+  };
+  for (const [resource, record] of stubAdditions) {
+    mergedExtensions[resource] = record;
+  }
+
+  return {
+    ext: {
+      ...ext,
+      extensions:
+        mergedExtensions as AppwriteUtilsExtension["extensions"],
+    },
+    added,
+    orphaned,
+  };
+}

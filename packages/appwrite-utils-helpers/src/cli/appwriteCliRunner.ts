@@ -60,7 +60,14 @@ export interface AppwriteCliResult<T = unknown> {
 }
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-const PREFS_PATH = join(homedir(), ".appwrite", "prefs.json");
+
+/**
+ * Resolves the path to the Appwrite CLI prefs file at call time so tests can
+ * point at a temp HOME without re-importing the module.
+ */
+function getPrefsPath(): string {
+  return join(homedir(), ".appwrite", "prefs.json");
+}
 
 /**
  * The known top-level preference keys the Appwrite CLI persists outside of
@@ -112,10 +119,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readPrefsFile(): CliPrefsFile | null {
   try {
-    if (!existsSync(PREFS_PATH)) {
+    const prefsPath = getPrefsPath();
+    if (!existsSync(prefsPath)) {
       return null;
     }
-    const content = readFileSync(PREFS_PATH, "utf-8");
+    const content = readFileSync(prefsPath, "utf-8");
     const parsed = JSON.parse(content) as unknown;
     if (!isRecord(parsed)) {
       return null;

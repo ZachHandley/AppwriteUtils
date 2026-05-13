@@ -89,6 +89,7 @@ interface CliOptions {
   passthrough?: boolean;
   regen?: string;
   noDeploy?: boolean;
+  syncExtensions?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -666,6 +667,11 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "With --regen: only write the aggregated JSON; skip the push call",
   })
+  .option("syncExtensions", {
+    alias: ["sync-extensions"],
+    type: "boolean",
+    description: "Add empty extension stubs in the sidecar for any $id in the official config that is missing from extensions.<resource>. Orphans (sidecar entries missing from official) are surfaced as warnings but never deleted.",
+  })
   .parse() as ParsedArgv;
 
 async function main() {
@@ -707,7 +713,7 @@ async function main() {
       if (error instanceof AuthenticationError) {
         // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
         // Defer auth handling to those flows; otherwise surface the error and exit.
-        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen) {
+        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions) {
           MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
           process.exit(1);
         }
@@ -762,6 +768,15 @@ async function main() {
           ? { endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey }
           : undefined,
       });
+      return;
+    }
+
+    // --sync-extensions: backfill ext.extensions stubs from the official config
+    if (argv.syncExtensions) {
+      const { runSyncExtensionsFlow } = await import(
+        "./cli/commands/syncExtensionsFlow.js"
+      );
+      await runSyncExtensionsFlow({ configPath: argv.config });
       return;
     }
 
