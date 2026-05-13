@@ -160,7 +160,8 @@ export class ConfigMergeService {
    *
    * Supported environment variables:
    * - APPWRITE_ENDPOINT: Appwrite API endpoint URL
-   * - APPWRITE_PROJECT: Appwrite project ID
+   * - APPWRITE_PROJECT_ID: Appwrite project ID (preferred; matches Stack A / official CLI)
+   * - APPWRITE_PROJECT: Appwrite project ID (legacy alias; APPWRITE_PROJECT_ID wins on conflict)
    * - APPWRITE_API_KEY: API key for authentication
    * - APPWRITE_SESSION_COOKIE: Session cookie for authentication
    *
@@ -180,9 +181,12 @@ export class ConfigMergeService {
     // Clone config to avoid mutation
     const merged = cloneDeep(config);
 
-    // Read environment variables
+    // Read environment variables.
+    // APPWRITE_PROJECT_ID matches Stack A and the official Appwrite CLI;
+    // APPWRITE_PROJECT is kept as a legacy alias. On conflict, _ID wins.
     const envEndpoint = process.env.APPWRITE_ENDPOINT;
-    const envProject = process.env.APPWRITE_PROJECT;
+    const envProject =
+      process.env.APPWRITE_PROJECT_ID ?? process.env.APPWRITE_PROJECT;
     const envApiKey = process.env.APPWRITE_API_KEY;
     const envSessionCookie = process.env.APPWRITE_SESSION_COOKIE;
 

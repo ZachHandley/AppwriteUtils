@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { Sites } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { SiteManager } from 'appwrite-utils-helpers';
 
@@ -72,6 +73,16 @@ const deploySiteSchema = z.object({
  */
 const deleteSiteSchema = z.object({
   siteId: z.string().min(1, 'Site ID is required'),
+});
+
+/**
+ * Schema for deploy_site_via_cli - Delegates to the official `appwrite push site` CLI
+ */
+const deploySiteViaCliSchema = z.object({
+  siteId: z.string().min(1, 'Site ID is required'),
+  path: z.string().optional().describe('Site source code directory (default: <cwd>/appwrite/sites/<id>/)'),
+  async: z.boolean().optional().default(false).describe("Don't wait for the deployment to finish"),
+  stream: z.boolean().optional().default(false).describe('Stream CLI output to MCP host (usually false for MCP — output is captured and returned in `result`)'),
 });
 
 /**
@@ -423,6 +434,68 @@ async function handleCreateSiteVariable(
   };
 }
 
+/**
+ * Deploy a site via the official `appwrite push site` CLI command.
+ *
+ * Fetches the existing site from Appwrite to build a minimal site descriptor,
+ * then delegates the actual push to the CLI runner.
+ */
+async function handleDeploySiteViaCli(
+  input: unknown,
+  context: ToolContext
+): Promise<{ result: string; exitCode: number; tail: string }> {
+  const validated = deploySiteViaCliSchema.parse(input);
+  const authResult = await context.authResolver.resolve();
+
+  // Fetch the existing site from Appwrite to construct the required
+  // AppwriteSite shape for the CLI deploy helper.
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+  const sites = new Sites(client);
+  const site: any = await sites.get(validated.siteId);
+
+  // Lazy-import the CLI deploy helper to avoid loading execa for
+  // non-MCP-CLI users.
+  const { deploySiteViaCli } = await import('appwrite-utils-helpers');
+  const res = await deploySiteViaCli(
+    {
+      $id: site.$id,
+      name: site.name,
+      framework: site.framework,
+      buildCommand: site.buildCommand ?? '',
+      installCommand: site.installCommand ?? '',
+      outputDirectory: site.outputDirectory ?? '',
+      buildRuntime: site.buildRuntime,
+      adapter: site.adapter,
+      path: `./sites/${site.$id}`,
+      timeout: site.timeout ?? 30,
+    } as any,
+    {
+      codePath: validated.path,
+      credentials: {
+        endpoint: authResult.credentials.endpoint,
+        projectId: authResult.credentials.projectId,
+        apiKey: authResult.credentials.apiKey,
+      },
+      stream: validated.stream,
+      async: validated.async,
+    }
+  );
+
+  // Tail the last 30 lines of combined output for the MCP response.
+  const tail = (res.stdout + '\n' + res.stderr).split('\n').slice(-30).join('\n');
+  return {
+    result: res.exitCode === 0 ? 'success' : 'failed',
+    exitCode: res.exitCode,
+    tail,
+  };
+}
+
 // ──────────────────────────────────────────────────
 // TOOL DEFINITIONS
 // ──────────────────────────────────────────────────
@@ -483,6 +556,15 @@ const createSiteVariableTool: ToolDefinition = {
   requiresAuth: true,
 };
 
+const deploySiteViaCliTool: ToolDefinition = {
+  name: 'deploy_site_via_cli',
+  description:
+    'Deploy a site by delegating to the official `appwrite push site` CLI command. Returns the CLI exit code and a tail of its combined stdout/stderr output.',
+  inputSchema: deploySiteViaCliSchema,
+  handler: handleDeploySiteViaCli,
+  requiresAuth: true,
+};
+
 // ──────────────────────────────────────────────────
 // TOOL GROUP EXPORT
 // ──────────────────────────────────────────────────
@@ -502,5 +584,6 @@ export const sitesToolGroup: ToolGroupDefinition = {
     deleteSiteTool,
     listSiteVariablesTool,
     createSiteVariableTool,
+    deploySiteViaCliTool,
   ],
 };

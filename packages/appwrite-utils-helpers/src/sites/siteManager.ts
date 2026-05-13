@@ -587,4 +587,17 @@ export class SiteManager {
       )
     );
   }
+
+  /**
+   * Deploy a site via the official Appwrite CLI (`appwrite push site`).
+   * Alternative to {@link SiteManager.deploySite} — uses the official tooling
+   * instead of the SDK directly.
+   */
+  public async deploySiteViaCli(
+    siteConfig: AppwriteSite,
+    opts?: import("./cliSiteDeploy.js").DeploySiteViaCliOptions
+  ): Promise<import("../cli/appwriteCliRunner.js").AppwriteCliResult> {
+    const { deploySiteViaCli } = await import("./cliSiteDeploy.js");
+    return deploySiteViaCli(siteConfig, opts);
+  }
 }

@@ -83,6 +83,13 @@ interface CliOptions {
   importFile?: string;
   targetDb?: string;
   targetTable?: string;
+  // New sidecar/bootstrap/passthrough flags
+  init?: boolean;
+  upgradeConfig?: boolean;
+  passthrough?: boolean;
+  regen?: string;
+  noDeploy?: boolean;
+  syncExtensions?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -636,6 +643,35 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Target table ID for --importFile (prompted if omitted)",
   })
+  .option("init", {
+    alias: ["initialize", "init-project"],
+    type: "boolean",
+    description: "Run `appwrite init` to bootstrap an Appwrite project and create the AppwriteUtils sidecar config",
+  })
+  .option("upgradeConfig", {
+    alias: ["upgrade-config"],
+    type: "boolean",
+    description: "Opt-in: rewrite legacy AppwriteUtils config.yaml to the new sidecar format (appwrite-utils.config.yaml + appwrite.config.json)",
+  })
+  .option("passthrough", {
+    alias: ["pass-through", "appwrite-cli"],
+    type: "boolean",
+    description: "Pass remaining args to the official `appwrite` CLI through our auth bridge. Use `-- <appwrite args...>` after this flag. Example: appwrite-migrate --passthrough -- functions list",
+  })
+  .option("regen", {
+    type: "string",
+    description: "Regenerate official JSON + push. Target syntax: <resource>[:<id>] or 'all'. V1 supports: all | functions[:<id>] | sites[:<id>]",
+  })
+  .option("noDeploy", {
+    alias: ["no-deploy"],
+    type: "boolean",
+    description: "With --regen: only write the aggregated JSON; skip the push call",
+  })
+  .option("syncExtensions", {
+    alias: ["sync-extensions"],
+    type: "boolean",
+    description: "Add empty extension stubs in the sidecar for any $id in the official config that is missing from extensions.<resource>. Orphans (sidecar entries missing from official) are surfaced as warnings but never deleted.",
+  })
   .parse() as ParsedArgv;
 
 async function main() {
@@ -675,11 +711,73 @@ async function main() {
       await controller.init(initOptions);
     } catch (error) {
       if (error instanceof AuthenticationError) {
-        MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
-        process.exit(1);
+        // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
+        // Defer auth handling to those flows; otherwise surface the error and exit.
+        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions) {
+          MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
+          process.exit(1);
+        }
+      } else {
+        // Re-throw other errors
+        throw error;
       }
-      // Re-throw other errors
-      throw error;
+    }
+
+    // --init: bootstrap project + sidecar
+    if (argv.init) {
+      const { runInitFlow } = await import("./cli/commands/initFlow.js");
+      await runInitFlow({
+        cwd: process.cwd(),
+        configPath: argv.config,
+        credentials: argv.endpoint && argv.projectId ? {
+          endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey,
+        } : undefined,
+      });
+      return;
+    }
+
+    // --upgradeConfig: opt-in rewrite of old YAML to new sidecar
+    if (argv.upgradeConfig) {
+      const { runUpgradeConfigFlow } = await import("./cli/commands/upgradeConfigFlow.js");
+      await runUpgradeConfigFlow({ cwd: process.cwd() });
+      return;
+    }
+
+    // --passthrough: forward remaining args to `appwrite` CLI through our auth bridge
+    if (argv.passthrough) {
+      const { runPassthrough } = await import("./cli/commands/passthroughCommand.js");
+      // yargs places unconsumed args after `--` into argv._
+      const rest = (argv._ as Array<string | number>).map((s) => String(s));
+      await runPassthrough(rest, {
+        configPath: argv.config,
+        credentials: argv.endpoint && argv.projectId ? {
+          endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey,
+        } : undefined,
+      });
+      return;
+    }
+
+    // --regen: unified regen+push for a resource target
+    if (argv.regen) {
+      const { runRegenFlow } = await import("./cli/commands/regenFlow.js");
+      await runRegenFlow({
+        target: argv.regen,
+        configPath: argv.config,
+        noDeploy: argv.noDeploy,
+        argvCredentials: argv.endpoint && argv.projectId
+          ? { endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey }
+          : undefined,
+      });
+      return;
+    }
+
+    // --sync-extensions: backfill ext.extensions stubs from the official config
+    if (argv.syncExtensions) {
+      const { runSyncExtensionsFlow } = await import(
+        "./cli/commands/syncExtensionsFlow.js"
+      );
+      await runSyncExtensionsFlow({ configPath: argv.config });
+      return;
     }
 
     // After init, check if we have a valid config (from file OR CLI overrides)

@@ -35,7 +35,13 @@ import { join } from "node:path";
 import path from "path";
 import fs from "node:fs";
 import os from "node:os";
-import { MessageFormatter, findYamlConfig } from "appwrite-utils-helpers";
+import {
+  MessageFormatter,
+  findYamlConfig,
+  loadExtensionConfig,
+  saveExtensionConfig,
+  syncExtensionStubsFromOfficial,
+} from "appwrite-utils-helpers";
 import { findAppwriteConfig } from "./utils/loadConfigs.js";
 
 // Import command modules
@@ -109,6 +115,10 @@ export class InteractiveCLI {
       // Continue if detection fails
       this.isUsingTypeScriptConfig = false;
     }
+
+    // Offer to backfill extension stubs if the sidecar has drifted from
+    // the official config. Silently no-ops when no sidecar is present.
+    await this.maybePromptSyncExtensions();
 
     while (true) {
       // Build choices array dynamically based on config type
@@ -223,6 +233,72 @@ export class InteractiveCLI {
           MessageFormatter.success("Goodbye!");
           process.exit(0);
       }
+    }
+  }
+
+  /**
+   * On startup, if a sidecar is present, check whether `ext.extensions` is
+   * missing stubs for any `$id` in the resolved official config. If so,
+   * prompt the user to backfill empty stubs in one click. Silently no-ops
+   * when no sidecar is present or loading fails — users who want explicit
+   * reporting can run `--sync-extensions` directly.
+   */
+  private async maybePromptSyncExtensions(): Promise<void> {
+    try {
+      const loaded = await loadExtensionConfig({
+        cwd: this.currentDir,
+        resolveOfficial: true,
+      });
+      if (!loaded.official) return;
+
+      const { ext, added, orphaned } = syncExtensionStubsFromOfficial(
+        loaded.ext,
+        loaded.official
+      );
+
+      if (added.length === 0) {
+        if (orphaned.length > 0) {
+          MessageFormatter.warning(
+            `${orphaned.length} orphaned extension entr${orphaned.length === 1 ? "y" : "ies"} preserved (in sidecar but missing from official): ${orphaned.join(", ")}`,
+            { prefix: "SyncExtensions" }
+          );
+        }
+        return;
+      }
+
+      const preview =
+        added.slice(0, 5).join(", ") +
+        (added.length > 5 ? `, … (+${added.length - 5} more)` : "");
+
+      const { confirm } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "confirm",
+          message: chalk.yellow(
+            `Sidecar is missing extension stubs for ${added.length} resource(s): ${preview}. Add empty stubs now?`
+          ),
+          default: true,
+        },
+      ]);
+
+      if (!confirm) return;
+
+      await saveExtensionConfig(ext, loaded.sidecarPath);
+      MessageFormatter.success(
+        `Added ${added.length} stub${added.length === 1 ? "" : "s"} to ${loaded.sidecarPath}`,
+        { prefix: "SyncExtensions" }
+      );
+
+      if (orphaned.length > 0) {
+        MessageFormatter.warning(
+          `${orphaned.length} orphaned entr${orphaned.length === 1 ? "y" : "ies"} preserved (in sidecar but missing from official): ${orphaned.join(", ")}`,
+          { prefix: "SyncExtensions" }
+        );
+      }
+    } catch {
+      // No sidecar present, or the sidecar/official couldn't be loaded.
+      // Silently skip — users running `--sync-extensions` directly will
+      // see the full error.
     }
   }
 

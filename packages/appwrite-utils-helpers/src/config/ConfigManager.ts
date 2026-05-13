@@ -292,6 +292,11 @@ export class ConfigManager {
     // 3. Load config from file
     let config = await this.loaderService.loadFromPath(configPath);
 
+    // 3b. Merge environment variables (lowest priority — only fills gaps).
+    // Without this, APPWRITE_PROJECT_ID / APPWRITE_API_KEY / etc. were
+    // dead-letter for Stack B and only honoured by Stack A's CLI bridge.
+    config = this.mergeService.mergeEnvironmentVariables(config);
+
     // 4. Load session authentication with caching support
     let session: SessionAuthInfo | null = null;
     let sessionPrefsKey: string | undefined = undefined;

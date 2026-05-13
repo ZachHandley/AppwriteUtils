@@ -537,4 +537,17 @@ export class FunctionManager {
 
     return { valid: errors.length === 0, errors };
   }
+
+  /**
+   * Deploy a function via the official Appwrite CLI (`appwrite push function`).
+   * Alternative to deployFunction() — uses the official tooling instead of the SDK directly.
+   * See packages/appwrite-utils-helpers/src/functions/cliFunctionDeploy.ts for details.
+   */
+  public async deployFunctionViaCli(
+    functionConfig: AppwriteFunction,
+    opts?: import("./cliFunctionDeploy.js").DeployFunctionViaCliOptions
+  ): Promise<import("../cli/appwriteCliRunner.js").AppwriteCliResult> {
+    const { deployFunctionViaCli } = await import("./cliFunctionDeploy.js");
+    return deployFunctionViaCli(functionConfig, opts);
+  }
 }
