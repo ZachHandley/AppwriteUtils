@@ -1,6 +1,9 @@
 // Client utilities for creating authenticated Appwrite clients
 export * from "./clients/index.js";
 
+// Official Appwrite CLI runner with auth bridging
+export * from "./cli/index.js";
+
 // Configuration management utilities
 export * from "./config/index.js";
 

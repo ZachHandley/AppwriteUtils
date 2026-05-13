@@ -35,6 +35,16 @@ const deployFunctionSchema = z.object({
   commands: z.string().optional().describe('Build commands (e.g., npm install)'),
 });
 
+/**
+ * Schema for deploy_function_via_cli - Delegates to the official `appwrite push function` CLI
+ */
+const deployFunctionViaCliSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+  path: z.string().optional().describe('Function source code directory (default: <cwd>/appwrite/functions/<id>/)'),
+  async: z.boolean().optional().default(false).describe("Don't wait for the deployment to finish"),
+  stream: z.boolean().optional().default(false).describe('Stream CLI output to MCP host (usually false for MCP — output is captured and returned in `result`)'),
+});
+
 // ──────────────────────────────────────────────────
 // TOOL HANDLERS
 // ──────────────────────────────────────────────────
@@ -227,6 +237,72 @@ async function handleDeployFunction(
   };
 }
 
+/**
+ * Deploy a function via the official `appwrite push function` CLI command.
+ *
+ * Fetches the existing function from Appwrite to build a minimal function
+ * descriptor, then delegates the actual push to the CLI runner.
+ */
+async function handleDeployFunctionViaCli(
+  input: unknown,
+  context: ToolContext
+): Promise<{ result: string; exitCode: number; tail: string }> {
+  const validated = deployFunctionViaCliSchema.parse(input);
+  const authResult = await context.authResolver.resolve();
+
+  // Build a minimal AppwriteFunction by fetching the existing function from the
+  // project (the function must already exist for `appwrite push function` to
+  // work without an in-project appwrite.config.json). For MCP, we resolve the
+  // function record from Appwrite first, then convert it.
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+  const functions = new Functions(client);
+  const fn: any = await functions.get(validated.functionId);
+
+  // Lazy-import the CLI deploy helper to avoid loading execa for
+  // non-MCP-CLI users.
+  const { deployFunctionViaCli } = await import('appwrite-utils-helpers');
+  const res = await deployFunctionViaCli(
+    {
+      $id: fn.$id,
+      name: fn.name,
+      runtime: fn.runtime,
+      entrypoint: fn.entrypoint,
+      commands: fn.commands ?? '',
+      execute: fn.execute as string[],
+      events: fn.events as string[],
+      schedule: fn.schedule ?? '',
+      timeout: fn.timeout ?? 15,
+      enabled: fn.enabled ?? true,
+      logging: fn.logging ?? true,
+      scopes: (fn.scopes ?? []) as any,
+    } as any,
+    {
+      codePath: validated.path,
+      credentials: {
+        endpoint: authResult.credentials.endpoint,
+        projectId: authResult.credentials.projectId,
+        apiKey: authResult.credentials.apiKey,
+      },
+      stream: validated.stream,
+      async: validated.async,
+    }
+  );
+
+  // Tail the last 30 lines of combined output for the MCP response.
+  const tail = (res.stdout + '\n' + res.stderr).split('\n').slice(-30).join('\n');
+  return {
+    result: res.exitCode === 0 ? 'success' : 'failed',
+    exitCode: res.exitCode,
+    tail,
+  };
+}
+
 // ──────────────────────────────────────────────────
 // TOOL DEFINITIONS
 // ──────────────────────────────────────────────────
@@ -255,6 +331,15 @@ const deployFunctionTool: ToolDefinition = {
   requiresAuth: true,
 };
 
+const deployFunctionViaCliTool: ToolDefinition = {
+  name: 'deploy_function_via_cli',
+  description:
+    'Deploy a function by delegating to the official `appwrite push function` CLI command. Returns the CLI exit code and a tail of its combined stdout/stderr output.',
+  inputSchema: deployFunctionViaCliSchema,
+  handler: handleDeployFunctionViaCli,
+  requiresAuth: true,
+};
+
 // ──────────────────────────────────────────────────
 // TOOL GROUP EXPORT
 // ──────────────────────────────────────────────────
@@ -270,5 +355,6 @@ export const functionsToolGroup: ToolGroupDefinition = {
     listFunctionsTool,
     getFunctionTool,
     deployFunctionTool,
+    deployFunctionViaCliTool,
   ],
 };

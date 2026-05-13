@@ -13,3 +13,10 @@ export const indexesSchema = z.array(indexSchema);
 
 export type Index = z.infer<typeof indexSchema>;
 export type Indexes = z.infer<typeof indexesSchema>;
+
+// Re-exports for the new official + utils-extension config schemas.
+// These are grouped here so consumers can `import { ... } from
+// "appwrite-utils/schemas"` (or the package barrel) without having to know
+// the exact filenames.
+export * from "./officialConfig.js";
+export * from "./utilsExtensionConfig.js";

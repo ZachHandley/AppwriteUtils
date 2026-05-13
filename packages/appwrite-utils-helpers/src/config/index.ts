@@ -40,6 +40,16 @@ export {
   type ConfigConflict,
 } from "./configValidation.js";
 
+// Extension (sidecar) config loader for the new appwrite-utils.config.{yaml,yml,json} format
+export * from "./extensionConfigLoader.js";
+
+// Project root discovery (sidecar / official config / .git walk-up)
+export {
+  findProjectRoot,
+  type ProjectRootAnchor,
+  type ProjectRootResult,
+} from "./findProjectRoot.js";
+
 // Config Migration
 export {
   createMigrationPlan,
