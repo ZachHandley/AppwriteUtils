@@ -58,3 +58,44 @@ export function resolveCliCredentials(
     ...(apiKey ? { apiKey } : {}),
   };
 }
+
+/**
+ * Endpoint-only sibling of {@link resolveCliCredentials}. Returns a credentials
+ * object with just `endpoint` populated when `endpoint` alone is resolvable
+ * from argv → env → sidecar. Useful before `appwrite init project` runs (no
+ * projectId yet) so we can still pre-configure `appwrite client --endpoint`.
+ *
+ * If a project ID and/or API key are resolvable alongside the endpoint, they
+ * are included — the result is a superset of "endpoint-only", never less.
+ * Returns `undefined` if no endpoint can be resolved anywhere.
+ */
+export function resolveEndpoint(
+  input?: ResolveCliCredentialsInput
+): AppwriteCliCredentials | undefined {
+  const argv = input?.argv;
+  const sidecarAuth = input?.sidecarAuth;
+  const env = input?.env ?? process.env;
+
+  const pick = (
+    ...candidates: Array<string | undefined>
+  ): string | undefined => {
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.length > 0) {
+        return candidate;
+      }
+    }
+    return undefined;
+  };
+
+  const endpoint = pick(argv?.endpoint, env.APPWRITE_ENDPOINT, sidecarAuth?.endpoint);
+  if (!endpoint) return undefined;
+
+  const projectId = pick(argv?.projectId, env.APPWRITE_PROJECT_ID, sidecarAuth?.projectId);
+  const apiKey = pick(argv?.apiKey, env.APPWRITE_API_KEY, sidecarAuth?.apiKey);
+
+  return {
+    endpoint,
+    ...(projectId ? { projectId } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
+}

@@ -1,7 +1,10 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import {
   findProjectRoot,
+  loadExtensionConfig,
+  resolveEndpoint,
   runAppwriteCli,
+  MessageFormatter,
   type AppwriteCliCredentials,
 } from "appwrite-utils-helpers";
 
@@ -30,10 +33,34 @@ export async function runPassthrough(args: string[], opts: PassthroughOptions): 
   } else {
     ({ root } = await findProjectRoot());
   }
+
+  // Layer argv → env → sidecar.auth so passthrough always points at the
+  // intended Appwrite server. `resolveEndpoint` returns a creds object whenever
+  // an endpoint can be found, even without a project ID.
+  let sidecarAuth:
+    | { endpoint?: string; projectId?: string; apiKey?: string; sessionCookie?: string }
+    | undefined;
+  try {
+    const loaded = await loadExtensionConfig({ cwd: root, resolveOfficial: false });
+    sidecarAuth = (loaded.ext as { auth?: typeof loaded.ext.auth }).auth;
+  } catch {
+    sidecarAuth = undefined;
+  }
+  const resolvedCreds = resolveEndpoint({
+    argv: opts.credentials,
+    sidecarAuth,
+  });
+  if (resolvedCreds) {
+    MessageFormatter.info(
+      `Configuring appwrite client → ${resolvedCreds.endpoint}`,
+      { prefix: "Passthrough" }
+    );
+  }
+
   await runAppwriteCli(args, {
     cwd: root,
     stream: true,
     force: false,
-    credentials: opts.credentials,
+    credentials: resolvedCreds ?? opts.credentials,
   });
 }

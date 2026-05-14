@@ -14,8 +14,11 @@ import { join } from "node:path";
 export interface AppwriteCliCredentials {
   /** Appwrite endpoint, e.g. "https://cloud.appwrite.io/v1". */
   endpoint: string;
-  /** Appwrite project ID. */
-  projectId: string;
+  /**
+   * Appwrite project ID. Optional because some flows (`--link`, pre-`init project`)
+   * know only the endpoint at the moment they call `injectCredentials`.
+   */
+  projectId?: string;
   /** Optional API key for non-interactive auth via `appwrite client --key`. */
   apiKey?: string;
 }
@@ -298,8 +301,10 @@ export async function injectCredentials(
 
   await runClient(["--reset"]);
   await runClient(["--endpoint", creds.endpoint]);
-  await runClient(["--project-id", creds.projectId]);
-  if (creds.apiKey !== undefined) {
+  if (creds.projectId) {
+    await runClient(["--project-id", creds.projectId]);
+  }
+  if (creds.apiKey !== undefined && creds.apiKey !== "") {
     await runClient(["--key", creds.apiKey]);
   }
 }
@@ -336,10 +341,12 @@ export async function runAppwriteCli<T = unknown>(
   if (!skipAuthBridge) {
     const creds = credentials ?? resolveCredentialsFromEnv();
     if (creds) {
-      const alreadyConfigured = await hasCliPrefsFor(
-        creds.endpoint,
-        creds.projectId,
-      );
+      // hasCliPrefsFor requires a project ID to match a stored session entry.
+      // Endpoint-only creds (e.g. before `appwrite init project` picks one)
+      // always inject, since there's nothing to match against.
+      const alreadyConfigured = creds.projectId
+        ? await hasCliPrefsFor(creds.endpoint, creds.projectId)
+        : false;
       if (!alreadyConfigured) {
         await injectCredentials(creds, { cwd });
       }
@@ -367,9 +374,7 @@ export async function runAppwriteCli<T = unknown>(
         env: mergedEnv,
         reject: false,
         timeout,
-        stdin: "inherit",
-        stdout: ["inherit", "pipe"],
-        stderr: ["inherit", "pipe"],
+        stdio: "inherit",
       })
     : await execa("bunx", execaArgs, {
         cwd,
@@ -377,6 +382,16 @@ export async function runAppwriteCli<T = unknown>(
         reject: false,
         timeout,
       });
+
+  const childSignal =
+    typeof (result as { signal?: unknown }).signal === "string"
+      ? ((result as { signal: string }).signal as NodeJS.Signals)
+      : undefined;
+  if (childSignal) {
+    // Child died from a signal; mirror it so the parent exits the same way
+    // (instead of continuing past the await and dumping a stack later).
+    process.kill(process.pid, childSignal);
+  }
 
   const stdout = typeof result.stdout === "string" ? result.stdout : "";
   const stderr = typeof result.stderr === "string" ? result.stderr : "";

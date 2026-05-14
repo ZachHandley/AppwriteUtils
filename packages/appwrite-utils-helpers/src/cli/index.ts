@@ -18,7 +18,7 @@ export * from "./appwriteCliAuth.js";
 export * from "./configBridge.js";
 
 // Per-field credential merge (argv > APPWRITE_* env > sidecar.auth)
-export { resolveCliCredentials } from "./resolveCliCredentials.js";
+export { resolveCliCredentials, resolveEndpoint } from "./resolveCliCredentials.js";
 export type { ResolveCliCredentialsInput } from "./resolveCliCredentials.js";
 
 // Per-function/per-site YAML discovery + aggregation into appwrite/{functions,sites}.json

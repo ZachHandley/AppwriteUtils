@@ -90,6 +90,7 @@ interface CliOptions {
   regen?: string;
   noDeploy?: boolean;
   syncExtensions?: boolean;
+  pullSelective?: boolean;
 }
 
 type ParsedArgv = ArgumentsCamelCase<CliOptions>;
@@ -673,7 +674,25 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "Add empty extension stubs in the sidecar for any $id in the official config that is missing from extensions.<resource>. Orphans (sidecar entries missing from official) are surfaced as warnings but never deleted.",
   })
+  .option("pullSelective", {
+    alias: ["pull-selective", "pull"],
+    type: "boolean",
+    description: "Re-run the selective post-link pull (functions + tables + filtered buckets, never teams by default). Useful after --link or when remote schema changed.",
+  })
   .parse() as ParsedArgv;
+
+// Idempotent process-wide exit. Multiple SIGINTs (or SIGINT-then-SIGTERM)
+// collapse to a single process.exit. Without this, a Ctrl+C during an inquirer
+// prompt that's already been torn down by `runAppwriteCli`'s signal mirroring
+// would otherwise print a stack trace from the second handler firing.
+let __awuExiting = false;
+function __awuExit(code: number): void {
+  if (__awuExiting) return;
+  __awuExiting = true;
+  process.exit(code);
+}
+process.on("SIGINT", () => __awuExit(130));
+process.on("SIGTERM", () => __awuExit(143));
 
 async function main() {
   const startTime = Date.now();
@@ -714,7 +733,7 @@ async function main() {
       if (error instanceof AuthenticationError) {
         // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
         // Defer auth handling to those flows; otherwise surface the error and exit.
-        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions) {
+        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective) {
           MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
           process.exit(1);
         }
@@ -781,6 +800,20 @@ async function main() {
         "./cli/commands/syncExtensionsFlow.js"
       );
       await runSyncExtensionsFlow({ configPath: argv.config });
+      return;
+    }
+
+    // --pull-selective: re-run the post-link selective pull (no re-link needed)
+    if (argv.pullSelective) {
+      const { runSelectivePullFlow } = await import(
+        "./cli/commands/selectivePullFlow.js"
+      );
+      await runSelectivePullFlow({
+        configPath: argv.config,
+        credentials: argv.endpoint && argv.projectId ? {
+          endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey,
+        } : undefined,
+      });
       return;
     }
 
@@ -1656,6 +1689,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  // Inquirer throws ExitPromptError when the user hits Ctrl+C during a prompt.
+  // Surface a clean exit instead of dumping the stack.
+  if (error && (error.name === "ExitPromptError" || error.code === "ERR_USE_AFTER_CLOSE")) {
+    __awuExit(130);
+    return;
+  }
   MessageFormatter.error("CLI execution failed", error, { prefix: "CLI" });
   process.exit(1);
 });
