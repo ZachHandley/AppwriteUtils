@@ -209,7 +209,16 @@ export const relationshipAttributeSchema = extendBase({
   type: z.literal("relationship").describe("The type of the attribute"),
   relatedCollection: z
     .string()
-    .describe("The collection ID of the related collection"),
+    .optional()
+    .describe(
+      "The collection ID of the related collection. Appwrite < 1.8 emits this field; provide either this or `relatedTable`."
+    ),
+  relatedTable: z
+    .string()
+    .optional()
+    .describe(
+      "The table ID of the related table. Appwrite >= 1.8 emits this field; provide either this or `relatedCollection`."
+    ),
   relationType: z
     .enum(["oneToMany", "manyToOne", "oneToOne", "manyToMany"])
     .describe("The relation type of the relationship attribute"),
@@ -246,24 +255,42 @@ export const relationshipAttributeSchema = extendBase({
     .describe(
       "Configuration for mapping and resolving relationships during data import"
     ),
-}).superRefine((val, ctx) => {
-  if (val.twoWay) {
-    if (!val.twoWayKey) {
+})
+  .superRefine((val, ctx) => {
+    // Appwrite >= 1.8 renamed `relatedCollection` to `relatedTable` in the
+    // wire format. Accept either, but require at least one.
+    if (!val.relatedCollection && !val.relatedTable) {
       ctx.addIssue({
         code: "custom",
-        path: ["twoWayKey"],
-        message: "twoWayKey is required when twoWay is true",
+        path: ["relatedCollection"],
+        message:
+          "relationship attribute requires either `relatedCollection` (Appwrite < 1.8) or `relatedTable` (Appwrite >= 1.8)",
       });
     }
-    if (!val.side) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["side"],
-        message: "side is required when twoWay is true",
-      });
+    if (val.twoWay) {
+      if (!val.twoWayKey) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["twoWayKey"],
+          message: "twoWayKey is required when twoWay is true",
+        });
+      }
+      if (!val.side) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["side"],
+          message: "side is required when twoWay is true",
+        });
+      }
     }
-  }
-});
+  })
+  // Normalize so downstream code can keep reading `relatedCollection`
+  // regardless of which field name the source serialized.
+  .transform((val) => ({
+    ...val,
+    relatedCollection: val.relatedCollection ?? val.relatedTable,
+    relatedTable: val.relatedTable ?? val.relatedCollection,
+  }));
 
 // Text variant attribute schemas (node-appwrite v22+)
 export const varcharAttributeSchema = extendBase({
