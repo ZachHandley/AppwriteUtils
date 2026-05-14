@@ -208,15 +208,27 @@ async function prepareDocumentUpdates(
         continue;
       }
 
+      // Appwrite >= 1.8 uses `relatedTable` instead of `relatedCollection`.
+      const relatedRef =
+        rel.relatedCollection ??
+        (rel as { relatedTable?: string }).relatedTable;
+      if (!relatedRef) {
+        MessageFormatter.warning(
+          "Relationship attribute has neither relatedCollection nor relatedTable, skipping...",
+          { prefix: "Migration" }
+        );
+        continue;
+      }
+
       const relatedCollection = (
         await database.listCollections(dbId, [
-          Query.equal("name", rel.relatedCollection),
+          Query.equal("name", relatedRef),
         ])
       ).collections[0];
 
       if (!relatedCollection) {
         MessageFormatter.warning(
-          `Related collection ${rel.relatedCollection} not found, skipping...`,
+          `Related collection ${relatedRef} not found, skipping...`,
           { prefix: "Migration" }
         );
         continue;

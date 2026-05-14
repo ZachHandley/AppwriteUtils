@@ -69,6 +69,14 @@ export function extractTwoWayRelationships(
       if (attr.type === "relationship" && attr.twoWay && attr.twoWayKey) {
         const relationshipAttr = attr as RelationshipAttribute;
 
+        // Appwrite >= 1.8 uses `relatedTable`; the schema accepts either.
+        const relatedRef =
+          relationshipAttr.relatedCollection ??
+          (relationshipAttr as { relatedTable?: string }).relatedTable;
+        if (!relatedRef) {
+          return;
+        }
+
         let isArrayParent = false;
         let isArrayChild = false;
 
@@ -95,7 +103,7 @@ export function extractTwoWayRelationships(
 
         const relatedCollectionName = resolveCollectionName(
           config,
-          relationshipAttr.relatedCollection
+          relatedRef
         );
 
         addTwoWayRelationship(
@@ -109,7 +117,7 @@ export function extractTwoWayRelationships(
         );
 
         console.log(
-          `Extracted relationship: ${attr.key}\n\t${collection.name} -> ${relationshipAttr.relatedCollection}, databaseId: ${collection.databaseId}`
+          `Extracted relationship: ${attr.key}\n\t${collection.name} -> ${relatedRef}, databaseId: ${collection.databaseId}`
         );
       }
     });
@@ -184,12 +192,18 @@ export function extractSimpleRelationships(
     }
 
     collection.attributes.forEach((attr) => {
-      if (attr.type === "relationship" && attr.relatedCollection) {
+      if (attr.type === "relationship") {
+        // Appwrite >= 1.8 uses `relatedTable` instead of `relatedCollection`.
+        const relatedRef =
+          attr.relatedCollection ??
+          (attr as { relatedTable?: string }).relatedTable;
+        if (!relatedRef) return;
+
         const relationships = relationshipMap.get(collection.name) || [];
 
         relationships.push({
           attributeKey: attr.key,
-          relatedCollection: resolveCollectionName(config, attr.relatedCollection),
+          relatedCollection: resolveCollectionName(config, relatedRef),
           relationType: attr.relationType || "oneToOne",
           isArray: isArrayRelationship(attr.relationType || "oneToOne")
         });
