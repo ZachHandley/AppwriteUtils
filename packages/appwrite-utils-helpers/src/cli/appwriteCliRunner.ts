@@ -367,6 +367,7 @@ export async function runAppwriteCli<T = unknown>(
         env: mergedEnv,
         reject: false,
         timeout,
+        stdin: "inherit",
         stdout: ["inherit", "pipe"],
         stderr: ["inherit", "pipe"],
       })

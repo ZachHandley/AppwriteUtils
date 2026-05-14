@@ -364,6 +364,7 @@ function checkMigrationConditions(configPath: string): {
 }
 
 const argv = yargs(hideBin(process.argv))
+  .parserConfiguration({ "populate--": true })
   .option("config", {
     type: "string",
     description: "Path to Appwrite configuration file (appwriteConfig.ts)",
@@ -644,9 +645,9 @@ const argv = yargs(hideBin(process.argv))
     description: "Target table ID for --importFile (prompted if omitted)",
   })
   .option("init", {
-    alias: ["initialize", "init-project"],
+    alias: ["initialize", "init-project", "link", "link-project"],
     type: "boolean",
-    description: "Run `appwrite init` to bootstrap an Appwrite project and create the AppwriteUtils sidecar config",
+    description: "Link this project to Appwrite (runs `appwrite init project`) and create the AppwriteUtils sidecar config",
   })
   .option("upgradeConfig", {
     alias: ["upgrade-config"],
@@ -746,8 +747,11 @@ async function main() {
     // --passthrough: forward remaining args to `appwrite` CLI through our auth bridge
     if (argv.passthrough) {
       const { runPassthrough } = await import("./cli/commands/passthroughCommand.js");
-      // yargs places unconsumed args after `--` into argv._
-      const rest = (argv._ as Array<string | number>).map((s) => String(s));
+      // With parserConfiguration({ "populate--": true }), args after `--` land in
+      // argv["--"]. Fall back to argv._ for users who omit the `--` separator.
+      const afterDashDash = ((argv as any)["--"] as string[] | undefined) ?? [];
+      const positional = (argv._ as Array<string | number>).map((s) => String(s));
+      const rest = afterDashDash.length > 0 ? afterDashDash : positional;
       await runPassthrough(rest, {
         configPath: argv.config,
         credentials: argv.endpoint && argv.projectId ? {

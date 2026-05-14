@@ -55,6 +55,7 @@ import { importFileCommands } from "./cli/commands/importFileCommands.js";
 import { siteCommands } from "./cli/commands/siteCommands.js";
 
 enum CHOICES {
+  LINK_PROJECT = "🔗 Link this Project to Appwrite and setup multi-file configuration",
   MIGRATE_CONFIG = "🔄 Migrate TypeScript config to YAML (.appwrite structure)",
   VALIDATE_CONFIG = "✅ Validate configuration (collections/tables conflicts)",
   MIGRATE_COLLECTIONS_TO_TABLES = "🔀 Migrate collections to tables format",
@@ -134,6 +135,11 @@ export class InteractiveCLI {
       ]);
 
       switch (action) {
+        case CHOICES.LINK_PROJECT: {
+          const { runInitFlow } = await import("./cli/commands/initFlow.js");
+          await runInitFlow({ cwd: this.currentDir });
+          break;
+        }
         case CHOICES.MIGRATE_CONFIG:
           await configCommands.migrateTypeScriptConfig(this);
           break;
