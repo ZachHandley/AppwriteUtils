@@ -7,6 +7,7 @@ import type { z } from 'zod';
 import type { StateManager } from '../state/StateManager.js';
 import type { ClientRegistry } from '../state/ClientRegistry.js';
 import type { AuthResolver } from '../auth/AuthResolver.js';
+import type { ToolRegistry } from './ToolRegistry.js';
 
 /**
  * Context provided to tool handlers during execution
@@ -20,6 +21,10 @@ export interface ToolContext {
   authResolver: AuthResolver;
   /** Optional project ID for the current operation */
   projectId?: string;
+  /** Tool registry — present for meta tools that mutate the enabled-group set */
+  toolRegistry?: ToolRegistry;
+  /** Send notifications/tools/list_changed to the MCP client */
+  notifyToolsChanged?: () => Promise<void>;
 }
 
 /**

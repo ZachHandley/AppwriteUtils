@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto';
 // Import tool groups
 import { configToolGroup } from './tools/config/index.js';
 import { functionsToolGroup } from './tools/functions/index.js';
+import { metaToolGroup } from './tools/meta/index.js';
 import { projectsToolGroup } from './tools/projects/index.js';
 import { schemasToolGroup } from './tools/schemas/index.js';
 import { sitesToolGroup } from './tools/sites/index.js';
@@ -81,9 +82,15 @@ export class AppwriteMCPServer {
 
     this.clientRegistry = new ClientRegistry();
     this.stateManager = new StateManager();
-    this.toolRegistry = new ToolRegistry(getEnabledToolGroups(flags));
+
+    // Meta tools are always-on except in locked-scope mode (per-group bins).
+    const alwaysOnGroups = flags.lockedScope ? [] : ['meta'];
+    this.toolRegistry = new ToolRegistry(getEnabledToolGroups(flags), alwaysOnGroups);
 
     // Register all available tool groups
+    if (!flags.lockedScope) {
+      this.toolRegistry.registerGroup(metaToolGroup);
+    }
     this.toolRegistry.registerGroup(configToolGroup);
     this.toolRegistry.registerGroup(functionsToolGroup);
     this.toolRegistry.registerGroup(projectsToolGroup);
@@ -103,7 +110,9 @@ export class AppwriteMCPServer {
       },
       {
         capabilities: {
-          tools: {}, // Enable tool capability
+          // listChanged: true allows the server to send notifications/tools/list_changed
+          // when meta tools enable/disable groups at runtime.
+          tools: { listChanged: !flags.lockedScope },
         },
         instructions: this.generateServerInstructions(),
       }
@@ -121,32 +130,49 @@ export class AppwriteMCPServer {
    */
   private generateServerInstructions(): string {
     const enabledGroups = getEnabledToolGroups(this.flags);
-    const groupList = enabledGroups.length > 0
-      ? enabledGroups.join(', ')
-      : 'all';
+    const groupList = enabledGroups.join(', ') || 'none';
 
-    return `Appwrite MCP Server
+    if (this.flags.lockedScope) {
+      return `Appwrite MCP Server (scoped: ${groupList})
 
-This server provides tools for managing Appwrite instances.
-
-Enabled tool groups: ${groupList}
+This server exposes only the '${groupList}' tool group. No meta/discovery
+tools are available — start the unscoped 'appwrite-mcp' binary if you need
+to switch groups at runtime.
 
 Authentication priority:
 1. Tool parameters (endpoint, projectId, apiKey/sessionCookie)
 2. Server defaults (from CLI flags: ${this.flags.endpoint || 'none'})
 3. CLI session discovery (from ~/.appwrite/prefs.json)
 
-Available operations:
-- Tables: Rows, columns, indexes for TablesDB v18+ databases
-- Functions: List, create, deploy, delete, execute Appwrite functions
-- Projects: Project-level operations (variables shared across all functions)
-- Sites: List, create, deploy, delete sites and manage site variables
-- Storage: Manage buckets, upload/download files
-- Teams: Memberships and team preferences
-- Users: List, create, update, delete users and sessions
-- Transfer: Backup, restore, migrate data between instances
-- Schemas: Generate and validate TypeScript schemas
-- Config: Read, write, validate appwrite.json configuration
+Server instance ID: ${this.instanceId}
+`;
+    }
+
+    return `Appwrite MCP Server (progressive disclosure mode)
+
+This server starts with a small tool surface to keep context cheap. Only
+the 'meta' group (always-on) and currently-enabled groups are visible:
+
+  Enabled at startup: ${groupList}
+
+To discover and load more tools at runtime, use the meta tools:
+  1. list_tool_groups            -> see every group with its tool count
+  2. describe_tool_group(group)  -> preview a group's tools without enabling
+  3. enable_tool_groups(groups)  -> activate one or more groups; the client
+                                    will receive notifications/tools/list_changed
+                                    and refresh its visible tool list
+  4. disable_tool_groups(groups) -> shrink the surface when done
+  5. enable_all_tool_groups      -> open the floodgates (~97 tools)
+
+Pass --all on the CLI to skip the meta dance and pre-enable every group.
+
+Available groups: config, functions, projects, schemas, sites, storage,
+tables (Appwrite v18+ TablesDB), teams, transfer, users.
+
+Authentication priority:
+1. Tool parameters (endpoint, projectId, apiKey/sessionCookie)
+2. Server defaults (from CLI flags: ${this.flags.endpoint || 'none'})
+3. CLI session discovery (from ~/.appwrite/prefs.json)
 
 Server instance ID: ${this.instanceId}
 `;
@@ -184,6 +210,10 @@ Server instance ID: ${this.instanceId}
         clientRegistry: this.clientRegistry,
         stateManager: this.stateManager,
         projectId: this.flags.projectId,
+        toolRegistry: this.toolRegistry,
+        notifyToolsChanged: this.flags.lockedScope
+          ? undefined
+          : () => this.server.sendToolListChanged(),
       };
 
       try {
@@ -234,8 +264,14 @@ Server instance ID: ${this.instanceId}
     await this.server.connect(this.transport);
 
     // Log server startup
-    console.error(`[appwrite-mcp] Server started (instance: ${this.instanceId})`);
-    console.error(`[appwrite-mcp] Enabled tool groups: ${getEnabledToolGroups(this.flags).join(', ') || 'all'}`);
+    const mode = this.flags.lockedScope ? 'locked-scope' : 'progressive';
+    const visibleTools = this.toolRegistry.getEnabledTools().length;
+    console.error(`[appwrite-mcp] Server started (instance: ${this.instanceId}, mode: ${mode})`);
+    console.error(`[appwrite-mcp] Enabled tool groups: ${getEnabledToolGroups(this.flags).join(', ') || 'none'}`);
+    if (!this.flags.lockedScope) {
+      console.error(`[appwrite-mcp] Meta tools active — agent can enable more groups via enable_tool_groups()`);
+    }
+    console.error(`[appwrite-mcp] Visible tool count: ${visibleTools}`);
     console.error(`[appwrite-mcp] Default endpoint: ${this.flags.endpoint || 'none (will use tool params or CLI session)'}`);
     console.error(`[appwrite-mcp] Default project: ${this.flags.projectId || 'none (will use tool params or CLI session)'}`);
     console.error('[appwrite-mcp] Ready to accept MCP requests via stdio');

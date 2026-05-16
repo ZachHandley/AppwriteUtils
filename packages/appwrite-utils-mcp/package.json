@@ -17,7 +17,17 @@
     "utils"
   ],
   "bin": {
-    "appwrite-mcp": "./dist/bin/appwrite-mcp.js"
+    "appwrite-mcp": "./dist/bin/appwrite-mcp.js",
+    "appwrite-mcp-tables": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-functions": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-storage": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-users": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-teams": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-sites": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-projects": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-schemas": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-transfer": "./dist/bin/appwrite-mcp-group.js",
+    "appwrite-mcp-config": "./dist/bin/appwrite-mcp-group.js"
   },
   "scripts": {
     "build": "bun run tsc",

@@ -31,6 +31,13 @@ export interface ServerFlags {
   apiKey?: string;
   configDir?: string;
   instanceId?: string;
+
+  /**
+   * When true, the server runs in scoped/locked mode: no meta tools are
+   * exposed and the agent cannot enable additional groups at runtime.
+   * Used by per-group binaries (appwrite-mcp-storage, etc.).
+   */
+  lockedScope?: boolean;
 }
 
 /**
@@ -144,7 +151,12 @@ export function parseFlags(argv: string[]): ServerFlags {
 }
 
 /**
- * Get list of enabled tool groups based on flags
+ * Get list of enabled tool groups based on flags.
+ *
+ * When no group flags are passed, only `config` is enabled by default —
+ * the agent uses meta tools (always exposed in non-locked mode) to enable
+ * other groups on demand. Pass `--all` to pre-enable every group.
+ *
  * @param flags - Parsed server flags
  * @returns Array of enabled tool group names
  */
@@ -166,6 +178,13 @@ export function getEnabledToolGroups(flags: ServerFlags): string[] {
   if (flags.sites) enabled.push('sites');
   if (flags.projects) enabled.push('projects');
   if (flags.teams) enabled.push('teams');
+
+  // Default surface when no group flags are passed: just `config` so the
+  // agent can introspect auth/config status, plus the always-on meta group
+  // (added by the server, not here).
+  if (enabled.length === 0) {
+    enabled.push('config');
+  }
 
   return enabled;
 }

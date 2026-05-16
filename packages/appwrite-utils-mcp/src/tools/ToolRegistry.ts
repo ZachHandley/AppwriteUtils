@@ -46,14 +46,19 @@ export class ValidationError extends Error {
 export class ToolRegistry {
   private groups: Map<string, ToolGroup>;
   private enabledFlags: Set<string>;
+  private alwaysOn: Set<string>;
 
   /**
    * Create a new tool registry with specified enabled groups
-   * @param enabledGroups - Array of flag names to enable (e.g., ['--databases', '--functions'])
+   * @param enabledGroups - Array of flag names to enable (e.g., ['tables', 'functions']).
+   *                       Empty array means no optional groups are enabled — only `alwaysOn` groups will be exposed.
+   * @param alwaysOnGroups - Array of flag names that are always exposed and cannot be disabled.
+   *                        Defaults to empty (no always-on groups).
    */
-  constructor(enabledGroups: string[] = []) {
+  constructor(enabledGroups: string[] = [], alwaysOnGroups: string[] = []) {
     this.groups = new Map();
     this.enabledFlags = new Set(enabledGroups);
+    this.alwaysOn = new Set(alwaysOnGroups);
   }
 
   /**
@@ -66,15 +71,35 @@ export class ToolRegistry {
   }
 
   /**
-   * Get all tools from enabled groups
+   * Check whether a group flag is currently exposed (either always-on or enabled).
+   */
+  isGroupActive(flag: string): boolean {
+    return this.alwaysOn.has(flag) || this.enabledFlags.has(flag);
+  }
+
+  /**
+   * Get the set of always-on group flags.
+   */
+  getAlwaysOnFlags(): string[] {
+    return Array.from(this.alwaysOn);
+  }
+
+  /**
+   * Get the set of currently-enabled optional group flags (excludes always-on groups).
+   */
+  getEnabledFlags(): string[] {
+    return Array.from(this.enabledFlags);
+  }
+
+  /**
+   * Get all tools from enabled groups (including always-on groups)
    * @returns Array of all enabled tool definitions
    */
   getEnabledTools(): ToolDefinition[] {
     const tools: ToolDefinition[] = [];
 
     for (const [flag, group] of this.groups.entries()) {
-      // Include tools if no flags specified (all enabled) or if flag is enabled
-      if (this.enabledFlags.size === 0 || this.enabledFlags.has(flag)) {
+      if (this.isGroupActive(flag)) {
         tools.push(...group.tools);
       }
     }
@@ -91,13 +116,11 @@ export class ToolRegistry {
   }
 
   /**
-   * Get only enabled groups
+   * Get only enabled groups (including always-on groups)
    * @returns Array of enabled tool groups
    */
   getEnabledGroups(): ToolGroup[] {
-    return Array.from(this.groups.values()).filter((group) => {
-      return this.enabledFlags.size === 0 || this.enabledFlags.has(group.flag);
-    });
+    return Array.from(this.groups.values()).filter((group) => this.isGroupActive(group.flag));
   }
 
   /**
@@ -175,27 +198,50 @@ export class ToolRegistry {
   /**
    * Enable additional tool groups by flag
    * @param flags - Array of flag names to enable
+   * @returns Array of flag names that were newly enabled (already-enabled and unknown flags are skipped)
    */
-  enableGroups(flags: string[]): void {
+  enableGroups(flags: string[]): string[] {
+    const newlyEnabled: string[] = [];
     for (const flag of flags) {
+      if (!this.groups.has(flag)) continue;
+      if (this.isGroupActive(flag)) continue;
       this.enabledFlags.add(flag);
+      newlyEnabled.push(flag);
     }
+    return newlyEnabled;
   }
 
   /**
-   * Disable tool groups by flag
+   * Disable tool groups by flag. Always-on groups cannot be disabled.
    * @param flags - Array of flag names to disable
+   * @returns Object with `disabled` (flags actually removed) and `refused` (flags that were always-on)
    */
-  disableGroups(flags: string[]): void {
+  disableGroups(flags: string[]): { disabled: string[]; refused: string[] } {
+    const disabled: string[] = [];
+    const refused: string[] = [];
     for (const flag of flags) {
-      this.enabledFlags.delete(flag);
+      if (this.alwaysOn.has(flag)) {
+        refused.push(flag);
+        continue;
+      }
+      if (this.enabledFlags.delete(flag)) {
+        disabled.push(flag);
+      }
     }
+    return { disabled, refused };
   }
 
   /**
-   * Clear all enabled flags (enables all groups)
+   * Enable every registered group.
+   * @returns Array of flag names that were newly enabled.
    */
-  enableAllGroups(): void {
-    this.enabledFlags.clear();
+  enableAllGroups(): string[] {
+    const newlyEnabled: string[] = [];
+    for (const flag of this.groups.keys()) {
+      if (this.isGroupActive(flag)) continue;
+      this.enabledFlags.add(flag);
+      newlyEnabled.push(flag);
+    }
+    return newlyEnabled;
   }
 }
