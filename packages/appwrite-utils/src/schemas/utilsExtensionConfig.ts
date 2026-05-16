@@ -41,12 +41,24 @@ import { importDefSchemas } from "./importDef.js";
 /**
  * Function-specific extensions (predeployCommands, deployDir, ignore, etc.
  * still to be formalised). Currently passthrough.
+ *
+ * Known field: `forceOverwriteSecrets` — when false (default), the var-sync
+ * step skips updating any Appwrite-side variable whose `secret` flag is true,
+ * preserving server-managed secrets across deploys. Set to true to opt into
+ * overwriting secrets from this function's local `vars` block.
  */
 export const FunctionExtensionSchema = z
-  .object({})
+  .object({
+    forceOverwriteSecrets: z
+      .boolean()
+      .optional()
+      .describe(
+        "When false (default), the var-sync step refuses to overwrite any Appwrite-side variable whose `secret` flag is true. Set true to opt into clobbering secrets from this function's local `vars` block.",
+      ),
+  })
   .passthrough()
   .describe(
-    "AppwriteUtils-specific extension fields for an Appwrite function. Currently accepts any keys; will be formalised over time.",
+    "AppwriteUtils-specific extension fields for an Appwrite function. Known: forceOverwriteSecrets.",
   );
 
 /**

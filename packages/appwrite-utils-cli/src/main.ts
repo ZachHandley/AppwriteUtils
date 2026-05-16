@@ -89,6 +89,7 @@ interface CliOptions {
   passthrough?: boolean;
   regen?: string;
   noDeploy?: boolean;
+  forceOverwriteSecrets?: boolean;
   syncExtensions?: boolean;
   pullSelective?: boolean;
 }
@@ -669,6 +670,12 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "With --regen: only write the aggregated JSON; skip the push call",
   })
+  .option("forceOverwriteSecrets", {
+    alias: ["force-overwrite-secrets", "force-secrets"],
+    type: "boolean",
+    description:
+      "With --regen functions/all: overwrite Appwrite-side secret variables from the local sidecar `vars` block. Default preserves server-side secrets (OneUptime tokens, payment keys, etc.). Per-function `forceOverwriteSecrets: true` in the sidecar wins over this flag if set.",
+  })
   .option("syncExtensions", {
     alias: ["sync-extensions"],
     type: "boolean",
@@ -787,6 +794,7 @@ async function main() {
         target: argv.regen,
         configPath: argv.config,
         noDeploy: argv.noDeploy,
+        forceOverwriteSecrets: argv.forceOverwriteSecrets,
         argvCredentials: argv.endpoint && argv.projectId
           ? { endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey }
           : undefined,

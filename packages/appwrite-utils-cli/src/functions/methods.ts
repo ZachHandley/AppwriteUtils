@@ -4,6 +4,7 @@ import {
   Functions,
   Query,
   Runtime,
+  type Models,
   type Scopes,
 } from "node-appwrite";
 import { join, dirname } from "node:path";
@@ -287,4 +288,167 @@ export const createFunctionTemplate = async (
   }
 
   return functionPath;
+};
+
+// ──────────────────────────────────────────────────
+// VARIABLE MANAGEMENT
+// ──────────────────────────────────────────────────
+
+export const listFunctionVariables = async (
+  client: Client,
+  functionId: string
+): Promise<Models.VariableList> => {
+  const functions = new Functions(client);
+  return await functions.listVariables({ functionId });
+};
+
+export const createFunctionVariable = async (
+  client: Client,
+  functionId: string,
+  key: string,
+  value: string,
+  secret?: boolean
+): Promise<Models.Variable> => {
+  const functions = new Functions(client);
+  return await functions.createVariable({
+    functionId,
+    key,
+    value,
+    secret,
+  });
+};
+
+export const updateFunctionVariable = async (
+  client: Client,
+  functionId: string,
+  variableId: string,
+  key: string,
+  value?: string,
+  secret?: boolean
+): Promise<Models.Variable> => {
+  const functions = new Functions(client);
+  return await functions.updateVariable({
+    functionId,
+    variableId,
+    key,
+    value,
+    secret,
+  });
+};
+
+export interface SyncVariablesOptions {
+  /**
+   * When true, overwrites Appwrite-side variables whose `secret` flag is true.
+   * Default: false (secrets are preserved across deploys).
+   */
+  forceOverwriteSecrets?: boolean;
+  /**
+   * Optional MessageFormatter prefix override. Defaults to "Variables".
+   */
+  prefix?: string;
+}
+
+export interface SyncVariablesResult {
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  unchanged: string[];
+}
+
+/**
+ * Sync a function's variables to Appwrite while respecting Appwrite-side
+ * secret variables. Behavior:
+ *
+ *   - For each key in `desiredVars`:
+ *       - if absent on Appwrite → createVariable
+ *       - if present and `secret === true` on Appwrite and
+ *         `forceOverwriteSecrets !== true` → SKIP (preserve)
+ *       - if present and value differs → updateVariable
+ *       - if present and value matches → unchanged
+ *   - Variables present on Appwrite but absent from `desiredVars` are
+ *     LEFT ALONE. We never delete server-side vars during sync.
+ *
+ * This is intentionally additive/preserving so that out-of-band secrets
+ * (e.g. OneUptime ingest tokens, payment provider keys set in the UI)
+ * survive every redeploy.
+ */
+export const syncFunctionVariables = async (
+  client: Client,
+  functionId: string,
+  desiredVars: Record<string, string> | undefined,
+  options: SyncVariablesOptions = {}
+): Promise<SyncVariablesResult> => {
+  const prefix = options.prefix ?? "Variables";
+  const result: SyncVariablesResult = {
+    created: [],
+    updated: [],
+    skipped: [],
+    unchanged: [],
+  };
+
+  if (!desiredVars || Object.keys(desiredVars).length === 0) {
+    MessageFormatter.debug(
+      `No local variables to sync for ${functionId}`,
+      undefined,
+      { prefix }
+    );
+    return result;
+  }
+
+  const existing = await listFunctionVariables(client, functionId);
+  const existingByKey = new Map<string, Models.Variable>();
+  for (const v of existing.variables) {
+    existingByKey.set(v.key, v);
+  }
+
+  for (const [key, rawValue] of Object.entries(desiredVars)) {
+    const value = String(rawValue);
+    const current = existingByKey.get(key);
+
+    if (!current) {
+      await createFunctionVariable(client, functionId, key, value);
+      result.created.push(key);
+      MessageFormatter.debug(`Created ${key}`, undefined, { prefix });
+      continue;
+    }
+
+    if (current.secret && !options.forceOverwriteSecrets) {
+      result.skipped.push(key);
+      MessageFormatter.info(
+        `[preserve-secret] ${functionId}:${key} (Appwrite-side secret — not overwritten)`,
+        { prefix }
+      );
+      continue;
+    }
+
+    if (current.value === value) {
+      result.unchanged.push(key);
+      continue;
+    }
+
+    await updateFunctionVariable(
+      client,
+      functionId,
+      current.$id,
+      key,
+      value,
+      current.secret
+    );
+    result.updated.push(key);
+    MessageFormatter.debug(`Updated ${key}`, undefined, { prefix });
+  }
+
+  const summary = [
+    result.created.length ? `created=${result.created.length}` : null,
+    result.updated.length ? `updated=${result.updated.length}` : null,
+    result.skipped.length ? `skipped=${result.skipped.length}` : null,
+    result.unchanged.length ? `unchanged=${result.unchanged.length}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (summary) {
+    MessageFormatter.success(`${functionId}: ${summary}`, { prefix });
+  }
+
+  return result;
 };
