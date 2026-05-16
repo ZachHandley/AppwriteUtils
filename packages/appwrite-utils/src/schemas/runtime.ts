@@ -10,6 +10,7 @@ export const runtimeValues = [
   "node-22",
   "bun-1.0",
   "bun-1.1",
+  "bun-1.3",
   "deno-1.21",
   "deno-1.24",
   "deno-1.35",
