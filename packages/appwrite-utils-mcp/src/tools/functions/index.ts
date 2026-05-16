@@ -359,7 +359,7 @@ async function handleDeployFunction(
   if (!functionPath) {
     // Try to find function directory automatically
     const foundPath = await functionManager.findFunctionDirectory(fn.name, {
-      searchPaths: [process.cwd()],
+      searchPaths: [context.configDir ?? process.cwd()],
       verbose: false,
     });
 

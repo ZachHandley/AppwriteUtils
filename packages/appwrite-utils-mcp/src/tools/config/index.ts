@@ -87,7 +87,7 @@ async function validateConfig(
     if (!actualConfigPath) {
       const { ConfigDiscoveryService } = await import("appwrite-utils-helpers");
       const discoveryService = new ConfigDiscoveryService();
-      const discovered = await discoveryService.findConfig(process.cwd());
+      const discovered = await discoveryService.findConfig(context.configDir ?? process.cwd());
       if (!discovered) {
         throw new Error("No Appwrite configuration file found. Please provide a configPath or ensure appwrite.json exists.");
       }

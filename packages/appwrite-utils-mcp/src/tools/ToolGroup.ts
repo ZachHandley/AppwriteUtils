@@ -21,6 +21,12 @@ export interface ToolContext {
   authResolver: AuthResolver;
   /** Optional project ID for the current operation */
   projectId?: string;
+  /**
+   * Directory the server should treat as the "current project" when
+   * resolving config files (appwrite.json) and function bundle paths.
+   * Falls back to process.cwd() when unset.
+   */
+  configDir?: string;
   /** Tool registry — present for meta tools that mutate the enabled-group set */
   toolRegistry?: ToolRegistry;
   /** Send notifications/tools/list_changed to the MCP client */

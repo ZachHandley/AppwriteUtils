@@ -11,6 +11,7 @@ import {
   type CallToolRequest,
   type ListToolsRequest,
 } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { parseFlags, getEnabledToolGroups, type ServerFlags } from './config/FlagParser.js';
 import { AuthResolver } from './auth/AuthResolver.js';
 import { ClientRegistry } from './state/ClientRegistry.js';
@@ -179,6 +180,33 @@ Server instance ID: ${this.instanceId}
   }
 
   /**
+   * Convert a tool's Zod input schema into a JSON Schema object the MCP
+   * client can use for parameter validation / autocomplete.
+   *
+   * Failures are caught per-tool so a single bad schema can't break the
+   * entire tools/list response — the fallback exposes the tool with no
+   * declared parameters and lets server-side Zod validation catch issues.
+   */
+  private toInputSchema(toolName: string, schema: z.ZodSchema): Record<string, unknown> {
+    try {
+      const json = z.toJSONSchema(schema) as Record<string, unknown>;
+      // Strip top-level $schema so MCP clients don't see a stray draft URI.
+      delete json.$schema;
+      // MCP requires the root inputSchema to be an object schema.
+      if (json.type !== 'object') {
+        return { type: 'object', properties: {} };
+      }
+      return json;
+    } catch (err) {
+      console.error(
+        `[appwrite-mcp] Failed to convert Zod schema for tool '${toolName}' to JSON Schema:`,
+        err
+      );
+      return { type: 'object', properties: {} };
+    }
+  }
+
+  /**
    * Set up MCP request handlers for tools
    */
   private setupRequestHandlers(): void {
@@ -190,12 +218,7 @@ Server instance ID: ${this.instanceId}
         tools: enabledTools.map((tool) => ({
           name: tool.name,
           description: tool.description,
-          inputSchema: {
-            type: 'object' as const,
-            properties: {},
-            // TODO: Convert Zod schema to JSON Schema for proper input validation
-            // For now, we rely on runtime Zod validation in the tool handler
-          },
+          inputSchema: this.toInputSchema(tool.name, tool.inputSchema),
         })),
       };
     });
@@ -210,6 +233,7 @@ Server instance ID: ${this.instanceId}
         clientRegistry: this.clientRegistry,
         stateManager: this.stateManager,
         projectId: this.flags.projectId,
+        configDir: this.flags.configDir,
         toolRegistry: this.toolRegistry,
         notifyToolsChanged: this.flags.lockedScope
           ? undefined
