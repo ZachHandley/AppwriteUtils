@@ -27,3 +27,15 @@ export * from "./paths/index.js";
 
 // Shared utilities for logging, messaging, and error handling
 export * from "./shared/index.js";
+
+// Project-level configuration utilities (variables, etc.)
+export * from "./projects/index.js";
+
+// Storage utilities for managing buckets and files
+export * from "./storage/index.js";
+
+// Team utilities for managing teams and memberships
+export * from "./teams/index.js";
+
+// User utilities for managing users, sessions, identities, prefs
+export * from "./users/index.js";

@@ -29,6 +29,8 @@ import {
   type CreateAttributeParams,
   type UpdateAttributeParams,
   type DeleteAttributeParams,
+  type ListColumnsParams,
+  type GetColumnParams,
   type ApiResponse,
   type AdapterMetadata,
   AdapterError
@@ -655,6 +657,45 @@ export class TablesDBAdapter extends BaseAdapter {
       throw new AdapterError(
         `Failed to delete attribute: ${error instanceof Error ? error.message : 'Unknown error'}`,
         'DELETE_ATTRIBUTE_FAILED',
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  // Column Read Operations (TablesDB v18+ terminology)
+  async listColumns(params: ListColumnsParams): Promise<ApiResponse> {
+    try {
+      const result = await this.tablesDB.listColumns({
+        databaseId: params.databaseId,
+        tableId: params.tableId,
+        queries: params.queries || []
+      });
+      const columns = (result as any).columns || [];
+      return {
+        data: columns,
+        total: (result as any).total ?? columns.length
+      };
+    } catch (error) {
+      throw new AdapterError(
+        `Failed to list columns: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'LIST_COLUMNS_FAILED',
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  async getColumn(params: GetColumnParams): Promise<ApiResponse> {
+    try {
+      const result = await this.tablesDB.getColumn({
+        databaseId: params.databaseId,
+        tableId: params.tableId,
+        key: params.key
+      });
+      return { data: result };
+    } catch (error) {
+      throw new AdapterError(
+        `Failed to get column: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'GET_COLUMN_FAILED',
         error instanceof Error ? error : undefined
       );
     }

@@ -1,4 +1,4 @@
-import { Client, Functions, Runtime, type Models, type Scopes } from "node-appwrite";
+import { Client, Functions, Runtime, ExecutionMethod, VCSReferenceType, ID, type Models, type Scopes } from "node-appwrite";
 import { type AppwriteFunction, EventTypeSchema } from "appwrite-utils";
 import { join, relative, resolve, basename } from "node:path";
 import fs from "node:fs";
@@ -505,6 +505,266 @@ export class FunctionManager {
   public async deleteFunction(functionId: string): Promise<void> {
     await functionLimit(() =>
       tryAwaitWithRetry(async () => await this.functions.delete(functionId))
+    );
+  }
+
+  /**
+   * List function executions. Supports Appwrite query strings to filter results.
+   * Note: the `search` parameter is accepted for API symmetry but the underlying
+   * Functions service exposes filtering via the `queries` array — callers that
+   * pass `search` should encode it as a Query.search(...) string in `queries`.
+   */
+  public async listExecutions(
+    functionId: string,
+    queries?: string[],
+    search?: string
+  ): Promise<Models.ExecutionList> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () => {
+        const params: { functionId: string; queries?: string[] } = { functionId };
+        const mergedQueries: string[] = [];
+        if (queries && queries.length > 0) mergedQueries.push(...queries);
+        if (search && search.trim().length > 0) {
+          // The Functions.listExecutions endpoint does not accept a `search`
+          // argument directly; encode it as a Query.search filter so callers
+          // get a consistent UX.
+          const { Query } = await import("node-appwrite");
+          mergedQueries.push(Query.search("requestPath", search));
+        }
+        if (mergedQueries.length > 0) params.queries = mergedQueries;
+        return await this.functions.listExecutions(params);
+      })
+    );
+  }
+
+  /**
+   * Get a single function execution by ID.
+   */
+  public async getExecution(
+    functionId: string,
+    executionId: string
+  ): Promise<Models.Execution> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.getExecution({ functionId, executionId })
+      )
+    );
+  }
+
+  /**
+   * Trigger a function execution.
+   */
+  public async createExecution(
+    functionId: string,
+    body?: string,
+    async?: boolean,
+    path?: string,
+    method?: ExecutionMethod,
+    headers?: object,
+    scheduledAt?: string
+  ): Promise<Models.Execution> {
+    return await functionLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.createExecution({
+          functionId,
+          body,
+          async,
+          xpath: path,
+          method,
+          headers,
+          scheduledAt,
+        })
+      )
+    );
+  }
+
+  /**
+   * Delete a function execution by ID.
+   */
+  public async deleteExecution(
+    functionId: string,
+    executionId: string
+  ): Promise<void> {
+    await functionLimit(() =>
+      tryAwaitWithRetry(async () => {
+        await this.functions.deleteExecution({ functionId, executionId });
+      })
+    );
+  }
+
+  /**
+   * List code deployments for a function. Supports Appwrite query strings to
+   * filter results and an optional free-text search.
+   */
+  public async listDeployments(
+    functionId: string,
+    queries?: string[],
+    search?: string
+  ): Promise<Models.DeploymentList> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () => {
+        const params: { functionId: string; queries?: string[]; search?: string } = { functionId };
+        if (queries && queries.length > 0) params.queries = queries;
+        if (search && search.trim().length > 0) params.search = search;
+        return await this.functions.listDeployments(params);
+      })
+    );
+  }
+
+  /**
+   * Get a single function deployment by ID.
+   */
+  public async getDeployment(
+    functionId: string,
+    deploymentId: string
+  ): Promise<Models.Deployment> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.getDeployment({ functionId, deploymentId })
+      )
+    );
+  }
+
+  /**
+   * Delete a function deployment by ID.
+   */
+  public async deleteDeployment(
+    functionId: string,
+    deploymentId: string
+  ): Promise<void> {
+    await functionLimit(() =>
+      tryAwaitWithRetry(async () => {
+        await this.functions.deleteDeployment({ functionId, deploymentId });
+      })
+    );
+  }
+
+  /**
+   * Create a deployment for a VCS-connected function from a branch or commit
+   * reference. This is the "redeploy from current branch HEAD" path used for
+   * VCS-connected functions.
+   */
+  public async createVcsDeployment(
+    functionId: string,
+    reference: string,
+    options?: { type?: "branch" | "commit"; activate?: boolean }
+  ): Promise<Models.Deployment> {
+    const type = options?.type ?? "branch";
+    const activate = options?.activate ?? true;
+    const vcsType =
+      type === "commit" ? VCSReferenceType.Commit : VCSReferenceType.Branch;
+
+    return await functionLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.createVcsDeployment({
+          functionId,
+          type: vcsType,
+          reference,
+          activate,
+        })
+      )
+    );
+  }
+
+  /**
+   * List all per-function (function-scoped) environment variables for a
+   * function. These are distinct from project-level variables: function-scoped
+   * variables override project-level variables for the specific function.
+   */
+  public async listVariables(
+    functionId: string,
+    queries?: string[]
+  ): Promise<Models.VariableList> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () => {
+        const params: { functionId: string; queries?: string[] } = { functionId };
+        if (queries && queries.length > 0) params.queries = queries;
+        return await this.functions.listVariables(params);
+      })
+    );
+  }
+
+  /**
+   * Get a single per-function (function-scoped) environment variable by ID.
+   */
+  public async getVariable(
+    functionId: string,
+    variableId: string
+  ): Promise<Models.Variable> {
+    return await queryLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.getVariable({ functionId, variableId })
+      )
+    );
+  }
+
+  /**
+   * Create a new per-function (function-scoped) environment variable. The
+   * variable ID is generated server-side by Appwrite — unlike project-level
+   * variables, function-scoped variables are not user-id-able by the caller.
+   */
+  public async createVariable(
+    functionId: string,
+    key: string,
+    value: string,
+    options: { secret?: boolean } = {}
+  ): Promise<Models.Variable> {
+    const secret = options.secret ?? false;
+
+    return await functionLimit(() =>
+      tryAwaitWithRetry(async () =>
+        await this.functions.createVariable({
+          functionId,
+          key,
+          value,
+          secret,
+        })
+      )
+    );
+  }
+
+  /**
+   * Update an existing per-function (function-scoped) environment variable.
+   * All patch fields are optional at the caller surface. The underlying SDK
+   * requires `key`, so when the caller omits it we issue a GET to read the
+   * existing variable's key and forward that to the update call. The
+   * GET-then-update flow runs inside a single `tryAwaitWithRetry` block so a
+   * transient network failure retries the whole sequence.
+   */
+  public async updateVariable(
+    functionId: string,
+    variableId: string,
+    patch: { key?: string; value?: string; secret?: boolean }
+  ): Promise<Models.Variable> {
+    return await functionLimit(() =>
+      tryAwaitWithRetry(async () => {
+        let key = patch.key;
+        if (key === undefined) {
+          const existing = await this.functions.getVariable({ functionId, variableId });
+          key = existing.key;
+        }
+        return await this.functions.updateVariable({
+          functionId,
+          variableId,
+          key,
+          value: patch.value,
+          secret: patch.secret,
+        });
+      })
+    );
+  }
+
+  /**
+   * Delete a per-function (function-scoped) environment variable by ID.
+   */
+  public async deleteVariable(
+    functionId: string,
+    variableId: string
+  ): Promise<void> {
+    await functionLimit(() =>
+      tryAwaitWithRetry(async () => {
+        await this.functions.deleteVariable({ functionId, variableId });
+      })
     );
   }
 

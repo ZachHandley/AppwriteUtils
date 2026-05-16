@@ -29,6 +29,8 @@ import {
   type CreateAttributeParams,
   type UpdateAttributeParams,
   type DeleteAttributeParams,
+  type ListColumnsParams,
+  type GetColumnParams,
   type ApiResponse,
   type AdapterMetadata,
   AdapterError,
@@ -677,6 +679,51 @@ export class LegacyAdapter extends BaseAdapter {
       throw new AdapterError(
         `Failed to delete attribute (legacy): ${error instanceof Error ? error.message : 'Unknown error'}`,
         'DELETE_ATTRIBUTE_FAILED',
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  // Column Read Operations (TablesDB v18+ terminology; legacy maps to attributes)
+  async listColumns(params: ListColumnsParams): Promise<ApiResponse> {
+    try {
+      // TablesDB: listColumns({ databaseId, tableId, queries })
+      // Legacy: listAttributes(databaseId, collectionId, queries)
+      const result = await this.databases.listAttributes(
+        params.databaseId,
+        params.tableId, // Maps tableId to collectionId
+        params.queries || []
+      );
+
+      const attributes = (result as any).attributes || [];
+      return {
+        data: attributes,
+        total: (result as any).total ?? attributes.length
+      };
+    } catch (error) {
+      throw new AdapterError(
+        `Failed to list columns (legacy): ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'LIST_COLUMNS_FAILED',
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  async getColumn(params: GetColumnParams): Promise<ApiResponse> {
+    try {
+      // TablesDB: getColumn({ databaseId, tableId, key })
+      // Legacy: getAttribute(databaseId, collectionId, key)
+      const result = await this.databases.getAttribute(
+        params.databaseId,
+        params.tableId, // Maps tableId to collectionId
+        params.key
+      );
+
+      return { data: result };
+    } catch (error) {
+      throw new AdapterError(
+        `Failed to get column (legacy): ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'GET_COLUMN_FAILED',
         error instanceof Error ? error : undefined
       );
     }

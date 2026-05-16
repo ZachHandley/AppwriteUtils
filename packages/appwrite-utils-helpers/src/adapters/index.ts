@@ -30,6 +30,8 @@ export type {
   DeleteTableParams,
   ListTablesParams,
   GetTableParams,
+  ListColumnsParams,
+  GetColumnParams,
   AdapterMetadata,
   ApiResponse,
 } from "./DatabaseAdapter.js";

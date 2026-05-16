@@ -169,6 +169,19 @@ export interface DeleteAttributeParams {
   key: string;
 }
 
+// Column read parameters (TablesDB v18+ terminology, polymorphic across v17 attributes)
+export interface ListColumnsParams {
+  databaseId: string;
+  tableId: string;
+  queries?: string[];
+}
+
+export interface GetColumnParams {
+  databaseId: string;
+  tableId: string;
+  key: string;
+}
+
 // Response types with conditional typing
 export interface ApiResponse<T = any> {
   data?: T;
@@ -224,6 +237,10 @@ export interface DatabaseAdapter {
   updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse>;
   deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse>;
 
+  // Column read operations (TablesDB v18+; polymorphic across v17 legacy attributes)
+  listColumns(params: ListColumnsParams): Promise<ApiResponse>;
+  getColumn(params: GetColumnParams): Promise<ApiResponse>;
+
   // Bulk operations (when supported)
   bulkCreateRows?(params: BulkCreateRowsParams): Promise<ApiResponse>;
   bulkUpsertRows?(params: BulkUpsertRowsParams): Promise<ApiResponse>;
@@ -273,6 +290,9 @@ export abstract class BaseAdapter implements DatabaseAdapter {
   abstract createAttribute(params: CreateAttributeParams): Promise<ApiResponse>;
   abstract updateAttribute(params: UpdateAttributeParams): Promise<ApiResponse>;
   abstract deleteAttribute(params: DeleteAttributeParams): Promise<ApiResponse>;
+
+  abstract listColumns(params: ListColumnsParams): Promise<ApiResponse>;
+  abstract getColumn(params: GetColumnParams): Promise<ApiResponse>;
 
   abstract getMetadata(): AdapterMetadata;
 

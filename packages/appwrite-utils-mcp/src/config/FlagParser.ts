@@ -10,7 +10,7 @@ import yargs from 'yargs';
  */
 export interface ServerFlags {
   // Tool group flags
-  databases: boolean;
+  tables: boolean;
   functions: boolean;
   storage: boolean;
   users: boolean;
@@ -18,7 +18,12 @@ export interface ServerFlags {
   schemas: boolean;
   config: boolean;
   sites: boolean;
+  projects: boolean;
+  teams: boolean;
   all: boolean;
+
+  // Deprecated alias for --tables (Appwrite v18+ renamed databases → tables)
+  databases?: boolean;
 
   // Configuration flags
   endpoint?: string;
@@ -35,11 +40,12 @@ export interface ServerFlags {
  */
 export function parseFlags(argv: string[]): ServerFlags {
   const parsed = yargs(argv)
-    .option('databases', {
+    .option('tables', {
       type: 'boolean',
-      description: 'Enable database tools',
+      description: 'Enable TablesDB tools (rows, columns, indexes — Appwrite v18+)',
       default: false,
     })
+    .alias('databases', 'tables')
     .option('functions', {
       type: 'boolean',
       description: 'Enable function tools',
@@ -75,6 +81,16 @@ export function parseFlags(argv: string[]): ServerFlags {
       description: 'Enable sites tools',
       default: false,
     })
+    .option('projects', {
+      type: 'boolean',
+      description: 'Enable Project-level configuration tools (project variables)',
+      default: false,
+    })
+    .option('teams', {
+      type: 'boolean',
+      description: 'Enable Teams tools (teams + memberships)',
+      default: false,
+    })
     .option('all', {
       type: 'boolean',
       description: 'Enable all tools',
@@ -107,7 +123,7 @@ export function parseFlags(argv: string[]): ServerFlags {
     .parseSync();
 
   return {
-    databases: parsed.databases,
+    tables: Boolean(parsed.tables || parsed.databases),
     functions: parsed.functions,
     storage: parsed.storage,
     users: parsed.users,
@@ -115,7 +131,10 @@ export function parseFlags(argv: string[]): ServerFlags {
     schemas: parsed.schemas,
     config: parsed.config,
     sites: parsed.sites,
+    projects: parsed.projects,
+    teams: parsed.teams,
     all: parsed.all,
+    databases: parsed.databases,
     endpoint: parsed.endpoint,
     projectId: parsed.projectId,
     apiKey: parsed.apiKey,
@@ -132,12 +151,12 @@ export function parseFlags(argv: string[]): ServerFlags {
 export function getEnabledToolGroups(flags: ServerFlags): string[] {
   // If --all is specified, enable all tool groups
   if (flags.all) {
-    return ['databases', 'functions', 'storage', 'users', 'transfer', 'schemas', 'config', 'sites'];
+    return ['config', 'functions', 'projects', 'schemas', 'sites', 'storage', 'tables', 'teams', 'transfer', 'users'];
   }
 
   const enabled: string[] = [];
 
-  if (flags.databases) enabled.push('databases');
+  if (flags.tables) enabled.push('tables');
   if (flags.functions) enabled.push('functions');
   if (flags.storage) enabled.push('storage');
   if (flags.users) enabled.push('users');
@@ -145,6 +164,8 @@ export function getEnabledToolGroups(flags: ServerFlags): string[] {
   if (flags.schemas) enabled.push('schemas');
   if (flags.config) enabled.push('config');
   if (flags.sites) enabled.push('sites');
+  if (flags.projects) enabled.push('projects');
+  if (flags.teams) enabled.push('teams');
 
   return enabled;
 }

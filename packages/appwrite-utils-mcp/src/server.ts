@@ -20,22 +20,26 @@ import type { ToolContext } from './tools/ToolGroup.js';
 import { randomUUID } from 'crypto';
 
 // Import tool groups
-import { databasesToolGroup } from './tools/databases/index.js';
-import { functionsToolGroup } from './tools/functions/index.js';
-import { storageToolGroup } from './tools/storage/index.js';
-import { usersToolGroup } from './tools/users/index.js';
-import { transferToolGroup } from './tools/transfer/index.js';
-import { schemasToolGroup } from './tools/schemas/index.js';
 import { configToolGroup } from './tools/config/index.js';
+import { functionsToolGroup } from './tools/functions/index.js';
+import { projectsToolGroup } from './tools/projects/index.js';
+import { schemasToolGroup } from './tools/schemas/index.js';
 import { sitesToolGroup } from './tools/sites/index.js';
+import { storageToolGroup } from './tools/storage/index.js';
+import { tablesToolGroup } from './tools/tables/index.js';
+import { teamsToolGroup } from './tools/teams/index.js';
+import { transferToolGroup } from './tools/transfer/index.js';
+import { usersToolGroup } from './tools/users/index.js';
 
 /**
  * AppwriteMCPServer - Main MCP server for Appwrite utilities
  *
  * This server provides MCP tools for interacting with Appwrite instances:
- * - Database operations (list, create, sync, backup, restore)
+ * - Tables operations (rows, columns, indexes — TablesDB v18+)
  * - Function management (list, create, deploy, execute)
+ * - Project-level operations (variables for all functions)
  * - Storage operations (buckets, upload, download)
+ * - Team operations (memberships, prefs)
  * - User management (list, create, update, delete)
  * - Transfer operations (backup, restore, migrate)
  * - Schema generation and validation
@@ -80,14 +84,16 @@ export class AppwriteMCPServer {
     this.toolRegistry = new ToolRegistry(getEnabledToolGroups(flags));
 
     // Register all available tool groups
-    this.toolRegistry.registerGroup(databasesToolGroup);
-    this.toolRegistry.registerGroup(functionsToolGroup);
-    this.toolRegistry.registerGroup(storageToolGroup);
-    this.toolRegistry.registerGroup(usersToolGroup);
-    this.toolRegistry.registerGroup(transferToolGroup);
-    this.toolRegistry.registerGroup(schemasToolGroup);
     this.toolRegistry.registerGroup(configToolGroup);
+    this.toolRegistry.registerGroup(functionsToolGroup);
+    this.toolRegistry.registerGroup(projectsToolGroup);
+    this.toolRegistry.registerGroup(schemasToolGroup);
     this.toolRegistry.registerGroup(sitesToolGroup);
+    this.toolRegistry.registerGroup(storageToolGroup);
+    this.toolRegistry.registerGroup(tablesToolGroup);
+    this.toolRegistry.registerGroup(teamsToolGroup);
+    this.toolRegistry.registerGroup(transferToolGroup);
+    this.toolRegistry.registerGroup(usersToolGroup);
 
     // Create MCP server instance
     this.server = new Server(
@@ -131,10 +137,12 @@ Authentication priority:
 3. CLI session discovery (from ~/.appwrite/prefs.json)
 
 Available operations:
-- Database: List, create, sync, backup, restore databases and collections
+- Tables: Rows, columns, indexes for TablesDB v18+ databases
 - Functions: List, create, deploy, delete, execute Appwrite functions
+- Projects: Project-level operations (variables shared across all functions)
 - Sites: List, create, deploy, delete sites and manage site variables
 - Storage: Manage buckets, upload/download files
+- Teams: Memberships and team preferences
 - Users: List, create, update, delete users and sessions
 - Transfer: Backup, restore, migrate data between instances
 - Schemas: Generate and validate TypeScript schemas
