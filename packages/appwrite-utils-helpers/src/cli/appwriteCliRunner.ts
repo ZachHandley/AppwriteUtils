@@ -33,7 +33,10 @@ export interface AppwriteCliRunOptions {
   json?: boolean;
   /** Pass `--force` to skip interactive confirmations. Default `true`. */
   force?: boolean;
-  /** Stream stdout/stderr to the parent process. Default `false`. */
+  /**
+   * Tee stdout/stderr to the parent process (real-time output) while still
+   * capturing them for the error message. Default `false`.
+   */
   stream?: boolean;
   /** Extra env vars merged onto `process.env` for this invocation. */
   env?: Record<string, string>;
@@ -284,17 +287,23 @@ export async function injectCredentials(
   const baseEnv = { ...process.env };
 
   const runClient = async (args: string[]): Promise<void> => {
-    const result = await execa("bunx", ["--bun", "appwrite", "client", ...args], {
-      cwd,
-      env: baseEnv,
-      reject: false,
-      timeout: DEFAULT_TIMEOUT_MS,
-    });
+    const result = await execa(
+      "npx",
+      ["--yes", "--package=appwrite-cli", "appwrite", "client", ...args],
+      {
+        cwd,
+        env: baseEnv,
+        reject: false,
+        timeout: DEFAULT_TIMEOUT_MS,
+      },
+    );
     if (result.exitCode !== 0) {
       const stderr =
         typeof result.stderr === "string" ? result.stderr : String(result.stderr ?? "");
+      const stdout =
+        typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
       throw new Error(
-        `Failed to configure Appwrite CLI client (args: ${args.join(" ")}): ${stderr.trim() || "non-zero exit"}`,
+        `Failed to configure Appwrite CLI client (args: ${args.join(" ")}): ${stderr.trim() || stdout.trim() || "non-zero exit"}`,
       );
     }
   };
@@ -310,7 +319,7 @@ export async function injectCredentials(
 }
 
 /**
- * Run an arbitrary appwrite CLI command via `bunx --bun appwrite ...`.
+ * Run an arbitrary appwrite CLI command via `npx --yes --package=appwrite-cli appwrite ...`.
  *
  * Performs auth bridging unless `skipAuthBridge` is true. Auth bridging:
  *   - Resolves credentials from `opts.credentials` or env vars.
@@ -320,8 +329,10 @@ export async function injectCredentials(
  * Behavior:
  *   - When `opts.json` is true, appends `--json` and attempts `JSON.parse(stdout)`.
  *   - When `opts.force` is true (default), appends `--force`.
- *   - When `opts.stream` is true, stdout/stderr are inherited (still captured exit code).
- *   - On non-zero exit, throws an Error containing stderr.
+ *   - When `opts.stream` is true, stdout/stderr are tee'd to the parent
+ *     process AND captured for the error message — you get real-time output
+ *     and a useful error if the command fails.
+ *   - On non-zero exit, throws an Error containing the captured stderr.
  */
 export async function runAppwriteCli<T = unknown>(
   args: string[],
@@ -366,22 +377,30 @@ export async function runAppwriteCli<T = unknown>(
     ...(extraEnv ?? {}),
   };
 
-  const execaArgs = ["--bun", "appwrite", ...finalArgs];
+  // Invoke the official Appwrite CLI via `npx --yes --package=appwrite-cli appwrite ...`.
+  // We deliberately use npx rather than `bunx --bun appwrite` so consumers
+  // don't need bun installed in CI just to talk to Appwrite. `appwrite-cli`
+  // is declared as a dep of this package, so npx hits the local cache.
+  const execaArgs = ["--yes", "--package=appwrite-cli", "appwrite", ...finalArgs];
 
-  const result = stream
-    ? await execa("bunx", execaArgs, {
-        cwd,
-        env: mergedEnv,
-        reject: false,
-        timeout,
-        stdio: "inherit",
-      })
-    : await execa("bunx", execaArgs, {
-        cwd,
-        env: mergedEnv,
-        reject: false,
-        timeout,
-      });
+  // Always run with stdio: pipe so we can capture stderr/stdout into the
+  // error message. When `stream: true`, also tee the streams to the parent
+  // process so the user sees real-time output. Using `stdio: "inherit"` (as
+  // an earlier version did) prevented execa from capturing stderr, which
+  // turned every CLI failure into an opaque "non-zero exit" message.
+  const subprocess = execa("npx", execaArgs, {
+    cwd,
+    env: mergedEnv,
+    reject: false,
+    timeout,
+  });
+
+  if (stream) {
+    subprocess.stdout?.pipe(process.stdout, { end: false });
+    subprocess.stderr?.pipe(process.stderr, { end: false });
+  }
+
+  const result = await subprocess;
 
   const childSignal =
     typeof (result as { signal?: unknown }).signal === "string"
