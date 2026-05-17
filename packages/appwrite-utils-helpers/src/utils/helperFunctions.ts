@@ -170,13 +170,14 @@ export const tryAwaitWithRetry = async <T>(
       return tryAwaitWithRetry(createFunction, attemptNum + 1);
     }
 
-    // For validation errors or non-transient errors, throw immediately
-    if (throwError) {
-      throw error;
-    }
-    console.error("Error during retryAwait function: ", error);
-    // @ts-ignore
-    return Promise.resolve();
+    // Non-transient errors (validation, permission, malformed request, etc.)
+    // always propagate. Previously this branch swallowed the error and
+    // returned `Promise.resolve()` when `throwError` was false (the default),
+    // which forced every caller into defensive null-checking and masked real
+    // failures (401s, permission denied) as "successful undefined results".
+    // The `throwError` parameter is retained for API stability but is now a
+    // no-op — errors always throw.
+    throw error;
   }
 };
 
