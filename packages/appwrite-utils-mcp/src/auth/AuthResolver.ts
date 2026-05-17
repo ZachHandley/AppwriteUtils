@@ -34,7 +34,7 @@ export interface ToolAuthParams {
  */
 export interface AuthResolutionResult {
   credentials: AuthCredentials;
-  source: "tool-params" | "server-defaults" | "cli-session";
+  source: "tool-params" | "server-defaults" | "cli-current" | "cli-session";
 }
 
 /**
@@ -128,13 +128,40 @@ export class AuthResolver {
     toolParams?: ToolAuthParams
   ): Promise<AuthResolutionResult> {
     // Merge parameters with priority: tool > server > undefined
-    const endpoint =
-      toolParams?.endpoint ?? this.serverDefaults.endpoint;
-    const projectId =
-      toolParams?.projectId ?? this.serverDefaults.projectId;
-    const apiKey =
-      toolParams?.apiKey ?? this.serverDefaults.apiKey;
-    const sessionCookie = toolParams?.sessionCookie;
+    let endpoint = toolParams?.endpoint ?? this.serverDefaults.endpoint;
+    let projectId = toolParams?.projectId ?? this.serverDefaults.projectId;
+    let apiKey = toolParams?.apiKey ?? this.serverDefaults.apiKey;
+    let sessionCookie = toolParams?.sessionCookie;
+
+    // Tier 2.5 fill: if endpoint/projectId/creds are missing, consult
+    // ~/.appwrite/prefs.json's `current` pointer (whatever project the user
+    // most recently selected via `appwrite use <project>`). Fills only empty
+    // slots — explicit tool params and server flags always win.
+    let currentContributedCreds = false;
+    if (!endpoint || !projectId || (!apiKey && !sessionCookie)) {
+      try {
+        const current = await this.sessionService.findCurrentSession();
+        if (current) {
+          if (!endpoint) endpoint = current.endpoint;
+          if (!projectId) projectId = current.projectId;
+          if (!apiKey && !sessionCookie) {
+            if (current.apiKey) {
+              apiKey = current.apiKey;
+              currentContributedCreds = true;
+            } else if (current.sessionCookie) {
+              sessionCookie = current.sessionCookie;
+              currentContributedCreds = true;
+            }
+          }
+        }
+      } catch (error) {
+        // Non-fatal — the resolver still has the existing fallback chain.
+        console.warn(
+          "prefs.current discovery failed:",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
 
     // Validate minimum required parameters
     if (!endpoint || !projectId) {
@@ -184,6 +211,22 @@ export class AuthResolver {
         },
         source: "server-defaults",
       };
+    }
+
+    // Tier 2.5: Credentials resolved from ~/.appwrite/prefs.json `current`
+    if (currentContributedCreds) {
+      if (apiKey) {
+        return {
+          credentials: { endpoint, projectId, apiKey, authMethod: "apikey" },
+          source: "cli-current",
+        };
+      }
+      if (sessionCookie) {
+        return {
+          credentials: { endpoint, projectId, sessionCookie, authMethod: "session" },
+          source: "cli-current",
+        };
+      }
     }
 
     // Tier 3: CLI session discovery

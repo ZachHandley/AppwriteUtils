@@ -17,7 +17,8 @@ export {
   SessionAuthService,
   type SessionAuthInfo,
   type AppwriteSessionPrefs,
-  type AuthenticationStatus
+  type AuthenticationStatus,
+  type CurrentSessionInfo
 } from "./SessionAuthService.js";
 
 export {

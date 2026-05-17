@@ -8,15 +8,35 @@ import { isValidSessionCookie as isValidSessionCookieShared } from "../../client
 import { fetchServerVersion, isVersionAtLeast } from "../../utils/versionDetection.js";
 
 /**
- * Session preferences stored in ~/.appwrite/prefs.json
+ * Session preferences stored in ~/.appwrite/prefs.json.
+ *
+ * Note: the file also stores a top-level `current` field (string projectId pointer)
+ * which is NOT modeled here to keep the index signature clean; see
+ * {@link SessionAuthService.findCurrentSession} for the helper that reads it.
+ *
+ * Entries may carry an API `key` instead of (or in addition to) a session
+ * `cookie` — that's what the Appwrite CLI writes after `appwrite login --key`.
  */
 export interface AppwriteSessionPrefs {
   [projectId: string]: {
     endpoint: string;
     email: string;
     cookie: string;
+    key?: string;
     expiresAt?: string;
   };
+}
+
+/**
+ * Resolved "current" CLI session — what `~/.appwrite/prefs.json`'s `current`
+ * pointer dereferences to. Carries either an apiKey or a sessionCookie (or both).
+ */
+export interface CurrentSessionInfo {
+  projectId: string;
+  endpoint: string;
+  apiKey?: string;
+  sessionCookie?: string;
+  email?: string;
 }
 
 /**
@@ -188,6 +208,57 @@ export class SessionAuthService {
       });
       return null;
     }
+  }
+
+  /**
+   * Resolve the "currently selected" CLI project from `~/.appwrite/prefs.json`'s
+   * top-level `current` pointer. This is what `appwrite use <project>` sets, and
+   * lets MCP/SDK consumers auto-authenticate as whatever project the user last
+   * touched via the CLI — no flags required.
+   *
+   * Unlike {@link findSession}, this does NOT require the caller to know the
+   * endpoint or projectId up-front, and it handles both `key` (API key) and
+   * `cookie` (session) entries. Returns null when `current` is unset, points at
+   * a missing entry, or the entry has neither usable auth credential.
+   *
+   * No live probing — stale endpoints surface as a 401 on first API call.
+   */
+  public async findCurrentSession(): Promise<CurrentSessionInfo | null> {
+    const prefs = await this.loadSessionPrefs();
+    if (!prefs) return null;
+
+    // `current` is a top-level sibling of the project entries, not modeled in
+    // AppwriteSessionPrefs (which is a pure index signature). Read tolerantly.
+    const root = prefs as unknown as { current?: unknown };
+    const currentId = typeof root.current === "string" ? root.current : "";
+    if (!currentId) return null;
+
+    const rawEntry = (prefs as Record<string, unknown>)[currentId];
+    if (!rawEntry || typeof rawEntry !== "object") return null;
+
+    const entry = rawEntry as {
+      endpoint?: unknown;
+      email?: unknown;
+      cookie?: unknown;
+      key?: unknown;
+    };
+
+    if (typeof entry.endpoint !== "string" || !entry.endpoint) return null;
+
+    const apiKey = typeof entry.key === "string" && entry.key ? entry.key : undefined;
+    const sessionCookie =
+      typeof entry.cookie === "string" && entry.cookie ? entry.cookie : undefined;
+
+    // Need at least one usable auth credential
+    if (!apiKey && !sessionCookie) return null;
+
+    return {
+      projectId: currentId,
+      endpoint: entry.endpoint,
+      apiKey,
+      sessionCookie,
+      email: typeof entry.email === "string" ? entry.email : undefined,
+    };
   }
 
   /**

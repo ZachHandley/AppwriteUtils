@@ -36,8 +36,18 @@ async function getConfig(
   const serverDefaults = context.authResolver.getServerDefaults();
   const sessionService = context.authResolver.getSessionService();
 
-  // Check if there's an active CLI session
-  let cliSession = null;
+  // 1) Project-specific session lookup (only when both endpoint and projectId
+  //    are known from server flags or env).
+  let cliSession:
+    | {
+        source: "project-session" | "prefs.current";
+        endpoint: string;
+        projectId: string;
+        hasApiKey: boolean;
+        hasCookie: boolean;
+      }
+    | null = null;
+
   try {
     if (serverDefaults.endpoint && serverDefaults.projectId) {
       const session = await sessionService.findSession(
@@ -46,8 +56,10 @@ async function getConfig(
       );
       if (session && sessionService.isValidSession(session)) {
         cliSession = {
+          source: "project-session",
           endpoint: session.endpoint,
           projectId: session.projectId,
+          hasApiKey: false,
           hasCookie: !!session.cookie,
         };
       }
@@ -56,6 +68,31 @@ async function getConfig(
     // CLI session discovery is optional
   }
 
+  // 2) prefs.current fallback — what the AuthResolver itself will use when no
+  //    endpoint/projectId were passed (bare-launch case).
+  if (!cliSession) {
+    try {
+      const current = await sessionService.findCurrentSession();
+      if (current) {
+        cliSession = {
+          source: "prefs.current",
+          endpoint: current.endpoint,
+          projectId: current.projectId,
+          hasApiKey: !!current.apiKey,
+          hasCookie: !!current.sessionCookie,
+        };
+      }
+    } catch (error) {
+      // prefs.current discovery is optional
+    }
+  }
+
+  // Effective auth method the resolver would pick right now.
+  let authMethod: "apikey" | "session" | "none" = "none";
+  if (serverDefaults.apiKey) authMethod = "apikey";
+  else if (cliSession?.hasApiKey) authMethod = "apikey";
+  else if (cliSession?.hasCookie) authMethod = "session";
+
   return {
     serverDefaults: {
       endpoint: serverDefaults.endpoint || null,
@@ -63,7 +100,7 @@ async function getConfig(
       hasApiKey: !!serverDefaults.apiKey,
     },
     cliSession,
-    authMethod: serverDefaults.apiKey ? "apikey" : (cliSession ? "session" : "none"),
+    authMethod,
   };
 }
 
@@ -160,22 +197,39 @@ async function getAuthStatus(
   const serverDefaults = context.authResolver.getServerDefaults();
   const sessionService = context.authResolver.getSessionService();
 
-  // Determine the current authentication method and details
-  const endpoint = serverDefaults.endpoint || null;
-  const projectId = serverDefaults.projectId || null;
+  const serverDefaultEndpoint = serverDefaults.endpoint || null;
+  const serverDefaultProjectId = serverDefaults.projectId || null;
   const hasApiKey = !!serverDefaults.apiKey;
 
-  // Check for CLI session if endpoint and projectId are available
-  let cliSessionStatus = null;
-  if (endpoint && projectId) {
+  // 1) Project-specific session lookup when server defaults have both
+  //    endpoint and projectId.
+  let cliSessionStatus:
+    | {
+        source: "project-session" | "prefs.current";
+        isValid: boolean;
+        endpoint: string;
+        projectId: string;
+        email: string | null;
+        hasApiKey: boolean;
+        hasCookie: boolean;
+      }
+    | null = null;
+
+  if (serverDefaultEndpoint && serverDefaultProjectId) {
     try {
-      const session = await sessionService.findSession(endpoint, projectId);
+      const session = await sessionService.findSession(
+        serverDefaultEndpoint,
+        serverDefaultProjectId
+      );
       if (session) {
         cliSessionStatus = {
+          source: "project-session",
           isValid: sessionService.isValidSession(session),
           endpoint: session.endpoint,
           projectId: session.projectId,
           email: session.email || null,
+          hasApiKey: false,
+          hasCookie: !!session.cookie,
         };
       }
     } catch (error) {
@@ -184,14 +238,43 @@ async function getAuthStatus(
     }
   }
 
-  // Determine the effective auth method
-  let authMethod: string;
+  // 2) prefs.current fallback — what the AuthResolver will actually use when
+  //    no endpoint/projectId are passed via flags.
+  if (!cliSessionStatus) {
+    try {
+      const current = await sessionService.findCurrentSession();
+      if (current) {
+        cliSessionStatus = {
+          source: "prefs.current",
+          // Without live probing we treat the resolved entry as usable.
+          isValid: true,
+          endpoint: current.endpoint,
+          projectId: current.projectId,
+          email: current.email || null,
+          hasApiKey: !!current.apiKey,
+          hasCookie: !!current.sessionCookie,
+        };
+      }
+    } catch (error) {
+      // prefs.current discovery is optional
+    }
+  }
+
+  // Effective endpoint/projectId the resolver would use right now.
+  const effectiveEndpoint = serverDefaultEndpoint ?? cliSessionStatus?.endpoint ?? null;
+  const effectiveProjectId = serverDefaultProjectId ?? cliSessionStatus?.projectId ?? null;
+
+  // Effective auth method.
+  let authMethod: "apikey" | "session" | "none";
   let authenticated: boolean;
 
   if (hasApiKey) {
     authMethod = "apikey";
     authenticated = true;
-  } else if (cliSessionStatus?.isValid) {
+  } else if (cliSessionStatus?.hasApiKey) {
+    authMethod = "apikey";
+    authenticated = true;
+  } else if (cliSessionStatus?.isValid && cliSessionStatus.hasCookie) {
     authMethod = "session";
     authenticated = true;
   } else {
@@ -202,8 +285,8 @@ async function getAuthStatus(
   return {
     authenticated,
     authMethod,
-    endpoint,
-    projectId,
+    endpoint: effectiveEndpoint,
+    projectId: effectiveProjectId,
     serverDefaults: {
       hasEndpoint: !!serverDefaults.endpoint,
       hasProjectId: !!serverDefaults.projectId,
