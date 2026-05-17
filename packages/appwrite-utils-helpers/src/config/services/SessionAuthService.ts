@@ -262,6 +262,108 @@ export class SessionAuthService {
   }
 
   /**
+   * Look up the prefs.json entry for a specific projectId, regardless of auth
+   * method (cookie OR key) and regardless of endpoint match. Use this when
+   * the projectId is authoritative and you want whatever auth/endpoint is
+   * stored for it.
+   *
+   * Differs from {@link findSession} (which is cookie-only AND requires an
+   * endpoint match) and {@link findAuthForEndpoint} (which scans by endpoint).
+   */
+  public async findEntryForProject(
+    projectId: string
+  ): Promise<{
+    projectId: string;
+    endpoint: string;
+    apiKey?: string;
+    sessionCookie?: string;
+    email?: string;
+  } | null> {
+    const prefs = await this.loadSessionPrefs();
+    if (!prefs) return null;
+
+    const rawEntry = (prefs as Record<string, unknown>)[projectId];
+    if (!rawEntry || typeof rawEntry !== "object") return null;
+
+    const entry = rawEntry as {
+      endpoint?: unknown;
+      email?: unknown;
+      cookie?: unknown;
+      key?: unknown;
+    };
+
+    if (typeof entry.endpoint !== "string" || !entry.endpoint) return null;
+
+    const apiKey = typeof entry.key === "string" && entry.key ? entry.key : undefined;
+    const sessionCookie =
+      typeof entry.cookie === "string" && entry.cookie ? entry.cookie : undefined;
+
+    if (!apiKey && !sessionCookie) return null;
+
+    return {
+      projectId,
+      endpoint: entry.endpoint,
+      apiKey,
+      sessionCookie,
+      email: typeof entry.email === "string" ? entry.email : undefined,
+    };
+  }
+
+  /**
+   * Find an authentication entry by endpoint match only — covers the case of
+   * "one cookie/key shared across N projects on the same endpoint" (e.g. a
+   * single console login to appwrite.example.com that has access to a dozen
+   * projects). Returns the first prefs entry whose `endpoint` matches and has
+   * a usable cookie or key.
+   *
+   * Use this when you know the target project's endpoint and projectId, but
+   * `prefs[projectId]` itself isn't populated (because the login was performed
+   * under a sibling project's ID).
+   */
+  public async findAuthForEndpoint(
+    endpoint: string
+  ): Promise<{
+    endpoint: string;
+    apiKey?: string;
+    sessionCookie?: string;
+    sourceProjectId: string;
+  } | null> {
+    const prefs = await this.loadSessionPrefs();
+    if (!prefs) return null;
+
+    const normalizedTarget = this.normalizeEndpoint(endpoint);
+
+    for (const [pid, raw] of Object.entries(prefs)) {
+      if (pid === "current") continue;
+      if (!raw || typeof raw !== "object") continue;
+
+      const entry = raw as {
+        endpoint?: unknown;
+        cookie?: unknown;
+        key?: unknown;
+      };
+
+      if (typeof entry.endpoint !== "string" || !entry.endpoint) continue;
+      if (this.normalizeEndpoint(entry.endpoint) !== normalizedTarget) continue;
+
+      const apiKey = typeof entry.key === "string" && entry.key ? entry.key : undefined;
+      const sessionCookie =
+        typeof entry.cookie === "string" && entry.cookie ? entry.cookie : undefined;
+
+      if (!apiKey && !sessionCookie) continue;
+
+      return {
+        endpoint: entry.endpoint,
+        apiKey,
+        sessionCookie,
+        sourceProjectId: pid,
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Find session authentication info for a specific endpoint and project
    *
    * This method searches the session preferences for a matching endpoint and project ID.

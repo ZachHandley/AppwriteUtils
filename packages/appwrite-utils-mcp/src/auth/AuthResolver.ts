@@ -7,6 +7,10 @@ import {
   SessionAuthService,
   type SessionAuthInfo,
 } from "appwrite-utils-helpers";
+import {
+  resolveProjectConfig,
+  type ResolvedProjectConfig,
+} from "./ProjectConfigResolver.js";
 
 /**
  * Authentication credentials with source information
@@ -34,7 +38,15 @@ export interface ToolAuthParams {
  */
 export interface AuthResolutionResult {
   credentials: AuthCredentials;
-  source: "tool-params" | "server-defaults" | "cli-current" | "cli-session";
+  source:
+    | "tool-params"
+    | "server-defaults"
+    | "session-override"
+    | "cwd-config"
+    | "cwd-config+prefs-endpoint"
+    | "cwd-config+prefs-current"
+    | "cli-current"
+    | "cli-session";
 }
 
 /**
@@ -44,6 +56,24 @@ export interface ServerDefaults {
   endpoint?: string;
   projectId?: string;
   apiKey?: string;
+  /**
+   * Directory the resolver should treat as the project root when looking for
+   * `appwrite.json` or `.appwrite/config.yaml`. Defaults to `process.cwd()` at
+   * resolve time.
+   */
+  configDir?: string;
+}
+
+/**
+ * In-memory project override set via the `select_appwrite_project` meta tool.
+ * Lives only for the lifetime of this AuthResolver instance — never persisted,
+ * never leaks across MCP server instances.
+ */
+export interface ProjectOverride {
+  projectId: string;
+  endpoint?: string;
+  apiKey?: string;
+  sessionCookie?: string;
 }
 
 /**
@@ -84,6 +114,22 @@ export class AuthResolver {
   private readonly sessionService: SessionAuthService;
 
   /**
+   * In-memory project override (set via select_appwrite_project meta tool).
+   * Scoped to this resolver instance only — siblings can't see it.
+   */
+  private sessionOverride: ProjectOverride | null = null;
+
+  /**
+   * Cached CWD project config — read once lazily on first resolve(), kept for
+   * the resolver lifetime. The mtime-aware caching the user wants for prefs
+   * lives in SessionAuthService; for project config we accept "read once" since
+   * the working dir doesn't change during a server lifetime.
+   */
+  private projectConfigCache:
+    | { config: ResolvedProjectConfig | null; loaded: true }
+    | { loaded: false } = { loaded: false };
+
+  /**
    * Creates a new AuthResolver with server-level defaults
    *
    * @param serverDefaults - Default authentication configuration from FlagParser
@@ -91,6 +137,40 @@ export class AuthResolver {
   constructor(serverDefaults: ServerDefaults = {}) {
     this.serverDefaults = serverDefaults;
     this.sessionService = new SessionAuthService();
+  }
+
+  /**
+   * Set the in-memory project override. Used by the select_appwrite_project
+   * meta tool to pin the active project for this server instance.
+   */
+  public setOverride(override: ProjectOverride): void {
+    this.sessionOverride = { ...override };
+  }
+
+  /**
+   * Clear the in-memory project override.
+   */
+  public clearOverride(): void {
+    this.sessionOverride = null;
+  }
+
+  /**
+   * Get the current in-memory project override (if any).
+   */
+  public getOverride(): Readonly<ProjectOverride> | null {
+    return this.sessionOverride ? { ...this.sessionOverride } : null;
+  }
+
+  /**
+   * Resolve the project config bound to this MCP's working directory. Cached
+   * for the resolver lifetime. Returns `null` when no config exists in CWD.
+   */
+  public async getProjectConfig(): Promise<ResolvedProjectConfig | null> {
+    if (this.projectConfigCache.loaded) return this.projectConfigCache.config;
+    const workingDir = this.serverDefaults.configDir ?? process.cwd();
+    const config = await resolveProjectConfig(workingDir);
+    this.projectConfigCache = { config, loaded: true };
+    return config;
   }
 
   /**
@@ -127,16 +207,132 @@ export class AuthResolver {
   async resolve(
     toolParams?: ToolAuthParams
   ): Promise<AuthResolutionResult> {
-    // Merge parameters with priority: tool > server > undefined
+    // Tier 1+2: tool params win, then server flags, then nothing.
     let endpoint = toolParams?.endpoint ?? this.serverDefaults.endpoint;
     let projectId = toolParams?.projectId ?? this.serverDefaults.projectId;
     let apiKey = toolParams?.apiKey ?? this.serverDefaults.apiKey;
     let sessionCookie = toolParams?.sessionCookie;
 
-    // Tier 2.5 fill: if endpoint/projectId/creds are missing, consult
-    // ~/.appwrite/prefs.json's `current` pointer (whatever project the user
-    // most recently selected via `appwrite use <project>`). Fills only empty
-    // slots — explicit tool params and server flags always win.
+    // Source tracking — set whenever a tier contributes the auth credential
+    // that this resolution will actually use. The first tier to provide both
+    // (endpoint+projectId) and (apiKey|sessionCookie) wins the source label.
+    let contributingSource: AuthResolutionResult["source"] | null = null;
+
+    // Tier 3: in-memory session override (select_appwrite_project meta tool).
+    // Scoped to this server instance only — no leakage across MCPs.
+    if (
+      this.sessionOverride &&
+      (!endpoint || !projectId || (!apiKey && !sessionCookie))
+    ) {
+      const ov = this.sessionOverride;
+      if (!projectId) projectId = ov.projectId;
+      if (!endpoint && ov.endpoint) endpoint = ov.endpoint;
+      if (!apiKey && !sessionCookie) {
+        if (ov.apiKey) {
+          apiKey = ov.apiKey;
+          contributingSource = "session-override";
+        } else if (ov.sessionCookie) {
+          sessionCookie = ov.sessionCookie;
+          contributingSource = "session-override";
+        }
+      } else if (
+        !contributingSource &&
+        (projectId === ov.projectId || endpoint === ov.endpoint)
+      ) {
+        // Override contributed identity but not creds — still mark as the source.
+        contributingSource = "session-override";
+      }
+    }
+
+    // Tier 4: project config in CWD/--configDir. This is what makes each MCP
+    // instance bind to ITS dir's project — isolating siblings.
+    if (!projectId || !endpoint || (!apiKey && !sessionCookie)) {
+      const project = await this.getProjectConfig();
+      if (project) {
+        // 4a: YAML config carries full creds inline.
+        if (project.format === "yaml") {
+          if (!projectId) projectId = project.projectId;
+          if (!endpoint && project.endpoint) endpoint = project.endpoint;
+          if (!apiKey && !sessionCookie) {
+            if (project.apiKey) {
+              apiKey = project.apiKey;
+              if (!contributingSource) contributingSource = "cwd-config";
+            } else if (project.sessionCookie) {
+              sessionCookie = project.sessionCookie;
+              if (!contributingSource) contributingSource = "cwd-config";
+            }
+          }
+        }
+
+        // 4b: appwrite.json (CLI format) — has only projectId. Lookup auth
+        // against prefs.json via project-specific entry, then endpoint scan,
+        // then prefs.current's endpoint as a last-ditch (apply project's
+        // projectId on top of current's auth + endpoint).
+        if (project.format === "appwrite-json") {
+          if (!projectId) projectId = project.projectId;
+
+          if (!apiKey && !sessionCookie) {
+            // First try a project-specific prefs entry (key === projectId,
+            // either cookie- or API-key-based — findEntryForProject handles both).
+            try {
+              const direct = await this.sessionService.findEntryForProject(
+                project.projectId
+              );
+              if (direct) {
+                if (!endpoint) endpoint = direct.endpoint;
+                if (direct.apiKey) apiKey = direct.apiKey;
+                else if (direct.sessionCookie) sessionCookie = direct.sessionCookie;
+                if (!contributingSource && (apiKey || sessionCookie)) {
+                  contributingSource = "cwd-config";
+                }
+              }
+            } catch {
+              /* non-fatal */
+            }
+
+            // If we know the endpoint by now, scan prefs for an entry matching
+            // that endpoint with usable auth (the "12 projects on one cookie"
+            // case for the user's blackleafdigital console session).
+            if (!apiKey && !sessionCookie && endpoint) {
+              try {
+                const match = await this.sessionService.findAuthForEndpoint(endpoint);
+                if (match) {
+                  if (match.apiKey) apiKey = match.apiKey;
+                  else if (match.sessionCookie) sessionCookie = match.sessionCookie;
+                  if (!contributingSource && (apiKey || sessionCookie)) {
+                    contributingSource = "cwd-config+prefs-endpoint";
+                  }
+                }
+              } catch {
+                /* non-fatal */
+              }
+            }
+
+            // Final fallback: borrow prefs.current's endpoint + auth and pair
+            // them with the CWD-resolved projectId.
+            if (!apiKey && !sessionCookie) {
+              try {
+                const current = await this.sessionService.findCurrentSession();
+                if (current) {
+                  if (!endpoint) endpoint = current.endpoint;
+                  if (current.apiKey) apiKey = current.apiKey;
+                  else if (current.sessionCookie)
+                    sessionCookie = current.sessionCookie;
+                  if (!contributingSource && (apiKey || sessionCookie)) {
+                    contributingSource = "cwd-config+prefs-current";
+                  }
+                }
+              } catch {
+                /* non-fatal */
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Tier 5 (legacy): bare prefs.current fallback when CWD has no config —
+    // the bare-launch case (`bunx appwrite-utils-mcp` from a non-project dir).
     let currentContributedCreds = false;
     if (!endpoint || !projectId || (!apiKey && !sessionCookie)) {
       try {
@@ -213,7 +409,24 @@ export class AuthResolver {
       };
     }
 
-    // Tier 2.5: Credentials resolved from ~/.appwrite/prefs.json `current`
+    // Tier 3/4: credentials came from session-override or CWD project config
+    // (with optional prefs.json endpoint-match or prefs.current fallback).
+    if (contributingSource) {
+      if (apiKey) {
+        return {
+          credentials: { endpoint, projectId, apiKey, authMethod: "apikey" },
+          source: contributingSource,
+        };
+      }
+      if (sessionCookie) {
+        return {
+          credentials: { endpoint, projectId, sessionCookie, authMethod: "session" },
+          source: contributingSource,
+        };
+      }
+    }
+
+    // Tier 5 (legacy): Credentials resolved from bare ~/.appwrite/prefs.json `current`
     if (currentContributedCreds) {
       if (apiKey) {
         return {
@@ -229,7 +442,7 @@ export class AuthResolver {
       }
     }
 
-    // Tier 3: CLI session discovery
+    // Tier 6: project-specific CLI session discovery
     try {
       const session = await this.sessionService.findSession(
         endpoint,

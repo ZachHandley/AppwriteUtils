@@ -4,6 +4,14 @@
  * @packageDocumentation
  */
 
+// Stdout is the JSON-RPC channel in an MCP context; any stray console.log
+// from dependency code (notably appwrite-utils-helpers' MessageFormatter,
+// which prints ✅/⚠️/ℹ️ status lines) corrupts the protocol. Redirect every
+// non-error console writer to stderr before any other module loads.
+console.log = console.error.bind(console);
+console.info = console.error.bind(console);
+console.warn = console.error.bind(console);
+
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags } from '../config/FlagParser.js';
 

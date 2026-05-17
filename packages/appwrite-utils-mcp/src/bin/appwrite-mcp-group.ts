@@ -10,6 +10,11 @@
  * @packageDocumentation
  */
 
+// Stdout is the JSON-RPC channel — see appwrite-mcp.ts for context.
+console.log = console.error.bind(console);
+console.info = console.error.bind(console);
+console.warn = console.error.bind(console);
+
 import { basename } from 'node:path';
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags, type ServerFlags } from '../config/FlagParser.js';

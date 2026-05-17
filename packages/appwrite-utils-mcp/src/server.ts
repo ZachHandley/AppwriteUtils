@@ -79,6 +79,7 @@ export class AppwriteMCPServer {
       endpoint: flags.endpoint,
       projectId: flags.projectId,
       apiKey: flags.apiKey,
+      configDir: flags.configDir,
     });
 
     this.clientRegistry = new ClientRegistry();

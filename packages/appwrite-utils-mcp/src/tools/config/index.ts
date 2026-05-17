@@ -31,76 +31,86 @@ async function getConfig(
   input: unknown,
   context: ToolContext
 ): Promise<unknown> {
-  // Validate input
   GetConfigInputSchema.parse(input);
   const serverDefaults = context.authResolver.getServerDefaults();
   const sessionService = context.authResolver.getSessionService();
 
-  // 1) Project-specific session lookup (only when both endpoint and projectId
-  //    are known from server flags or env).
-  let cliSession:
-    | {
-        source: "project-session" | "prefs.current";
-        endpoint: string;
-        projectId: string;
-        hasApiKey: boolean;
-        hasCookie: boolean;
+  // CWD-resolved project config (the per-MCP-instance binding).
+  const cwdProjectRaw = await context.authResolver.getProjectConfig();
+  const cwdProject = cwdProjectRaw
+    ? {
+        source: cwdProjectRaw.source,
+        format: cwdProjectRaw.format,
+        projectId: cwdProjectRaw.projectId,
+        endpoint: cwdProjectRaw.endpoint || null,
+        hasInlineApiKey: !!cwdProjectRaw.apiKey,
+        hasInlineCookie: !!cwdProjectRaw.sessionCookie,
       }
-    | null = null;
+    : null;
 
+  // In-memory override set via select_appwrite_project.
+  const overrideRaw = context.authResolver.getOverride();
+  const sessionOverride = overrideRaw
+    ? {
+        projectId: overrideRaw.projectId,
+        endpoint: overrideRaw.endpoint || null,
+        hasApiKey: !!overrideRaw.apiKey,
+        hasCookie: !!overrideRaw.sessionCookie,
+      }
+    : null;
+
+  // prefs.current pointer — what the user most recently `appwrite use`'d.
+  let prefsCurrent: {
+    endpoint: string;
+    projectId: string;
+    hasApiKey: boolean;
+    hasCookie: boolean;
+  } | null = null;
   try {
-    if (serverDefaults.endpoint && serverDefaults.projectId) {
-      const session = await sessionService.findSession(
-        serverDefaults.endpoint,
-        serverDefaults.projectId
-      );
-      if (session && sessionService.isValidSession(session)) {
-        cliSession = {
-          source: "project-session",
-          endpoint: session.endpoint,
-          projectId: session.projectId,
-          hasApiKey: false,
-          hasCookie: !!session.cookie,
-        };
-      }
+    const current = await sessionService.findCurrentSession();
+    if (current) {
+      prefsCurrent = {
+        endpoint: current.endpoint,
+        projectId: current.projectId,
+        hasApiKey: !!current.apiKey,
+        hasCookie: !!current.sessionCookie,
+      };
     }
-  } catch (error) {
-    // CLI session discovery is optional
+  } catch {
+    /* optional */
   }
 
-  // 2) prefs.current fallback — what the AuthResolver itself will use when no
-  //    endpoint/projectId were passed (bare-launch case).
-  if (!cliSession) {
-    try {
-      const current = await sessionService.findCurrentSession();
-      if (current) {
-        cliSession = {
-          source: "prefs.current",
-          endpoint: current.endpoint,
-          projectId: current.projectId,
-          hasApiKey: !!current.apiKey,
-          hasCookie: !!current.sessionCookie,
-        };
-      }
-    } catch (error) {
-      // prefs.current discovery is optional
-    }
+  // Ask the resolver what it would actually pick right now.
+  let resolved: {
+    endpoint: string;
+    projectId: string;
+    source: string;
+    authMethod: "apikey" | "session";
+  } | { error: string };
+  try {
+    const result = await context.authResolver.resolve();
+    resolved = {
+      endpoint: result.credentials.endpoint,
+      projectId: result.credentials.projectId,
+      source: result.source,
+      authMethod:
+        result.credentials.authMethod === "session" ? "session" : "apikey",
+    };
+  } catch (err) {
+    resolved = { error: err instanceof Error ? err.message : String(err) };
   }
-
-  // Effective auth method the resolver would pick right now.
-  let authMethod: "apikey" | "session" | "none" = "none";
-  if (serverDefaults.apiKey) authMethod = "apikey";
-  else if (cliSession?.hasApiKey) authMethod = "apikey";
-  else if (cliSession?.hasCookie) authMethod = "session";
 
   return {
     serverDefaults: {
       endpoint: serverDefaults.endpoint || null,
       projectId: serverDefaults.projectId || null,
+      configDir: serverDefaults.configDir || null,
       hasApiKey: !!serverDefaults.apiKey,
     },
-    cliSession,
-    authMethod,
+    cwdProject,
+    sessionOverride,
+    prefsCurrent,
+    resolved,
   };
 }
 
@@ -192,107 +202,66 @@ async function getAuthStatus(
   input: unknown,
   context: ToolContext
 ): Promise<unknown> {
-  // Validate input
   GetAuthStatusInputSchema.parse(input);
   const serverDefaults = context.authResolver.getServerDefaults();
-  const sessionService = context.authResolver.getSessionService();
 
-  const serverDefaultEndpoint = serverDefaults.endpoint || null;
-  const serverDefaultProjectId = serverDefaults.projectId || null;
-  const hasApiKey = !!serverDefaults.apiKey;
-
-  // 1) Project-specific session lookup when server defaults have both
-  //    endpoint and projectId.
-  let cliSessionStatus:
-    | {
-        source: "project-session" | "prefs.current";
-        isValid: boolean;
-        endpoint: string;
-        projectId: string;
-        email: string | null;
-        hasApiKey: boolean;
-        hasCookie: boolean;
+  // CWD project + override state for visibility.
+  const cwdProjectRaw = await context.authResolver.getProjectConfig();
+  const cwdProject = cwdProjectRaw
+    ? {
+        source: cwdProjectRaw.source,
+        format: cwdProjectRaw.format,
+        projectId: cwdProjectRaw.projectId,
+        endpoint: cwdProjectRaw.endpoint || null,
+        hasInlineApiKey: !!cwdProjectRaw.apiKey,
+        hasInlineCookie: !!cwdProjectRaw.sessionCookie,
       }
-    | null = null;
+    : null;
 
-  if (serverDefaultEndpoint && serverDefaultProjectId) {
-    try {
-      const session = await sessionService.findSession(
-        serverDefaultEndpoint,
-        serverDefaultProjectId
-      );
-      if (session) {
-        cliSessionStatus = {
-          source: "project-session",
-          isValid: sessionService.isValidSession(session),
-          endpoint: session.endpoint,
-          projectId: session.projectId,
-          email: session.email || null,
-          hasApiKey: false,
-          hasCookie: !!session.cookie,
-        };
+  const overrideRaw = context.authResolver.getOverride();
+  const sessionOverride = overrideRaw
+    ? {
+        projectId: overrideRaw.projectId,
+        endpoint: overrideRaw.endpoint || null,
+        hasApiKey: !!overrideRaw.apiKey,
+        hasCookie: !!overrideRaw.sessionCookie,
       }
-    } catch (error) {
-      // CLI session discovery is optional
-      cliSessionStatus = null;
-    }
-  }
+    : null;
 
-  // 2) prefs.current fallback — what the AuthResolver will actually use when
-  //    no endpoint/projectId are passed via flags.
-  if (!cliSessionStatus) {
-    try {
-      const current = await sessionService.findCurrentSession();
-      if (current) {
-        cliSessionStatus = {
-          source: "prefs.current",
-          // Without live probing we treat the resolved entry as usable.
-          isValid: true,
-          endpoint: current.endpoint,
-          projectId: current.projectId,
-          email: current.email || null,
-          hasApiKey: !!current.apiKey,
-          hasCookie: !!current.sessionCookie,
-        };
-      }
-    } catch (error) {
-      // prefs.current discovery is optional
-    }
-  }
+  // Truth: what would the resolver actually pick right now?
+  let authenticated = false;
+  let authMethod: "apikey" | "session" | "none" = "none";
+  let endpoint: string | null = null;
+  let projectId: string | null = null;
+  let source: string | null = null;
+  let resolveError: string | null = null;
 
-  // Effective endpoint/projectId the resolver would use right now.
-  const effectiveEndpoint = serverDefaultEndpoint ?? cliSessionStatus?.endpoint ?? null;
-  const effectiveProjectId = serverDefaultProjectId ?? cliSessionStatus?.projectId ?? null;
-
-  // Effective auth method.
-  let authMethod: "apikey" | "session" | "none";
-  let authenticated: boolean;
-
-  if (hasApiKey) {
-    authMethod = "apikey";
+  try {
+    const result = await context.authResolver.resolve();
     authenticated = true;
-  } else if (cliSessionStatus?.hasApiKey) {
-    authMethod = "apikey";
-    authenticated = true;
-  } else if (cliSessionStatus?.isValid && cliSessionStatus.hasCookie) {
-    authMethod = "session";
-    authenticated = true;
-  } else {
-    authMethod = "none";
-    authenticated = false;
+    authMethod = result.credentials.authMethod === "session" ? "session" : "apikey";
+    endpoint = result.credentials.endpoint;
+    projectId = result.credentials.projectId;
+    source = result.source;
+  } catch (err) {
+    resolveError = err instanceof Error ? err.message : String(err);
   }
 
   return {
     authenticated,
     authMethod,
-    endpoint: effectiveEndpoint,
-    projectId: effectiveProjectId,
+    endpoint,
+    projectId,
+    source,
+    resolveError,
     serverDefaults: {
       hasEndpoint: !!serverDefaults.endpoint,
       hasProjectId: !!serverDefaults.projectId,
-      hasApiKey,
+      hasApiKey: !!serverDefaults.apiKey,
+      configDir: serverDefaults.configDir || null,
     },
-    cliSession: cliSessionStatus,
+    cwdProject,
+    sessionOverride,
   };
 }
 
