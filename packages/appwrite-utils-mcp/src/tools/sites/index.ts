@@ -7,6 +7,10 @@ import { z } from 'zod';
 import { Sites } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { SiteManager } from 'appwrite-utils-helpers';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // INPUT SCHEMAS
@@ -16,7 +20,10 @@ import { SiteManager } from 'appwrite-utils-helpers';
  * Schema for list_sites - Optional queries/search
  */
 const listSitesSchema = z.object({
-  queries: z.array(z.string()).optional().describe('Optional query filters'),
+  queries: z
+    .array(z.string())
+    .optional()
+    .describe('Optional Appwrite Query strings.' + QUERY_HELP_SUFFIX),
   search: z.string().optional().describe('Optional search string'),
 }).optional();
 
@@ -113,6 +120,8 @@ async function handleListSites(
   input: unknown,
   context: ToolContext
 ): Promise<{ sites: Array<{ id: string; name: string; framework: string; status: string }> }> {
+  const validated = listSitesSchema.parse(input) ?? {};
+
   // Resolve authentication credentials
   const authResult = await context.authResolver.resolve();
 
@@ -126,7 +135,10 @@ async function handleListSites(
   });
 
   const siteManager = new SiteManager(client);
-  const result = await siteManager.listSites();
+  const result = await siteManager.listSites(
+    normalizeQueries(validated.queries),
+    validated.search
+  );
 
   return {
     sites: result.sites.map((site: any) => ({

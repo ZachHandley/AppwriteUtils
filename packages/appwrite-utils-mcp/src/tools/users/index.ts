@@ -7,6 +7,10 @@ import { z } from 'zod';
 import type { Models } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { UsersManager } from 'appwrite-utils-helpers';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // INPUT SCHEMAS
@@ -17,7 +21,8 @@ const listUsersSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings (see Query class). Filter on name, email, phone, status, passwordUpdate, registration, emailVerification, phoneVerification, labels, impersonator.'
+      'Array of Appwrite Query strings. Filter on name, email, phone, status, passwordUpdate, registration, emailVerification, phoneVerification, labels, impersonator.' +
+        QUERY_HELP_SUFFIX
     ),
   search: z.string().max(256).optional().describe('Free-text search string (max 256 chars).'),
 });
@@ -83,7 +88,8 @@ const listUserMembershipsSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings. Filter on userId, teamId, invited, joined, confirm, roles.'
+      'Array of Appwrite Query strings. Filter on userId, teamId, invited, joined, confirm, roles.' +
+        QUERY_HELP_SUFFIX
     ),
 });
 
@@ -92,7 +98,8 @@ const listIdentitiesSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings. Filter on userId, provider, providerUid, providerEmail, providerAccessTokenExpiry.'
+      'Array of Appwrite Query strings. Filter on userId, provider, providerUid, providerEmail, providerAccessTokenExpiry.' +
+        QUERY_HELP_SUFFIX
     ),
   search: z.string().max(256).optional().describe('Free-text search string (max 256 chars).'),
 });
@@ -173,7 +180,7 @@ async function handleListUsers(
 ): Promise<{ total: number; users: SlimUserRow[] }> {
   const validated = listUsersSchema.parse(input);
   const manager = await buildManager(context);
-  const result = await manager.listUsers(validated.queries, validated.search);
+  const result = await manager.listUsers(normalizeQueries(validated.queries), validated.search);
   return {
     total: result.total,
     users: result.users.map(toSlimUserRow),
@@ -326,7 +333,10 @@ async function handleListUserMemberships(
 }> {
   const validated = listUserMembershipsSchema.parse(input);
   const manager = await buildManager(context);
-  const result = await manager.listMemberships(validated.userId, validated.queries);
+  const result = await manager.listMemberships(
+    validated.userId,
+    normalizeQueries(validated.queries)
+  );
   return {
     total: result.total,
     memberships: result.memberships.map((m) => ({
@@ -362,7 +372,10 @@ async function handleListIdentities(
 }> {
   const validated = listIdentitiesSchema.parse(input);
   const manager = await buildManager(context);
-  const result = await manager.listIdentities(validated.queries, validated.search);
+  const result = await manager.listIdentities(
+    normalizeQueries(validated.queries),
+    validated.search
+  );
   return {
     total: result.total,
     identities: result.identities.map((i) => ({

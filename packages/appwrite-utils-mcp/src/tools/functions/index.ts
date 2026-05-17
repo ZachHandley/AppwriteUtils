@@ -12,6 +12,10 @@ import { z } from 'zod';
 import { Functions, ExecutionMethod } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { FunctionManager } from 'appwrite-utils-helpers';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // REDACTION HELPER (function-scoped variables)
@@ -88,7 +92,7 @@ const deployFunctionViaCliSchema = z.object({
  */
 const listExecutionsSchema = z.object({
   functionId: z.string().min(1, 'Function ID is required'),
-  queries: z.array(z.string()).optional().describe('Array of Appwrite Query strings (see Query class). Filter on trigger, status, responseStatusCode, duration, requestMethod, requestPath, deploymentId.'),
+  queries: z.array(z.string()).optional().describe('Array of Appwrite Query strings. Filter on trigger, status, responseStatusCode, duration, requestMethod, requestPath, deploymentId.' + QUERY_HELP_SUFFIX),
   search: z.string().max(256).optional().describe('Free-text search string (max 256 chars). Encoded as a Query.search filter against requestPath.'),
 });
 
@@ -126,7 +130,7 @@ const deleteExecutionSchema = z.object({
  */
 const listDeploymentsSchema = z.object({
   functionId: z.string().min(1, 'Function ID is required'),
-  queries: z.array(z.string()).optional().describe('Array of Appwrite Query strings (see Query class). Filter on attributes such as size, buildDuration, status, activate, type, entrypoint, commands.'),
+  queries: z.array(z.string()).optional().describe('Array of Appwrite Query strings. Filter on attributes such as size, buildDuration, status, activate, type, entrypoint, commands.' + QUERY_HELP_SUFFIX),
   search: z.string().max(256).optional().describe('Free-text search string (max 256 chars) passed to the Functions service.'),
 });
 
@@ -164,7 +168,7 @@ const listFunctionVariablesSchema = z.object({
   queries: z
     .array(z.string())
     .optional()
-    .describe('Array of Appwrite Query strings (see Query class).'),
+    .describe('Array of Appwrite Query strings.' + QUERY_HELP_SUFFIX),
 });
 
 /**
@@ -516,7 +520,7 @@ async function handleListExecutions(
   const functionManager = new FunctionManager(client);
   const result = await functionManager.listExecutions(
     validated.functionId,
-    validated.queries,
+    normalizeQueries(validated.queries),
     validated.search
   );
 
@@ -710,7 +714,7 @@ async function handleListDeployments(
   const functionManager = new FunctionManager(client);
   const result = await functionManager.listDeployments(
     validated.functionId,
-    validated.queries,
+    normalizeQueries(validated.queries),
     validated.search
   );
 
@@ -851,7 +855,7 @@ async function handleListFunctionVariables(
   const functionManager = new FunctionManager(client);
   const result = await functionManager.listVariables(
     validated.functionId,
-    validated.queries
+    normalizeQueries(validated.queries)
   );
 
   return {

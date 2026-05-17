@@ -7,6 +7,10 @@ import { z } from 'zod';
 import type { Models } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { TeamsManager } from 'appwrite-utils-helpers';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // INPUT SCHEMAS
@@ -16,7 +20,7 @@ const listTeamsSchema = z.object({
   queries: z
     .array(z.string())
     .optional()
-    .describe('Array of Appwrite Query strings. Filter on: name, total, billingPlan.'),
+    .describe('Array of Appwrite Query strings. Filter on: name, total, billingPlan.' + QUERY_HELP_SUFFIX),
   search: z
     .string()
     .max(256)
@@ -76,7 +80,8 @@ const listTeamMembershipsSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings. Filter on: userId, teamId, invited, joined, confirm, roles.'
+      'Array of Appwrite Query strings. Filter on: userId, teamId, invited, joined, confirm, roles.' +
+        QUERY_HELP_SUFFIX
     ),
   search: z
     .string()
@@ -183,7 +188,7 @@ async function handleListTeams(
 }> {
   const validated = listTeamsSchema.parse(input ?? {});
   const teams = await getTeamsManager(context);
-  const result = await teams.listTeams(validated.queries, validated.search);
+  const result = await teams.listTeams(normalizeQueries(validated.queries), validated.search);
 
   return {
     total: result.total,
@@ -328,7 +333,7 @@ async function handleListTeamMemberships(
   const teams = await getTeamsManager(context);
   const result = await teams.listMemberships(
     validated.teamId,
-    validated.queries,
+    normalizeQueries(validated.queries),
     validated.search
   );
 

@@ -15,6 +15,10 @@
 import { z } from 'zod';
 import { ProjectsManager } from 'appwrite-utils-helpers';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // INPUT SCHEMAS
@@ -33,7 +37,7 @@ const listProjectVariablesSchema = z.object({
   queries: z
     .array(z.string())
     .optional()
-    .describe('Array of Appwrite Query strings (see Query class).'),
+    .describe('Array of Appwrite Query strings.' + QUERY_HELP_SUFFIX),
 });
 
 /**
@@ -185,7 +189,7 @@ async function handleListProjectVariables(
   );
 
   const manager = new ProjectsManager(client);
-  const result = await manager.listVariables(projectId, validated.queries);
+  const result = await manager.listVariables(projectId, normalizeQueries(validated.queries));
 
   return {
     total: result.total,

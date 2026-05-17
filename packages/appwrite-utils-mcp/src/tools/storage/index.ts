@@ -10,6 +10,10 @@ import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGr
 // (helpers/src/index.ts is orchestrator-owned). Once `export * from './storage';`
 // lands there, this import can become `from 'appwrite-utils-helpers'`.
 import { StorageManager } from 'appwrite-utils-helpers/dist/storage/storageManager.js';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_HELP_SUFFIX =
+  ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // INPUT SCHEMAS
@@ -36,7 +40,8 @@ const listBucketsSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings. Filter on: enabled, name, fileSecurity, maximumFileSize, encryption, antivirus, transformations.'
+      'Array of Appwrite Query strings. Filter on: enabled, name, fileSecurity, maximumFileSize, encryption, antivirus, transformations.' +
+        QUERY_HELP_SUFFIX
     ),
   search: z
     .string()
@@ -94,7 +99,8 @@ const listFilesSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Array of Appwrite Query strings. Filter on: name, signature, mimeType, sizeOriginal, chunksTotal, chunksUploaded.'
+      'Array of Appwrite Query strings. Filter on: name, signature, mimeType, sizeOriginal, chunksTotal, chunksUploaded.' +
+        QUERY_HELP_SUFFIX
     ),
   search: z
     .string()
@@ -258,7 +264,10 @@ async function handleListBuckets(
   });
 
   const storageManager = new StorageManager(client);
-  const result = await storageManager.listBuckets(validated.queries, validated.search);
+  const result = await storageManager.listBuckets(
+    normalizeQueries(validated.queries),
+    validated.search
+  );
 
   return {
     total: result.total,
@@ -387,7 +396,7 @@ async function handleListFiles(
   const storageManager = new StorageManager(client);
   const result = await storageManager.listFiles(
     validated.bucketId,
-    validated.queries,
+    normalizeQueries(validated.queries),
     validated.search
   );
 

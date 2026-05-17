@@ -373,9 +373,17 @@ export class SiteManager {
     );
   }
 
-  public async listSites(): Promise<Models.SiteList> {
+  public async listSites(
+    queries?: string[],
+    search?: string
+  ): Promise<Models.SiteList> {
     return await queryLimit(() =>
-      tryAwaitWithRetry(async () => await this.sites.list())
+      tryAwaitWithRetry(async () =>
+        await this.sites.list({
+          ...(queries && queries.length > 0 ? { queries } : {}),
+          ...(search ? { search } : {}),
+        })
+      )
     );
   }
 

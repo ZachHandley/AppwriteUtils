@@ -61,6 +61,8 @@ const SelectAppwriteProjectInputSchema = z.object({
 
 const ClearAppwriteProjectInputSchema = z.object({});
 
+const QueryHelpInputSchema = z.object({});
+
 function requireRegistry(context: ToolContext) {
   if (!context.toolRegistry) {
     throw new Error("Meta tools require a ToolRegistry in the context — this server was not started in meta-enabled mode.");
@@ -257,6 +259,109 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
   };
 }
 
+async function queryHelp(input: unknown, _context: ToolContext): Promise<unknown> {
+  QueryHelpInputSchema.parse(input);
+  return {
+    acceptedForms: [
+      {
+        form: "SDK syntax",
+        example: 'Query.limit(10)',
+        notes: "Mirrors the node-appwrite static helpers. The leading 'Query.' is optional, so 'limit(10)' also works.",
+      },
+      {
+        form: "JSON wire format",
+        example: '{"method":"limit","values":[10]}',
+        notes: "What Appwrite's REST API ultimately receives. Useful when you have a pre-serialized query from another tool.",
+      },
+    ],
+    argumentRules: [
+      "Arguments must be JSON-compatible literals: numbers, booleans, double-quoted strings, arrays.",
+      "Single-quoted strings are tolerated (auto-converted): Query.equal('status', 'active') works.",
+      "Use the bracket form for array args: Query.select([\"$id\",\"name\"]).",
+    ],
+    methods: {
+      pagination: [
+        { name: "limit", signature: "(limit: number)", example: "Query.limit(25)" },
+        { name: "offset", signature: "(offset: number)", example: "Query.offset(50)" },
+        { name: "cursorAfter", signature: "(documentId: string)", example: 'Query.cursorAfter("doc-abc")' },
+        { name: "cursorBefore", signature: "(documentId: string)", example: 'Query.cursorBefore("doc-abc")' },
+      ],
+      ordering: [
+        { name: "orderAsc", signature: "(attribute: string)", example: 'Query.orderAsc("$createdAt")' },
+        { name: "orderDesc", signature: "(attribute: string)", example: 'Query.orderDesc("$createdAt")' },
+        { name: "orderRandom", signature: "()", example: "Query.orderRandom()" },
+      ],
+      selection: [
+        { name: "select", signature: "(attributes: string[])", example: 'Query.select(["$id","name","status"])' },
+      ],
+      filters: [
+        { name: "equal", signature: "(attribute, value | values[])", example: 'Query.equal("status","active")' },
+        { name: "notEqual", signature: "(attribute, value)", example: 'Query.notEqual("status","blocked")' },
+        { name: "lessThan", signature: "(attribute, value)", example: 'Query.lessThan("duration",1000)' },
+        { name: "lessThanEqual", signature: "(attribute, value)", example: 'Query.lessThanEqual("duration",1000)' },
+        { name: "greaterThan", signature: "(attribute, value)", example: 'Query.greaterThan("duration",0)' },
+        { name: "greaterThanEqual", signature: "(attribute, value)", example: 'Query.greaterThanEqual("duration",0)' },
+        { name: "between", signature: "(attribute, start, end)", example: 'Query.between("count",1,100)' },
+        { name: "notBetween", signature: "(attribute, start, end)", example: 'Query.notBetween("count",1,100)' },
+        { name: "isNull", signature: "(attribute)", example: 'Query.isNull("deletedAt")' },
+        { name: "isNotNull", signature: "(attribute)", example: 'Query.isNotNull("deletedAt")' },
+        { name: "exists", signature: "(attributes: string[])", example: 'Query.exists(["email"])' },
+        { name: "notExists", signature: "(attributes: string[])", example: 'Query.notExists(["email"])' },
+        { name: "regex", signature: "(attribute, pattern)", example: 'Query.regex("name","^Acme")' },
+        { name: "startsWith", signature: "(attribute, value)", example: 'Query.startsWith("name","Acme")' },
+        { name: "endsWith", signature: "(attribute, value)", example: 'Query.endsWith("name","Corp")' },
+        { name: "notStartsWith", signature: "(attribute, value)", example: 'Query.notStartsWith("name","Internal")' },
+        { name: "notEndsWith", signature: "(attribute, value)", example: 'Query.notEndsWith("name","Test")' },
+        { name: "contains", signature: "(attribute, value | values[])", example: 'Query.contains("labels","admin")' },
+        { name: "notContains", signature: "(attribute, value | values[])", example: 'Query.notContains("labels","banned")' },
+        { name: "containsAny", signature: "(attribute, values[])", example: 'Query.containsAny("labels",["a","b"])' },
+        { name: "containsAll", signature: "(attribute, values[])", example: 'Query.containsAll("labels",["x","y"])' },
+      ],
+      searchAndDates: [
+        { name: "search", signature: "(attribute, value)", example: 'Query.search("name","acme")' },
+        { name: "notSearch", signature: "(attribute, value)", example: 'Query.notSearch("name","spam")' },
+        { name: "createdBefore", signature: "(iso8601: string)", example: 'Query.createdBefore("2025-01-01T00:00:00.000Z")' },
+        { name: "createdAfter", signature: "(iso8601: string)", example: 'Query.createdAfter("2025-01-01T00:00:00.000Z")' },
+        { name: "createdBetween", signature: "(start, end)", example: 'Query.createdBetween("2025-01-01T00:00:00.000Z","2025-02-01T00:00:00.000Z")' },
+        { name: "updatedBefore", signature: "(iso8601: string)", example: 'Query.updatedBefore("2025-01-01T00:00:00.000Z")' },
+        { name: "updatedAfter", signature: "(iso8601: string)", example: 'Query.updatedAfter("2025-01-01T00:00:00.000Z")' },
+        { name: "updatedBetween", signature: "(start, end)", example: 'Query.updatedBetween("2025-01-01T00:00:00.000Z","2025-02-01T00:00:00.000Z")' },
+      ],
+      combinators: [
+        { name: "or", signature: "(queries: string[])", example: 'Query.or([Query.equal("status","active"),Query.equal("status","pending")])' },
+        { name: "and", signature: "(queries: string[])", example: 'Query.and([Query.greaterThan("count",0),Query.lessThan("count",100)])' },
+        { name: "elemMatch", signature: "(attribute, queries: string[])", example: 'Query.elemMatch("items",[Query.equal("status","ready")])' },
+      ],
+      geospatial: [
+        { name: "distanceEqual", signature: "(attribute, values[], distance, meters?)" },
+        { name: "distanceNotEqual", signature: "(attribute, values[], distance, meters?)" },
+        { name: "distanceGreaterThan", signature: "(attribute, values[], distance, meters?)" },
+        { name: "distanceLessThan", signature: "(attribute, values[], distance, meters?)" },
+        { name: "intersects", signature: "(attribute, values[])" },
+        { name: "notIntersects", signature: "(attribute, values[])" },
+        { name: "crosses", signature: "(attribute, values[])" },
+        { name: "notCrosses", signature: "(attribute, values[])" },
+        { name: "overlaps", signature: "(attribute, values[])" },
+        { name: "notOverlaps", signature: "(attribute, values[])" },
+        { name: "touches", signature: "(attribute, values[])" },
+        { name: "notTouches", signature: "(attribute, values[])" },
+      ],
+    },
+    recipes: {
+      "Last 10 by date": ['Query.limit(10)', 'Query.orderDesc("$createdAt")'],
+      "Count rows matching a filter": ['Query.equal("status","active")', "Query.limit(1)"],
+      "Paginate with cursor": ['Query.limit(50)', 'Query.cursorAfter("<lastRowId>")'],
+      "Select specific fields only": ['Query.select(["$id","name","status"])'],
+      "Search in a column": ['Query.search("name","acme")'],
+    },
+    notes: [
+      "Pass queries as an array of strings on the tool's `queries` parameter. Order matters for cursors and combinators.",
+      "Appwrite defaults to 25 rows when no Query.limit is supplied; max is typically 100.",
+      "Combinators (and/or/elemMatch) accept queries already serialized to JSON wire form.",
+    ],
+  };
+}
+
 async function clearAppwriteProject(input: unknown, context: ToolContext): Promise<unknown> {
   ClearAppwriteProjectInputSchema.parse(input);
 
@@ -340,6 +445,14 @@ export const metaToolGroup: ToolGroupDefinition = {
         "Remove the in-memory project override set via select_appwrite_project. Resolution falls back to CWD project config / prefs.json.",
       inputSchema: ClearAppwriteProjectInputSchema,
       handler: clearAppwriteProject,
+      requiresAuth: false,
+    },
+    {
+      name: "query_help",
+      description:
+        "Reference for the `queries:` parameter shared by every list_* tool. Returns the accepted input forms (Query.limit(10), limit(10), or JSON wire form), every available Query static method grouped by category (filters, pagination, ordering, selection, combinators, geospatial), and common recipes (paginate, select fields, search, etc.). Call this whenever a list tool errors with 'Unknown Query method' or 'not a recognized query format'.",
+      inputSchema: QueryHelpInputSchema,
+      handler: queryHelp,
       requiresAuth: false,
     },
   ],

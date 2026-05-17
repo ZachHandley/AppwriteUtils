@@ -219,7 +219,7 @@ Server instance ID: ${this.instanceId}
    *    which violates MCP's requirement that `text` be a string.
    */
   private serializeToolResult(result: unknown): string {
-    if (typeof result === 'string') return result;
+    if (typeof result === 'string') return this.guardLargeText(result);
     if (result === undefined || result === null) return '';
     try {
       const serialized = JSON.stringify(
@@ -227,11 +227,31 @@ Server instance ID: ${this.instanceId}
         (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
         2
       );
-      return typeof serialized === 'string' ? serialized : String(result);
+      const out = typeof serialized === 'string' ? serialized : String(result);
+      return this.guardLargeText(out);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return `[serialization failed: ${msg}]`;
     }
+  }
+
+  /**
+   * Hard ceiling on the serialized result. Many Claude Code / MCP host
+   * implementations cap a single tool result around 100K chars; oversized
+   * results either get rejected outright or are spilled to disk for the
+   * agent to re-fetch. Truncate at 85K (leaving headroom for the footer)
+   * and tell the agent exactly which queries to use to constrain the call.
+   */
+  private guardLargeText(text: string): string {
+    const HARD_LIMIT = 90_000;
+    const TRUNCATE_TO = 85_000;
+    if (text.length <= HARD_LIMIT) return text;
+    return (
+      text.slice(0, TRUNCATE_TO) +
+      `\n\n[TRUNCATED — result was ${text.length.toLocaleString()} chars (cap ${HARD_LIMIT.toLocaleString()}). ` +
+      "Re-run with Query.limit(N), Query.select([...]) to project fewer fields, " +
+      "or summary:true on tools that support it. Call query_help for query syntax.]"
+    );
   }
 
   /**

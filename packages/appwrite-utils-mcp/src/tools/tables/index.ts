@@ -11,8 +11,13 @@
  */
 
 import { z } from 'zod';
+import { Query } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import type { DatabaseAdapter } from 'appwrite-utils-helpers';
+import { normalizeQueries } from '../../utils/queryNormalizer.js';
+
+const QUERY_DESCRIPTION_SUFFIX =
+  'Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
 
 // ──────────────────────────────────────────────────
 // SHARED HELPERS
@@ -100,7 +105,7 @@ const listRowsSchema = z.object({
   queries: z
     .array(z.string())
     .optional()
-    .describe('Optional Appwrite Query strings (see Query class).'),
+    .describe(`Optional Appwrite Query strings. ${QUERY_DESCRIPTION_SUFFIX}`),
 });
 
 const getRowSchema = z.object({
@@ -171,12 +176,22 @@ const bulkDeleteRowsSchema = z.object({
 // Tables
 const listTablesSchema = z.object({
   databaseId: databaseIdSchema,
-  queries: z.array(z.string()).optional().describe('Optional Appwrite Query strings.'),
+  queries: z
+    .array(z.string())
+    .optional()
+    .describe(`Optional Appwrite Query strings. ${QUERY_DESCRIPTION_SUFFIX}`),
   search: z
     .string()
     .max(256)
     .optional()
     .describe('Optional free-text search term (encoded as Query.search).'),
+  summary: z
+    .boolean()
+    .default(true)
+    .describe(
+      'When true (default), returns a slim projection per table: { $id, name, enabled, columnCount, indexCount, $createdAt, $updatedAt }. ' +
+        'Set false to return full column + index schemas inline — large projects can exceed the tool result cap, so prefer Query.limit() if you opt out.'
+    ),
 });
 
 const getTableSchema = z.object({
@@ -211,7 +226,10 @@ const deleteTableSchema = z.object({
 const listIndexesSchema = z.object({
   databaseId: databaseIdSchema,
   tableId: tableIdSchema,
-  queries: z.array(z.string()).optional(),
+  queries: z
+    .array(z.string())
+    .optional()
+    .describe(`Optional Appwrite Query strings. ${QUERY_DESCRIPTION_SUFFIX}`),
 });
 
 const createIndexSchema = z.object({
@@ -264,7 +282,10 @@ const columnTypeEnum = z.enum([
 const listColumnsSchema = z.object({
   databaseId: databaseIdSchema,
   tableId: tableIdSchema,
-  queries: z.array(z.string()).optional(),
+  queries: z
+    .array(z.string())
+    .optional()
+    .describe(`Optional Appwrite Query strings. ${QUERY_DESCRIPTION_SUFFIX}`),
 });
 
 const getColumnSchema = z.object({
@@ -353,7 +374,7 @@ async function handleListRows(input: unknown, context: ToolContext) {
   const response = await adapter.listRows({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: validated.queries,
+    queries: normalizeQueries(validated.queries),
   });
   return slimRowList(response);
 }
@@ -472,14 +493,22 @@ async function handleBulkDeleteRows(input: unknown, context: ToolContext) {
 async function handleListTables(input: unknown, context: ToolContext) {
   const validated = listTablesSchema.parse(input);
   const adapter = await getAdapter(context);
-  // listTables param interface accepts databaseId + queries; `search` is encoded as a Query.search filter.
-  const queries: string[] = [...(validated.queries ?? [])];
+
+  // Build the queries array: user-supplied entries + optional Query.search.
+  // Inject a default Query.limit(25) when the caller didn't set one — full
+  // table schemas are large enough that the default response can overflow
+  // the tool result cap.
+  const rawQueries: string[] = [...(validated.queries ?? [])];
   if (validated.search) {
-    queries.push(`search("${validated.search}")`);
+    rawQueries.push(Query.search('name', validated.search));
   }
+  if (!hasLimitQuery(rawQueries)) {
+    rawQueries.push(Query.limit(25));
+  }
+
   const response = await adapter.listTables({
     databaseId: validated.databaseId,
-    queries: queries.length > 0 ? queries : undefined,
+    queries: normalizeQueries(rawQueries),
   });
   const slim = slimTableList(response);
 
@@ -493,7 +522,61 @@ async function handleListTables(input: unknown, context: ToolContext) {
     }))
   );
 
+  if (validated.summary) {
+    return {
+      total: slim.total,
+      tables: slim.tables.map(projectTableSummary),
+      note:
+        'Returned slim summary. Pass summary:false on this tool for the full schema ' +
+        '(may overflow tool result cap on large projects — use Query.limit() when opting out).',
+    };
+  }
+
   return slim;
+}
+
+/**
+ * Detect whether the caller already supplied a Query.limit(...) entry, in any
+ * of the three accepted forms — JSON wire (`{"method":"limit",...}`), SDK
+ * (`Query.limit(...)`), or bare (`limit(...)`).
+ */
+function hasLimitQuery(entries: string[]): boolean {
+  return entries.some((entry) => {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed) as { method?: unknown };
+        return parsed?.method === 'limit';
+      } catch {
+        return false;
+      }
+    }
+    return /^(?:Query\.)?limit\s*\(/.test(trimmed);
+  });
+}
+
+/**
+ * Project a full Appwrite table object down to the small shape we return in
+ * summary mode. Tolerates both TablesDB (`columns`/`indexes`) and legacy
+ * (`attributes`/`indexes`) field names.
+ */
+function projectTableSummary(table: any) {
+  const columns = Array.isArray(table?.columns)
+    ? table.columns
+    : Array.isArray(table?.attributes)
+      ? table.attributes
+      : [];
+  const indexes = Array.isArray(table?.indexes) ? table.indexes : [];
+  return {
+    $id: table?.$id,
+    name: table?.name,
+    enabled: table?.enabled,
+    rowSecurity: table?.rowSecurity ?? table?.documentSecurity,
+    columnCount: columns.length,
+    indexCount: indexes.length,
+    $createdAt: table?.$createdAt,
+    $updatedAt: table?.$updatedAt,
+  };
 }
 
 async function handleGetTable(input: unknown, context: ToolContext) {
@@ -554,7 +637,7 @@ async function handleListIndexes(input: unknown, context: ToolContext) {
   const response = await adapter.listIndexes({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: validated.queries,
+    queries: normalizeQueries(validated.queries),
   });
   return slimIndexList(response);
 }
@@ -594,7 +677,7 @@ async function handleListColumns(input: unknown, context: ToolContext) {
   const response = await adapter.listColumns({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: validated.queries,
+    queries: normalizeQueries(validated.queries),
   });
   return slimColumnList(response);
 }
