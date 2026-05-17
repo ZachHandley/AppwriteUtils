@@ -18,8 +18,8 @@
     "data"
   ],
   "scripts": {
-    "prebuild": "tsx scripts/generate-zod-from-openapi.ts",
-    "regen:schemas": "tsx scripts/generate-zod-from-openapi.ts",
+    "prebuild": "bunx tsx scripts/generate-zod-from-openapi.ts",
+    "regen:schemas": "bunx tsx scripts/generate-zod-from-openapi.ts",
     "build": "bun run tsc",
     "deploy": "bun run build && npm publish --access public"
   },
