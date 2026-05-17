@@ -3,6 +3,7 @@
  * @packageDocumentation
  */
 
+import { createHash } from "node:crypto";
 import {
   SessionAuthService,
   type SessionAuthInfo,
@@ -11,6 +12,21 @@ import {
   resolveProjectConfig,
   type ResolvedProjectConfig,
 } from "./ProjectConfigResolver.js";
+
+/**
+ * Internal candidate shape used during resolve(). Each candidate is fully
+ * self-contained — all three of (endpoint, projectId, apiKey|sessionCookie)
+ * must be present for it to be probed and returned.
+ */
+interface Candidate {
+  endpoint: string;
+  projectId: string;
+  apiKey?: string;
+  sessionCookie?: string;
+  source: AuthResolutionResult["source"];
+}
+
+type ProbeVerdict = "valid" | "valid-but-narrow-scope" | "invalid-auth" | "unreachable";
 
 /**
  * Authentication credentials with source information
@@ -204,154 +220,245 @@ export class AuthResolver {
    * });
    * ```
    */
-  async resolve(
-    toolParams?: ToolAuthParams
-  ): Promise<AuthResolutionResult> {
-    // Tier 1+2: tool params win, then server flags, then nothing.
-    let endpoint = toolParams?.endpoint ?? this.serverDefaults.endpoint;
-    let projectId = toolParams?.projectId ?? this.serverDefaults.projectId;
-    let apiKey = toolParams?.apiKey ?? this.serverDefaults.apiKey;
-    let sessionCookie = toolParams?.sessionCookie;
+  /**
+   * Cache of probe verdicts keyed by SHA-256 of `${endpoint}:${projectId}:${cred}`.
+   * Lives for the resolver instance lifetime — bad creds aren't re-probed every
+   * tool call, but a fresh server start re-validates.
+   */
+  private probeCache: Map<string, ProbeVerdict> = new Map();
 
-    // Source tracking — set whenever a tier contributes the auth credential
-    // that this resolution will actually use. The first tier to provide both
-    // (endpoint+projectId) and (apiKey|sessionCookie) wins the source label.
-    let contributingSource: AuthResolutionResult["source"] | null = null;
+  /**
+   * Look up (or run) the probe verdict for a candidate. Cache hits are free.
+   */
+  private async probeAndCache(candidate: Candidate): Promise<ProbeVerdict> {
+    const cred = candidate.apiKey ?? candidate.sessionCookie ?? "";
+    const fingerprint = createHash("sha256")
+      .update(`${candidate.endpoint}:${candidate.projectId}:${cred}`)
+      .digest("hex");
+
+    const cached = this.probeCache.get(fingerprint);
+    if (cached !== undefined) return cached;
+
+    const verdict = await this.sessionService.probeCredentials({
+      endpoint: candidate.endpoint,
+      projectId: candidate.projectId,
+      apiKey: candidate.apiKey,
+      sessionCookie: candidate.sessionCookie,
+    });
+    this.probeCache.set(fingerprint, verdict);
+    return verdict;
+  }
+
+  /**
+   * Build the ordered list of candidate credentials this resolver would try,
+   * in priority order. Each candidate is fully self-contained.
+   */
+  private async buildCandidates(toolParams?: ToolAuthParams): Promise<Candidate[]> {
+    const candidates: Candidate[] = [];
+
+    // "Inherited" endpoint+projectId — tool params win, then server flags. CWD
+    // config and prefs can fill these for tiers that don't carry them.
+    const baseEndpoint = toolParams?.endpoint ?? this.serverDefaults.endpoint;
+    const baseProjectId = toolParams?.projectId ?? this.serverDefaults.projectId;
+
+    const pushIfComplete = (c: Partial<Candidate> & { source: Candidate["source"] }) => {
+      if (!c.endpoint || !c.projectId) return;
+      if (!c.apiKey && !c.sessionCookie) return;
+      candidates.push({
+        endpoint: c.endpoint,
+        projectId: c.projectId,
+        apiKey: c.apiKey,
+        sessionCookie: c.sessionCookie,
+        source: c.source,
+      });
+    };
+
+    // Tier 1: tool params with explicit creds.
+    if (toolParams?.sessionCookie) {
+      pushIfComplete({
+        endpoint: baseEndpoint,
+        projectId: baseProjectId,
+        sessionCookie: toolParams.sessionCookie,
+        source: "tool-params",
+      });
+    }
+    if (toolParams?.apiKey) {
+      pushIfComplete({
+        endpoint: baseEndpoint,
+        projectId: baseProjectId,
+        apiKey: toolParams.apiKey,
+        source: "tool-params",
+      });
+    }
+
+    // Tier 2: server-default API key (combined with baseEndpoint/baseProjectId).
+    if (this.serverDefaults.apiKey) {
+      pushIfComplete({
+        endpoint: baseEndpoint,
+        projectId: baseProjectId,
+        apiKey: this.serverDefaults.apiKey,
+        source: "server-defaults",
+      });
+    }
 
     // Tier 3: in-memory session override (select_appwrite_project meta tool).
-    // Scoped to this server instance only — no leakage across MCPs.
-    if (
-      this.sessionOverride &&
-      (!endpoint || !projectId || (!apiKey && !sessionCookie))
-    ) {
+    if (this.sessionOverride) {
       const ov = this.sessionOverride;
-      if (!projectId) projectId = ov.projectId;
-      if (!endpoint && ov.endpoint) endpoint = ov.endpoint;
-      if (!apiKey && !sessionCookie) {
-        if (ov.apiKey) {
-          apiKey = ov.apiKey;
-          contributingSource = "session-override";
-        } else if (ov.sessionCookie) {
-          sessionCookie = ov.sessionCookie;
-          contributingSource = "session-override";
-        }
-      } else if (
-        !contributingSource &&
-        (projectId === ov.projectId || endpoint === ov.endpoint)
-      ) {
-        // Override contributed identity but not creds — still mark as the source.
-        contributingSource = "session-override";
+      const ovEndpoint = ov.endpoint ?? baseEndpoint;
+      if (ov.sessionCookie) {
+        pushIfComplete({
+          endpoint: ovEndpoint,
+          projectId: ov.projectId,
+          sessionCookie: ov.sessionCookie,
+          source: "session-override",
+        });
       }
+      if (ov.apiKey) {
+        pushIfComplete({
+          endpoint: ovEndpoint,
+          projectId: ov.projectId,
+          apiKey: ov.apiKey,
+          source: "session-override",
+        });
+      }
+      // Override carries only identity — pair it with prefs-derived auth below.
     }
 
-    // Tier 4: project config in CWD/--configDir. This is what makes each MCP
-    // instance bind to ITS dir's project — isolating siblings.
-    if (!projectId || !endpoint || (!apiKey && !sessionCookie)) {
-      const project = await this.getProjectConfig();
-      if (project) {
-        // 4a: YAML config carries full creds inline.
-        if (project.format === "yaml") {
-          if (!projectId) projectId = project.projectId;
-          if (!endpoint && project.endpoint) endpoint = project.endpoint;
-          if (!apiKey && !sessionCookie) {
-            if (project.apiKey) {
-              apiKey = project.apiKey;
-              if (!contributingSource) contributingSource = "cwd-config";
-            } else if (project.sessionCookie) {
-              sessionCookie = project.sessionCookie;
-              if (!contributingSource) contributingSource = "cwd-config";
+    // Tier 4: CWD project config (per-MCP-instance isolation).
+    const project = await this.getProjectConfig();
+    if (project) {
+      const projEndpoint = project.endpoint ?? baseEndpoint;
+
+      if (project.format === "yaml") {
+        // Respect explicit authMethod: session/apikey. For "auto"/unset, prefer
+        // session (matches ClientFactory's "auto" behavior) but try both.
+        const wantSession = project.authMethod === "session" || project.authMethod !== "apikey";
+        const wantApiKey = project.authMethod === "apikey" || project.authMethod !== "session";
+
+        if (wantSession && project.sessionCookie) {
+          pushIfComplete({
+            endpoint: projEndpoint,
+            projectId: project.projectId,
+            sessionCookie: project.sessionCookie,
+            source: "cwd-config",
+          });
+        }
+        if (wantApiKey && project.apiKey) {
+          pushIfComplete({
+            endpoint: projEndpoint,
+            projectId: project.projectId,
+            apiKey: project.apiKey,
+            source: "cwd-config",
+          });
+        }
+      }
+
+      if (project.format === "appwrite-json") {
+        // appwrite.json carries only projectId. Try to find auth + endpoint in
+        // prefs.json via three paths, in order of specificity.
+        try {
+          const direct = await this.sessionService.findEntryForProject(project.projectId);
+          if (direct) {
+            if (direct.sessionCookie) {
+              pushIfComplete({
+                endpoint: direct.endpoint,
+                projectId: project.projectId,
+                sessionCookie: direct.sessionCookie,
+                source: "cwd-config",
+              });
             }
+            if (direct.apiKey) {
+              pushIfComplete({
+                endpoint: direct.endpoint,
+                projectId: project.projectId,
+                apiKey: direct.apiKey,
+                source: "cwd-config",
+              });
+            }
+          }
+        } catch {
+          /* non-fatal */
+        }
+
+        // "12 projects on one cookie" — scan prefs by endpoint when we have one.
+        const scanEndpoint = projEndpoint;
+        if (scanEndpoint) {
+          try {
+            const match = await this.sessionService.findAuthForEndpoint(scanEndpoint);
+            if (match) {
+              if (match.sessionCookie) {
+                pushIfComplete({
+                  endpoint: match.endpoint,
+                  projectId: project.projectId,
+                  sessionCookie: match.sessionCookie,
+                  source: "cwd-config+prefs-endpoint",
+                });
+              }
+              if (match.apiKey) {
+                pushIfComplete({
+                  endpoint: match.endpoint,
+                  projectId: project.projectId,
+                  apiKey: match.apiKey,
+                  source: "cwd-config+prefs-endpoint",
+                });
+              }
+            }
+          } catch {
+            /* non-fatal */
           }
         }
 
-        // 4b: appwrite.json (CLI format) — has only projectId. Lookup auth
-        // against prefs.json via project-specific entry, then endpoint scan,
-        // then prefs.current's endpoint as a last-ditch (apply project's
-        // projectId on top of current's auth + endpoint).
-        if (project.format === "appwrite-json") {
-          if (!projectId) projectId = project.projectId;
-
-          if (!apiKey && !sessionCookie) {
-            // First try a project-specific prefs entry (key === projectId,
-            // either cookie- or API-key-based — findEntryForProject handles both).
-            try {
-              const direct = await this.sessionService.findEntryForProject(
-                project.projectId
-              );
-              if (direct) {
-                if (!endpoint) endpoint = direct.endpoint;
-                if (direct.apiKey) apiKey = direct.apiKey;
-                else if (direct.sessionCookie) sessionCookie = direct.sessionCookie;
-                if (!contributingSource && (apiKey || sessionCookie)) {
-                  contributingSource = "cwd-config";
-                }
-              }
-            } catch {
-              /* non-fatal */
+        // Last-ditch: borrow prefs.current's endpoint+auth, pair with CWD projectId.
+        try {
+          const current = await this.sessionService.findCurrentSession();
+          if (current) {
+            if (current.sessionCookie) {
+              pushIfComplete({
+                endpoint: current.endpoint,
+                projectId: project.projectId,
+                sessionCookie: current.sessionCookie,
+                source: "cwd-config+prefs-current",
+              });
             }
-
-            // If we know the endpoint by now, scan prefs for an entry matching
-            // that endpoint with usable auth (the "12 projects on one cookie"
-            // case for the user's blackleafdigital console session).
-            if (!apiKey && !sessionCookie && endpoint) {
-              try {
-                const match = await this.sessionService.findAuthForEndpoint(endpoint);
-                if (match) {
-                  if (match.apiKey) apiKey = match.apiKey;
-                  else if (match.sessionCookie) sessionCookie = match.sessionCookie;
-                  if (!contributingSource && (apiKey || sessionCookie)) {
-                    contributingSource = "cwd-config+prefs-endpoint";
-                  }
-                }
-              } catch {
-                /* non-fatal */
-              }
-            }
-
-            // Final fallback: borrow prefs.current's endpoint + auth and pair
-            // them with the CWD-resolved projectId.
-            if (!apiKey && !sessionCookie) {
-              try {
-                const current = await this.sessionService.findCurrentSession();
-                if (current) {
-                  if (!endpoint) endpoint = current.endpoint;
-                  if (current.apiKey) apiKey = current.apiKey;
-                  else if (current.sessionCookie)
-                    sessionCookie = current.sessionCookie;
-                  if (!contributingSource && (apiKey || sessionCookie)) {
-                    contributingSource = "cwd-config+prefs-current";
-                  }
-                }
-              } catch {
-                /* non-fatal */
-              }
+            if (current.apiKey) {
+              pushIfComplete({
+                endpoint: current.endpoint,
+                projectId: project.projectId,
+                apiKey: current.apiKey,
+                source: "cwd-config+prefs-current",
+              });
             }
           }
+        } catch {
+          /* non-fatal */
         }
       }
     }
 
-    // Tier 5 (legacy): bare prefs.current fallback when CWD has no config —
-    // the bare-launch case (`bunx appwrite-utils-mcp` from a non-project dir).
-    let currentContributedCreds = false;
-    if (!endpoint || !projectId || (!apiKey && !sessionCookie)) {
+    // Tier 5: bare prefs.current — only kicks in when no CWD config exists
+    // (otherwise tier 4 already consulted prefs.current as a sub-step).
+    if (!project) {
       try {
         const current = await this.sessionService.findCurrentSession();
         if (current) {
-          if (!endpoint) endpoint = current.endpoint;
-          if (!projectId) projectId = current.projectId;
-          if (!apiKey && !sessionCookie) {
-            if (current.apiKey) {
-              apiKey = current.apiKey;
-              currentContributedCreds = true;
-            } else if (current.sessionCookie) {
-              sessionCookie = current.sessionCookie;
-              currentContributedCreds = true;
-            }
+          if (current.sessionCookie) {
+            pushIfComplete({
+              endpoint: current.endpoint,
+              projectId: current.projectId,
+              sessionCookie: current.sessionCookie,
+              source: "cli-current",
+            });
+          }
+          if (current.apiKey) {
+            pushIfComplete({
+              endpoint: current.endpoint,
+              projectId: current.projectId,
+              apiKey: current.apiKey,
+              source: "cli-current",
+            });
           }
         }
       } catch (error) {
-        // Non-fatal — the resolver still has the existing fallback chain.
         console.warn(
           "prefs.current discovery failed:",
           error instanceof Error ? error.message : String(error)
@@ -359,135 +466,75 @@ export class AuthResolver {
       }
     }
 
-    // Validate minimum required parameters
-    if (!endpoint || !projectId) {
-      throw new Error(
-        "Authentication resolution failed: endpoint and projectId are required. " +
-          "Provide them via tool parameters, server defaults, or CLI session."
-      );
-    }
-
-    // Tier 1: Tool parameters with explicit session cookie
-    if (toolParams?.sessionCookie) {
-      return {
-        credentials: {
-          endpoint,
-          projectId,
-          sessionCookie: toolParams.sessionCookie,
-          authMethod: "session",
-        },
-        source: "tool-params",
-      };
-    }
-
-    // Tier 1: Tool parameters with API key
-    if (toolParams?.apiKey) {
-      return {
-        credentials: {
-          endpoint,
-          projectId,
-          apiKey: toolParams.apiKey,
-          authMethod: "apikey",
-        },
-        source: "tool-params",
-      };
-    }
-
-    // Tier 2: Server defaults with API key
-    if (
-      this.serverDefaults.apiKey &&
-      (!toolParams?.endpoint || !toolParams?.projectId)
-    ) {
-      return {
-        credentials: {
-          endpoint,
-          projectId,
-          apiKey: this.serverDefaults.apiKey,
-          authMethod: "apikey",
-        },
-        source: "server-defaults",
-      };
-    }
-
-    // Tier 3/4: credentials came from session-override or CWD project config
-    // (with optional prefs.json endpoint-match or prefs.current fallback).
-    if (contributingSource) {
-      if (apiKey) {
-        return {
-          credentials: { endpoint, projectId, apiKey, authMethod: "apikey" },
-          source: contributingSource,
-        };
-      }
-      if (sessionCookie) {
-        return {
-          credentials: { endpoint, projectId, sessionCookie, authMethod: "session" },
-          source: contributingSource,
-        };
-      }
-    }
-
-    // Tier 5 (legacy): Credentials resolved from bare ~/.appwrite/prefs.json `current`
-    if (currentContributedCreds) {
-      if (apiKey) {
-        return {
-          credentials: { endpoint, projectId, apiKey, authMethod: "apikey" },
-          source: "cli-current",
-        };
-      }
-      if (sessionCookie) {
-        return {
-          credentials: { endpoint, projectId, sessionCookie, authMethod: "session" },
-          source: "cli-current",
-        };
-      }
-    }
-
-    // Tier 6: project-specific CLI session discovery
-    try {
-      const session = await this.sessionService.findSession(
-        endpoint,
-        projectId
-      );
-
-      if (session && this.sessionService.isValidSession(session)) {
-        return {
-          credentials: {
+    // Tier 6: per-project session cookie lookup against (baseEndpoint, baseProjectId).
+    // Only reachable when caller knows both already (e.g. via --endpoint --projectId flags).
+    if (baseEndpoint && baseProjectId) {
+      try {
+        const session = await this.sessionService.findSession(baseEndpoint, baseProjectId);
+        if (session && this.sessionService.isValidSession(session)) {
+          pushIfComplete({
             endpoint: session.endpoint,
             projectId: session.projectId,
             sessionCookie: session.cookie,
-            authMethod: "session",
-          },
-          source: "cli-session",
-        };
+            source: "cli-session",
+          });
+        }
+      } catch (error) {
+        console.warn(
+          "CLI session discovery failed:",
+          error instanceof Error ? error.message : String(error)
+        );
       }
-    } catch (error) {
-      // Session discovery failure is not fatal - continue to fallback
-      console.warn(
-        "CLI session discovery failed:",
-        error instanceof Error ? error.message : String(error)
+    }
+
+    return candidates;
+  }
+
+  async resolve(
+    toolParams?: ToolAuthParams
+  ): Promise<AuthResolutionResult> {
+    const candidates = await this.buildCandidates(toolParams);
+
+    if (candidates.length === 0) {
+      throw new Error(
+        "Authentication resolution failed: no candidate credentials available. " +
+          "Provide endpoint+projectId+(apiKey|sessionCookie) via tool params, server flags, " +
+          "a project config (appwrite.json / .appwrite/config.yaml) in the working dir, " +
+          "or run `appwrite login`."
       );
     }
 
-    // If we have an API key from any source, use it as final fallback
-    if (apiKey) {
+    // Probe each candidate in priority order. Return the first that's valid
+    // (or valid-but-scope-narrow, or unreachable — unreachable isn't auth's
+    // fault, so let the real call surface it). Skip only invalid-auth.
+    const failures: Array<{ source: string; verdict: ProbeVerdict }> = [];
+    for (const candidate of candidates) {
+      const verdict = await this.probeAndCache(candidate);
+      if (verdict === "invalid-auth") {
+        failures.push({ source: candidate.source, verdict });
+        continue;
+      }
       return {
         credentials: {
-          endpoint,
-          projectId,
-          apiKey,
-          authMethod: "apikey",
+          endpoint: candidate.endpoint,
+          projectId: candidate.projectId,
+          apiKey: candidate.apiKey,
+          sessionCookie: candidate.sessionCookie,
+          authMethod: candidate.sessionCookie ? "session" : "apikey",
         },
-        source: "server-defaults",
+        source: candidate.source,
       };
     }
 
-    // No valid authentication found
+    // All candidates probed as invalid-auth.
+    const summary = failures.map((f) => f.source).join(", ");
     throw new Error(
-      `Authentication resolution failed for endpoint="${endpoint}" projectId="${projectId}". ` +
-        "No API key or valid CLI session found. " +
-        "Run 'appwrite login' or provide an API key."
+      `Authentication resolution failed: every candidate credential was rejected by Appwrite (role: guests). ` +
+        `Tried in order: ${summary}. ` +
+        `Check that your API keys / session cookies are valid for the target project, or run \`appwrite login\`.`
     );
   }
+
 
   /**
    * Get the SessionAuthService instance for advanced session operations

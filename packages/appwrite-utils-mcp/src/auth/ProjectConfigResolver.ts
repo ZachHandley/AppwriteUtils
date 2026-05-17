@@ -30,6 +30,25 @@ export interface ResolvedProjectConfig {
   endpoint?: string;
   apiKey?: string;
   sessionCookie?: string;
+  /**
+   * Explicit auth preference from the YAML's `authMethod` field. When set,
+   * downstream resolution should honor it (e.g. `"session"` means use the
+   * cookie even if an apiKey value happens to be present in the file).
+   */
+  authMethod?: "session" | "apikey" | "auto";
+}
+
+/**
+ * Real Appwrite API keys are emitted as `standard_<hex>` or `dynamic_<hex>`.
+ * Anything else in the `key` slot is treated as a placeholder/stub (e.g. the
+ * common `SET_IF_NEEDED` template value) and ignored — propagating it would
+ * cause Appwrite to reject the request and downgrade the caller to role=guest.
+ */
+function isRealApiKey(value: string | undefined | null): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return trimmed.startsWith("standard_") || trimmed.startsWith("dynamic_");
 }
 
 /**
@@ -63,13 +82,25 @@ export async function resolveProjectConfig(
       const loader = new ConfigLoaderService();
       const config = await loader.loadYaml(configPath);
       if (!config.appwriteProject) return null;
+
+      // Normalize authMethod — YAML allows "auto" | "session" | "apikey".
+      const rawAuthMethod = (config as { authMethod?: unknown }).authMethod;
+      let authMethod: "session" | "apikey" | "auto" | undefined;
+      if (rawAuthMethod === "session" || rawAuthMethod === "apikey" || rawAuthMethod === "auto") {
+        authMethod = rawAuthMethod;
+      }
+
       return {
         source: configPath,
         format: "yaml",
         projectId: config.appwriteProject,
         endpoint: config.appwriteEndpoint || undefined,
-        apiKey: config.appwriteKey || undefined,
+        // Filter placeholder API keys (SET_IF_NEEDED, "", etc.). Real Appwrite
+        // keys are standard_<hex> or dynamic_<hex>; the probe in AuthResolver
+        // is the second line of defense for real-looking-but-revoked keys.
+        apiKey: isRealApiKey(config.appwriteKey) ? config.appwriteKey : undefined,
         sessionCookie: config.sessionCookie || undefined,
+        authMethod,
       };
     } catch {
       return null;

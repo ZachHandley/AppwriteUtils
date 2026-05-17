@@ -842,6 +842,95 @@ export class SessionAuthService {
   }
 
   /**
+   * Live-probe credentials against an Appwrite endpoint to verify they
+   * authenticate. Use this before trusting creds derived from a config file
+   * or prefs.json — placeholder API keys (e.g. `SET_IF_NEEDED`) and revoked
+   * keys / expired cookies still LOOK valid statically but fail at the wire.
+   *
+   * Tri-state result:
+   *  - `"valid"` — call succeeded.
+   *  - `"valid-but-narrow-scope"` — Appwrite recognized the credential but
+   *    the test endpoint required a scope the credential doesn't have. The
+   *    credential is real and should be kept; the actual tool call may still
+   *    succeed if it uses scopes the credential does have.
+   *  - `"invalid-auth"` — Appwrite did NOT recognize the credential and
+   *    treated the request as anonymous (`User (role: guests)` in the error).
+   *    Caller should drop this credential and fall through to the next tier.
+   *  - `"unreachable"` — network/DNS/timeout failure. Caller should NOT drop
+   *    the credential — the wire issue is transient and unrelated to auth.
+   *
+   * Probes against `tables.list({queries:[Query.limit(1)]})` on Appwrite ≥1.8,
+   * `databases.list(...)` otherwise. Either requires `tables.read`/`databases.read`,
+   * which the user's API keys typically have for any meaningful project — but
+   * the narrow-scope branch handles the case where they don't.
+   */
+  public async probeCredentials(input: {
+    endpoint: string;
+    projectId: string;
+    apiKey?: string;
+    sessionCookie?: string;
+  }): Promise<"valid" | "valid-but-narrow-scope" | "invalid-auth" | "unreachable"> {
+    if (!input.apiKey && !input.sessionCookie) return "invalid-auth";
+
+    try {
+      const { Client, Databases, TablesDB, Query } = await import("node-appwrite");
+
+      const client = new Client()
+        .setEndpoint(input.endpoint)
+        .setProject(input.projectId);
+
+      if (input.sessionCookie) {
+        // Same wire shape ClientFactory uses — set raw Cookie header + admin mode.
+        client.headers["cookie"] = input.sessionCookie;
+        client.headers["X-Appwrite-Mode"] = "admin";
+      } else if (input.apiKey) {
+        client.setKey(input.apiKey);
+        client.headers["X-Appwrite-Mode"] = "default";
+      }
+
+      const serverVersion = await fetchServerVersion(input.endpoint);
+      const useTables = !!(serverVersion && isVersionAtLeast(serverVersion, "1.8.0"));
+
+      if (useTables) {
+        const tables = new TablesDB(client);
+        await tables.list({ queries: [Query.limit(1)] });
+      } else {
+        const databases = new Databases(client);
+        await databases.list({ queries: [Query.limit(1)] });
+      }
+
+      return "valid";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = (error as { code?: unknown }).code;
+
+      // Appwrite returns 401 with message like:
+      //   "User (role: guests) missing scopes (["tables.read"])"
+      // for unrecognized API keys / invalid cookies — the role: guests marker
+      // means auth was NOT applied. Distinguish from a recognized cred that
+      // just lacks scope for THIS specific call.
+      const looksLikeGuestRole = /role:\s*guests?/i.test(message);
+      const looksLikeScopeError = /missing\s+scopes?/i.test(message);
+
+      if (looksLikeGuestRole) {
+        return "invalid-auth";
+      }
+      if (looksLikeScopeError) {
+        // Recognized cred, just narrow scope — keep it.
+        return "valid-but-narrow-scope";
+      }
+
+      // Other 401/403 → treat as invalid auth.
+      if (code === 401 || code === 403 || code === "401" || code === "403") {
+        return "invalid-auth";
+      }
+
+      // Network / DNS / timeout / 5xx → unreachable. Don't drop the cred.
+      return "unreachable";
+    }
+  }
+
+  /**
    * Test an explicit session cookie against a project/endpoint
    *
    * @param endpoint - Appwrite endpoint URL
