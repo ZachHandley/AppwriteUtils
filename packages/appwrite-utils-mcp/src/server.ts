@@ -207,6 +207,33 @@ Server instance ID: ${this.instanceId}
   }
 
   /**
+   * Serialize a tool handler's return value to the string body of an MCP
+   * `content: [{ type: 'text', text: ... }]` entry.
+   *
+   * Handles two edge cases that bare `JSON.stringify` gets wrong:
+   *  - `bigint` values (e.g. Appwrite TablesDB row `sequence` from node-appwrite)
+   *    cause `JSON.stringify` to throw `TypeError: Do not know how to serialize
+   *    a BigInt` — converted to string here to preserve precision.
+   *  - `undefined`/`null` results would serialize to the JS value `undefined`,
+   *    which violates MCP's requirement that `text` be a string.
+   */
+  private serializeToolResult(result: unknown): string {
+    if (typeof result === 'string') return result;
+    if (result === undefined || result === null) return '';
+    try {
+      const serialized = JSON.stringify(
+        result,
+        (_key, value) => (typeof value === 'bigint' ? value.toString() : value),
+        2
+      );
+      return typeof serialized === 'string' ? serialized : String(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `[serialization failed: ${msg}]`;
+    }
+  }
+
+  /**
    * Set up MCP request handlers for tools
    */
   private setupRequestHandlers(): void {
@@ -252,9 +279,7 @@ Server instance ID: ${this.instanceId}
           content: [
             {
               type: 'text' as const,
-              text: typeof result === 'string'
-                ? result
-                : JSON.stringify(result, null, 2),
+              text: this.serializeToolResult(result),
             },
           ],
         };
