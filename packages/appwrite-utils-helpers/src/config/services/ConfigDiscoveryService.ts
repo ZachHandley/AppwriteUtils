@@ -5,6 +5,53 @@ import { MessageFormatter } from "../../shared/messageFormatter.js";
 import { shouldIgnoreDirectory } from "../../utils/directoryUtils.js";
 
 /**
+ * Heuristic schema validator for YAML candidates produced by the sniff
+ * walker. We only need to know "is this an Appwrite config" without
+ * pulling in the full YAML parser, so a regex against the first few KB is
+ * enough — Appwrite YAML configs always declare `appwriteProject` (or
+ * `appwriteEndpoint`) at the top level. Comments and string values that
+ * happen to mention these tokens are filtered out by requiring a `:` and
+ * a leading non-indented position.
+ */
+async function isYamlAppwriteConfig(absPath: string): Promise<boolean> {
+  let head: string;
+  try {
+    const buf = await fs.promises.readFile(absPath);
+    head = buf.subarray(0, 4096).toString("utf-8");
+  } catch {
+    return false;
+  }
+  return /^\s*(appwriteProject|appwriteEndpoint)\s*:/m.test(head);
+}
+
+/**
+ * Heuristic schema validator for JSON candidates. Parses the whole file
+ * (these files are tiny — Appwrite CLI's `appwrite.json` typically <100KB)
+ * and confirms the top level has a string `projectId` field, which is the
+ * defining property of the Appwrite CLI config schema.
+ */
+async function isJsonAppwriteConfig(absPath: string): Promise<boolean> {
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(absPath, "utf-8");
+  } catch {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return (
+    !!parsed &&
+    typeof parsed === "object" &&
+    typeof (parsed as { projectId?: unknown }).projectId === "string" &&
+    (parsed as { projectId: string }).projectId.length > 0
+  );
+}
+
+/**
  * Result of discovering configuration files or collections/tables
  */
 export interface DiscoveryResult {
@@ -29,21 +76,46 @@ export interface DiscoveryResult {
  */
 export class ConfigDiscoveryService {
   /**
-   * YAML configuration file names to search for
+   * YAML configuration file names to search for (strict / fast path).
+   *
+   * Includes both the canonical `.appwrite/` (dot-prefix) location and the
+   * common `appwrite/` (no-dot) sibling layout that people set up by hand.
+   * Anything outside this list still has a chance via the schema-sniff
+   * fallback in {@link findYamlConfig}.
    */
   private readonly YAML_FILENAMES = [
     ".appwrite/config.yaml",
     ".appwrite/config.yml",
     ".appwrite/appwriteConfig.yaml",
     ".appwrite/appwriteConfig.yml",
+    "appwrite/config.yaml",
+    "appwrite/config.yml",
+    "appwrite/appwriteConfig.yaml",
+    "appwrite/appwriteConfig.yml",
     "appwrite.yaml",
     "appwrite.yml",
   ];
 
   /**
-   * JSON configuration file names to search for
+   * JSON configuration file names to search for (strict / fast path).
+   * Sniff fallback also looks for these basenames in any subdirectory.
    */
   private readonly JSON_FILENAMES = ["appwrite.config.json", "appwrite.json"];
+
+  /**
+   * Basenames the schema-sniff fallback is allowed to open.
+   * Kept narrow so we never accidentally parse e.g. a Vite `config.yaml`.
+   */
+  private readonly YAML_SNIFF_BASENAMES = [
+    "config.yaml",
+    "config.yml",
+    "appwriteConfig.yaml",
+    "appwriteConfig.yml",
+    "appwrite.yaml",
+    "appwrite.yml",
+  ];
+
+  private readonly JSON_SNIFF_BASENAMES = ["appwrite.config.json", "appwrite.json"];
 
   /**
    * TypeScript configuration file names to search for
@@ -112,6 +184,61 @@ export class ConfigDiscoveryService {
   }
 
   /**
+   * Walks downward from `dir`, opens every file whose basename is in
+   * `basenames`, and returns the first one for which `validate(absPath)`
+   * resolves to true.
+   *
+   * Used as the last-resort fallback when strict path patterns miss — lets
+   * us discover Appwrite configs in arbitrary directory layouts (e.g.
+   * `apps/api/appwrite/config.yaml`) without pattern whack-a-mole.
+   */
+  private async searchDownwardWithSniff(
+    dir: string,
+    basenames: string[],
+    validate: (absPath: string) => Promise<boolean>,
+    maxDepth: number = 6,
+    currentDepth: number = 0
+  ): Promise<string | null> {
+    if (currentDepth > maxDepth) return null;
+    if (shouldIgnoreDirectory(path.basename(dir))) return null;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+
+    // Files first — sniff any candidate basename in this directory.
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!basenames.includes(entry.name)) continue;
+      const absPath = path.join(dir, entry.name);
+      try {
+        if (await validate(absPath)) return absPath;
+      } catch {
+        // ignore unreadable / unparseable candidates and keep walking
+      }
+    }
+
+    // Then recurse.
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (shouldIgnoreDirectory(entry.name)) continue;
+      const result = await this.searchDownwardWithSniff(
+        path.join(dir, entry.name),
+        basenames,
+        validate,
+        maxDepth,
+        currentDepth + 1
+      );
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  /**
    * Finds any configuration file with configurable priority
    * @param startDir The directory to start searching from
    * @param preferJson If true, prioritizes appwrite.config.json over YAML (default: false)
@@ -172,8 +299,19 @@ export class ConfigDiscoveryService {
 
     if (upwardResult) return upwardResult;
 
-    // Search DOWN from repo root
-    return await this.searchDownward(boundary, this.YAML_FILENAMES);
+    // Search DOWN from repo root with known relative patterns first
+    const strictHit = await this.searchDownward(boundary, this.YAML_FILENAMES);
+    if (strictHit) return strictHit;
+
+    // Last resort: walk every subdir, open any file matching the sniff
+    // basenames, and accept it only if it parses as an Appwrite YAML config
+    // (has `appwriteProject` or `appwriteEndpoint`). Covers ad-hoc layouts
+    // like `myapp/server/appwrite/config.yaml`.
+    return await this.searchDownwardWithSniff(
+      boundary,
+      this.YAML_SNIFF_BASENAMES,
+      isYamlAppwriteConfig
+    );
   }
 
   /**
@@ -196,8 +334,17 @@ export class ConfigDiscoveryService {
 
     if (upwardResult) return upwardResult;
 
-    // Search DOWN from repo root
-    return await this.searchDownward(boundary, this.JSON_FILENAMES);
+    // Search DOWN from repo root with strict patterns first
+    const strictHit = await this.searchDownward(boundary, this.JSON_FILENAMES);
+    if (strictHit) return strictHit;
+
+    // Schema-sniff fallback: walk every subdir, parse any file matching the
+    // sniff basenames, accept only if it has an Appwrite-CLI `projectId`.
+    return await this.searchDownwardWithSniff(
+      boundary,
+      this.JSON_SNIFF_BASENAMES,
+      isJsonAppwriteConfig
+    );
   }
 
   /**
