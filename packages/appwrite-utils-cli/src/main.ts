@@ -1452,8 +1452,17 @@ async function main() {
           return true; // eligible everywhere if unspecified
         });
 
-        // Fetch available tables from remote for status/context
-        const availableTables = await fetchAllCollections(dbId, controller.database);
+        // Fetch available tables from remote for status/context. Skip the
+        // call for local-only databases (synthesized above when the DB exists
+        // in config but not yet on the server) — fetchAllCollections would
+        // 404 with "Database with the requested ID '<id>' could not be found"
+        // because Appwrite has nothing to list under a not-yet-created DB.
+        // selectivePush() / ensureDatabasesExist() create the DB downstream
+        // before any collection writes happen, so we just treat the remote
+        // table set as empty here.
+        const availableTables = (db as any)._isLocalOnly
+          ? []
+          : await fetchAllCollections(dbId, controller.database);
         const remoteTableIds = new Set(availableTables.map(table => table.$id));
         const localItems = eligibleConfigItems;
         const localItemIds = localItems.map(item => item.$id || (item as any).id || (item as any).tableId || item.name);

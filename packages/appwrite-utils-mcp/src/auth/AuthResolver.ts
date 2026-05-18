@@ -58,6 +58,7 @@ export interface AuthResolutionResult {
     | "tool-params"
     | "server-defaults"
     | "session-override"
+    | "probed-prefs"
     | "cwd-config"
     | "cwd-config+prefs-endpoint"
     | "cwd-config+prefs-current"
@@ -146,6 +147,19 @@ export class AuthResolver {
     | { loaded: false } = { loaded: false };
 
   /**
+   * Cache of "which prefs.json credential works for this projectId" keyed by
+   * projectId. Values are Promises so concurrent resolve() calls coalesce on a
+   * single probe pass. In-memory only — invalidated whenever the override
+   * changes or the user explicitly drops it.
+   *
+   * Lets CNAME-aliased projects (target endpoint differs from the endpoint
+   * that minted the cookie) resolve without the caller having to know the
+   * mapping: every prefs cookie/key is probed against the requested
+   * projectId, and the first one Appwrite recognizes wins.
+   */
+  private projectAuthCache: Map<string, Promise<Candidate | null>> = new Map();
+
+  /**
    * Creates a new AuthResolver with server-level defaults
    *
    * @param serverDefaults - Default authentication configuration from FlagParser
@@ -160,14 +174,119 @@ export class AuthResolver {
    * meta tool to pin the active project for this server instance.
    */
   public setOverride(override: ProjectOverride): void {
+    const previous = this.sessionOverride?.projectId;
     this.sessionOverride = { ...override };
+    // Drop cached probe results for both the previous and incoming project so
+    // a stale "no cred works" verdict from an earlier select doesn't shadow a
+    // fresh probe that should now succeed (e.g. user added a new entry to
+    // prefs.json between selects).
+    if (previous && previous !== override.projectId) {
+      this.projectAuthCache.delete(previous);
+    }
+    this.projectAuthCache.delete(override.projectId);
   }
 
   /**
    * Clear the in-memory project override.
    */
   public clearOverride(): void {
+    const previous = this.sessionOverride?.projectId;
     this.sessionOverride = null;
+    if (previous) {
+      this.projectAuthCache.delete(previous);
+    }
+  }
+
+  /**
+   * Invalidate the cached probe result for a specific projectId. Callers
+   * should hit this whenever the credential surface for that project may have
+   * changed (e.g. user re-ran `appwrite login`, swapped prefs.json by hand).
+   */
+  public invalidateProjectCache(projectId?: string): void {
+    if (projectId === undefined) {
+      this.projectAuthCache.clear();
+      return;
+    }
+    this.projectAuthCache.delete(projectId);
+  }
+
+  /**
+   * Probe every prefs.json entry against the given projectId. First one
+   * Appwrite accepts (`valid` or `valid-but-narrow-scope`) wins. Result is
+   * memoized in `projectAuthCache` so repeated resolve() calls are free.
+   *
+   * The probe uses each entry's OWN endpoint (not the override's) — same
+   * backend either way for CNAME aliases, and avoids guessing which alias to
+   * normalize against. Returned candidate's endpoint is the one that probed
+   * green, which is what the tool's underlying SDK call will use.
+   */
+  public findAuthForProjectId(projectId: string): Promise<Candidate | null> {
+    const existing = this.projectAuthCache.get(projectId);
+    if (existing) return existing;
+
+    const promise = (async (): Promise<Candidate | null> => {
+      const prefs = await this.sessionService.loadSessionPrefs();
+      if (!prefs) return null;
+
+      for (const [pid, raw] of Object.entries(prefs)) {
+        if (pid === "current") continue;
+        if (!raw || typeof raw !== "object") continue;
+
+        const entry = raw as {
+          endpoint?: unknown;
+          cookie?: unknown;
+          key?: unknown;
+        };
+
+        if (typeof entry.endpoint !== "string" || !entry.endpoint) continue;
+
+        const apiKey =
+          typeof entry.key === "string" && entry.key ? entry.key : undefined;
+        const sessionCookie =
+          typeof entry.cookie === "string" && entry.cookie
+            ? entry.cookie
+            : undefined;
+
+        if (!apiKey && !sessionCookie) continue;
+
+        // Probe with cookie first (preferred when both are present, matches
+        // ClientFactory's "auto" policy), then key as a separate attempt.
+        const tryProbe = async (
+          cred: { apiKey?: string; sessionCookie?: string }
+        ): Promise<Candidate | null> => {
+          const verdict = await this.sessionService.probeCredentials({
+            endpoint: entry.endpoint as string,
+            projectId,
+            apiKey: cred.apiKey,
+            sessionCookie: cred.sessionCookie,
+          });
+          if (verdict === "valid" || verdict === "valid-but-narrow-scope") {
+            return {
+              endpoint: entry.endpoint as string,
+              projectId,
+              apiKey: cred.apiKey,
+              sessionCookie: cred.sessionCookie,
+              source: "probed-prefs",
+            };
+          }
+          return null;
+        };
+
+        if (sessionCookie) {
+          const hit = await tryProbe({ sessionCookie });
+          if (hit) return hit;
+        }
+        if (apiKey) {
+          const hit = await tryProbe({ apiKey });
+          if (hit) return hit;
+        }
+      }
+
+      return null;
+    })();
+
+    this.projectAuthCache.set(projectId, promise);
+    return promise;
   }
 
   /**
@@ -326,6 +445,39 @@ export class AuthResolver {
 
     // Tier 4: CWD project config (per-MCP-instance isolation).
     const project = await this.getProjectConfig();
+
+    // Tier 3.5: probe every prefs.json credential against the target projectId
+    // and pick the first one Appwrite accepts. Sits between the explicit-creds
+    // tiers (1-3) and the config-driven tiers (4-6) so an override or CWD
+    // projectId that has no inline auth still resolves via whatever cookie/key
+    // in prefs.json actually works against the project — including CNAME-
+    // aliased cases where the cookie was minted for a different hostname.
+    //
+    // Priority order for the projectId to probe: override > CWD config >
+    // server-default --projectId. Whichever exists first wins; the others
+    // get their own resolution path through subsequent tiers.
+    const probeId =
+      this.sessionOverride?.projectId ?? project?.projectId ?? baseProjectId;
+    if (probeId) {
+      try {
+        const probed = await this.findAuthForProjectId(probeId);
+        if (probed) {
+          pushIfComplete({
+            endpoint: probed.endpoint,
+            projectId: probed.projectId,
+            apiKey: probed.apiKey,
+            sessionCookie: probed.sessionCookie,
+            source: "probed-prefs",
+          });
+        }
+      } catch (error) {
+        // Probe failures are non-fatal — downstream tiers can still resolve.
+        console.warn(
+          "prefs-probe discovery failed:",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
     if (project) {
       const projEndpoint = project.endpoint ?? baseEndpoint;
 

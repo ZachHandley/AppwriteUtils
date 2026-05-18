@@ -401,6 +401,29 @@ Server instance ID: ${this.instanceId}
     console.error(`[appwrite-mcp] Default endpoint: ${this.flags.endpoint || 'none (will use tool params or CLI session)'}`);
     console.error(`[appwrite-mcp] Default project: ${this.flags.projectId || 'none (will use tool params or CLI session)'}`);
     console.error('[appwrite-mcp] Ready to accept MCP requests via stdio');
+
+    // Background warm-up: if the CWD config or --projectId flag tells us which
+    // project we're working with, kick off the prefs-probe now so the first
+    // tool call doesn't pay the probe latency. The probe result is cached on
+    // the AuthResolver; explicit failures are swallowed (downstream
+    // resolve() will report a useful error if needed).
+    void this.warmProjectAuthCache();
+  }
+
+  /**
+   * Fire-and-forget probe to populate AuthResolver's projectAuthCache before
+   * the first tool call. Safe to fail — the on-demand resolve() path runs the
+   * same probe lazily if this skipped or errored.
+   */
+  private async warmProjectAuthCache(): Promise<void> {
+    try {
+      const project = await this.authResolver.getProjectConfig();
+      const probeId = project?.projectId ?? this.flags.projectId;
+      if (!probeId) return;
+      await this.authResolver.findAuthForProjectId(probeId);
+    } catch {
+      // Non-fatal — lazy probe still runs on first resolve().
+    }
   }
 
   /**

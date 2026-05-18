@@ -245,7 +245,9 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
   });
 
   // Invalidate any cached clients keyed on the previous credentials so the
-  // next tool call goes through full re-resolution.
+  // next tool call goes through full re-resolution. AuthResolver.setOverride
+  // already drops its probed-prefs cache for the affected projectIds, so we
+  // only need to flush clients here.
   context.clientRegistry.invalidate();
 
   const override = context.authResolver.getOverride()!;
