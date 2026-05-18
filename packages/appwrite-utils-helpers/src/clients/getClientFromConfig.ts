@@ -5,6 +5,7 @@ import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { findSessionByEndpointAndProject, hasSessionAuth, isValidSessionCookie } from "./sessionAuth.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
 import { logger } from "../shared/logging.js";
+import { buildAppwriteClient } from "./buildAppwriteClient.js";
 
 /**
  * Enhanced client creation from config with session authentication support
@@ -36,20 +37,18 @@ export const getClientWithAuth = (
   key?: string,
   sessionCookie?: string
 ): Client => {
-  const client = new Client()
-    .setEndpoint(endpoint)
-    .setProject(project);
-
   const authAttempts: string[] = [];
 
   // Priority 1: Explicit session cookie provided (already validated upstream or passed directly)
   if (sessionCookie) {
     if (isValidSessionCookie(sessionCookie)) {
-      // Set cookie header directly - sessionCookie is in full HTTP cookie format
-      client.headers['cookie'] = sessionCookie;
-      client.headers['X-Appwrite-Mode'] = 'admin';
       logger.debug("Using session authentication", { prefix: "Auth", project });
-      return client;
+      return buildAppwriteClient({
+        endpoint,
+        projectId: project,
+        sessionCookie,
+        authMethod: "session",
+      });
     } else {
       authAttempts.push("explicit session cookie (invalid format)");
       MessageFormatter.warning(`Provided session cookie has invalid format`, { prefix: "Auth" });
@@ -60,11 +59,13 @@ export const getClientWithAuth = (
   const sessionAuth = findSessionByEndpointAndProject(endpoint, project);
   if (sessionAuth) {
     if (isValidSessionCookie(sessionAuth.sessionCookie)) {
-      // Set cookie header directly - sessionCookie is in full HTTP cookie format
-      client.headers['cookie'] = sessionAuth.sessionCookie;
-      client.headers['X-Appwrite-Mode'] = 'admin';
       logger.debug("Using session authentication from CLI prefs", { prefix: "Auth", project, email: sessionAuth.email || 'unknown user' });
-      return client;
+      return buildAppwriteClient({
+        endpoint,
+        projectId: project,
+        sessionCookie: sessionAuth.sessionCookie,
+        authMethod: "session",
+      });
     } else {
       authAttempts.push("session from CLI prefs (invalid/expired)");
       MessageFormatter.warning(`Session cookie from CLI prefs is invalid or expired`, { prefix: "Auth" });
@@ -76,9 +77,13 @@ export const getClientWithAuth = (
     if (key.trim() === "") {
       authAttempts.push("API key (empty)");
     } else {
-      client.setKey(key);
       logger.debug("Using API key authentication", { prefix: "Auth", project });
-      return client;
+      return buildAppwriteClient({
+        endpoint,
+        projectId: project,
+        apiKey: key,
+        authMethod: "apikey",
+      });
     }
   }
 

@@ -13,8 +13,9 @@ import { TablesDBAdapter } from './TablesDBAdapter.js';
 import { LegacyAdapter } from './LegacyAdapter.js';
 import { logger } from '../shared/logging.js';
 import { isValidSessionCookie } from '../clients/sessionAuth.js';
+import { buildAppwriteClient } from '../clients/buildAppwriteClient.js';
+// Client class no longer needed — buildAppwriteClient owns construction.
 import { MessageFormatter } from '../shared/messageFormatter.js';
-import { Client } from 'node-appwrite';
 
 export interface AdapterFactoryConfig {
   appwriteEndpoint: string;
@@ -217,30 +218,30 @@ export class AdapterFactory {
         operation: 'createTablesDBAdapter'
       });
 
-      let client = new Client()
-        .setEndpoint(config.appwriteEndpoint)
-        .setProject(config.appwriteProject);
+      const hasUsableCookie =
+        !!config.sessionCookie && isValidSessionCookie(config.sessionCookie);
+      const hasUsableKey = !!config.appwriteKey;
 
-      // Set authentication method with mode headers
-      // Prefer session with admin mode, fallback to API key with default mode
-      if (config.sessionCookie && isValidSessionCookie(config.sessionCookie)) {
-        // Set cookie header directly - sessionCookie is in full HTTP cookie format
-        client.headers['cookie'] = config.sessionCookie;
-        client.headers['X-Appwrite-Mode'] = 'admin';
-        logger.debug('Using session authentication for TablesDB adapter', {
-          project: config.appwriteProject,
-          operation: 'createTablesDBAdapter'
-        });
-      } else if (config.appwriteKey) {
-        client.setKey(config.appwriteKey);
-        client.headers['X-Appwrite-Mode'] = 'default';
-        logger.debug('Using API key authentication for TablesDB adapter', {
-          project: config.appwriteProject,
-          operation: 'createTablesDBAdapter'
-        });
-      } else {
+      if (!hasUsableCookie && !hasUsableKey) {
         throw new Error("No authentication available for adapter");
       }
+
+      const client = buildAppwriteClient({
+        endpoint: config.appwriteEndpoint,
+        projectId: config.appwriteProject,
+        sessionCookie: hasUsableCookie ? config.sessionCookie : undefined,
+        apiKey: hasUsableKey ? config.appwriteKey : undefined,
+      });
+
+      logger.debug(
+        hasUsableCookie
+          ? 'Using session authentication for TablesDB adapter'
+          : 'Using API key authentication for TablesDB adapter',
+        {
+          project: config.appwriteProject,
+          operation: 'createTablesDBAdapter',
+        }
+      );
 
       const adapter = new TablesDBAdapter(client);
 
@@ -315,30 +316,30 @@ export class AdapterFactory {
       if (config.preConfiguredClient) {
         client = config.preConfiguredClient;
       } else {
-        client = new Client()
-          .setEndpoint(config.appwriteEndpoint)
-          .setProject(config.appwriteProject);
+        const hasUsableCookie =
+          !!config.sessionCookie && isValidSessionCookie(config.sessionCookie);
+        const hasUsableKey = !!config.appwriteKey;
 
-        // Set authentication method with mode headers
-        // Prefer session with admin mode, fallback to API key with default mode
-        if (config.sessionCookie && isValidSessionCookie(config.sessionCookie)) {
-          // Set cookie header directly - sessionCookie is in full HTTP cookie format
-          client.headers['cookie'] = config.sessionCookie;
-          client.headers['X-Appwrite-Mode'] = 'admin';
-          logger.debug('Using session authentication for Legacy adapter', {
-            project: config.appwriteProject,
-            operation: 'createLegacyAdapter'
-          });
-        } else if (config.appwriteKey) {
-          client.setKey(config.appwriteKey);
-          client.headers['X-Appwrite-Mode'] = 'default';
-          logger.debug('Using API key authentication for Legacy adapter', {
-            project: config.appwriteProject,
-            operation: 'createLegacyAdapter'
-          });
-        } else {
+        if (!hasUsableCookie && !hasUsableKey) {
           throw new Error("No authentication available for adapter");
         }
+
+        client = buildAppwriteClient({
+          endpoint: config.appwriteEndpoint,
+          projectId: config.appwriteProject,
+          sessionCookie: hasUsableCookie ? config.sessionCookie : undefined,
+          apiKey: hasUsableKey ? config.appwriteKey : undefined,
+        });
+
+        logger.debug(
+          hasUsableCookie
+            ? 'Using session authentication for Legacy adapter'
+            : 'Using API key authentication for Legacy adapter',
+          {
+            project: config.appwriteProject,
+            operation: 'createLegacyAdapter',
+          }
+        );
       }
 
       const adapter = new LegacyAdapter(client);

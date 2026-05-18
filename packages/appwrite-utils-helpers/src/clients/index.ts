@@ -1,3 +1,9 @@
+// Single source of truth for constructing Appwrite SDK clients.
+export {
+  buildAppwriteClient,
+  type ClientBuildInput,
+} from "./buildAppwriteClient.js";
+
 // Client factory for creating authenticated Appwrite clients
 export { ClientFactory } from "./ClientFactory.js";
 

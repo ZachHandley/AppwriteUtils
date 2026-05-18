@@ -3,6 +3,7 @@ import type { AppwriteConfig } from "appwrite-utils";
 import { AdapterFactory } from "../adapters/AdapterFactory.js";
 import type { DatabaseAdapter } from "../adapters/DatabaseAdapter.js";
 import { logger } from "../shared/logging.js";
+import { buildAppwriteClient } from "./buildAppwriteClient.js";
 
 /**
  * Test that the client is actually authenticated by making a lightweight API call.
@@ -76,7 +77,8 @@ export class ClientFactory {
    * ```
    */
   public static async createFromConfig(
-    config: AppwriteConfig
+    config: AppwriteConfig,
+    opts: { reuse?: Client } = {}
   ): Promise<{ client: Client; adapter: DatabaseAdapter }> {
     logger.debug("Creating client from config", {
       prefix: "ClientFactory",
@@ -84,12 +86,23 @@ export class ClientFactory {
       hasApiKey: !!config.appwriteKey,
       endpoint: config.appwriteEndpoint,
       project: config.appwriteProject,
+      reusing: !!opts.reuse,
     });
 
-    // Create base client with endpoint and project
-    const client = new Client()
-      .setEndpoint(config.appwriteEndpoint)
-      .setProject(config.appwriteProject);
+    // Fast path: caller passed an already-built client (e.g. from
+    // ConfigManager.getCachedClient()). Skip auth re-derivation and just
+    // verify + wrap in the adapter. The wire shape MUST be identical to
+    // what buildAppwriteClient would have produced — `reuse` is the same
+    // instance ConfigManager already constructed via the shared builder.
+    if (opts.reuse) {
+      await verifyAuthentication(opts.reuse);
+      const { adapter } = await AdapterFactory.createFromConfig(config);
+      logger.debug("Reused cached client; adapter created", {
+        prefix: "ClientFactory",
+        adapterType: adapter.getApiMode(),
+      });
+      return { client: opts.reuse, adapter };
+    }
 
     // Apply authentication based on authMethod preference with mode headers
     // Mode headers: "admin" for sessions (elevated permissions), "default" for API keys
@@ -101,6 +114,8 @@ export class ClientFactory {
       hasApiKey: !!config.appwriteKey,
       hasSession: !!config.sessionCookie,
     });
+
+    let client: Client;
 
     if (authMethod === "session") {
       // Explicit session preference - use only session with admin mode
@@ -115,9 +130,12 @@ export class ClientFactory {
         logger.error("Failed to create client - session required", { prefix: "ClientFactory" });
         throw error;
       }
-      // Set cookie header directly - sessionCookie is in full HTTP cookie format
-      client.headers['cookie'] = config.sessionCookie;
-      client.headers['X-Appwrite-Mode'] =  'admin';
+      client = buildAppwriteClient({
+        endpoint: config.appwriteEndpoint,
+        projectId: config.appwriteProject,
+        sessionCookie: config.sessionCookie,
+        authMethod: "session",
+      });
       logger.debug("Applied session authentication with admin mode (explicit preference)", {
         prefix: "ClientFactory",
         email: config.sessionMetadata?.email,
@@ -136,8 +154,12 @@ export class ClientFactory {
         logger.error("Failed to create client - API key required", { prefix: "ClientFactory" });
         throw error;
       }
-      client.setKey(config.appwriteKey);
-      client.headers['X-Appwrite-Mode'] = 'default';
+      client = buildAppwriteClient({
+        endpoint: config.appwriteEndpoint,
+        projectId: config.appwriteProject,
+        apiKey: config.appwriteKey,
+        authMethod: "apikey",
+      });
       logger.debug("Applied API key authentication with default mode (explicit preference)", {
         prefix: "ClientFactory",
       });
@@ -145,32 +167,52 @@ export class ClientFactory {
     } else {
       // Auto mode: Prefer session with admin mode (like official CLI), fallback to API key
       if (config.sessionCookie) {
-        // Set cookie header directly - sessionCookie is in full HTTP cookie format
-        client.headers['cookie'] = config.sessionCookie;
-        client.headers['X-Appwrite-Mode'] = 'admin';
+        client = buildAppwriteClient({
+          endpoint: config.appwriteEndpoint,
+          projectId: config.appwriteProject,
+          sessionCookie: config.sessionCookie,
+          authMethod: "auto",
+        });
         logger.debug("Applied session authentication with admin mode (auto - preferred)", {
           prefix: "ClientFactory",
           email: config.sessionMetadata?.email,
         });
       } else if (config.appwriteKey && config.appwriteKey.trim().length > 0) {
-        client.setKey(config.appwriteKey);
-        client.headers['X-Appwrite-Mode'] = 'default';
+        client = buildAppwriteClient({
+          endpoint: config.appwriteEndpoint,
+          projectId: config.appwriteProject,
+          apiKey: config.appwriteKey,
+          authMethod: "auto",
+        });
         logger.debug("Applied API key authentication with default mode (auto - fallback)", {
           prefix: "ClientFactory",
         });
       } else {
-        // No authentication available
+        // No authentication available. Pull the ConfigManager diagnostic
+        // (if loadConfig stashed one on the config object) so the user can
+        // see which discovery steps were tried and why each failed.
+        const diagnostic = (config as unknown as { _authDiagnostic?: string })
+          ._authDiagnostic;
+        const diagnosticBlock = diagnostic
+          ? `\n\nDiscovery attempt:\n  - Endpoint: ${config.appwriteEndpoint}\n  - Project:  ${config.appwriteProject}\n  - ${diagnostic}\n`
+          : `\n\n(No discovery context — config wasn't loaded via ConfigManager.loadConfig.)\n`;
+
         const error = new Error(
           "No authentication method available in configuration.\n\n" +
           "Expected either:\n" +
           "  - config.sessionCookie (from session authentication via 'appwrite login')\n" +
-          "  - config.appwriteKey (from config file, CLI flags, or environment)\n\n" +
-          "Suggestion:\n" +
-          "  - Run 'appwrite login' to create a session, OR\n" +
-          "  - Add appwriteKey to your config file, OR\n" +
-          "  - Provide --apiKey flag"
+          "  - config.appwriteKey (from config file, CLI flags, or environment)" +
+          diagnosticBlock +
+          "\nTry:\n" +
+          "  - appwrite login (re-create or refresh your session for this endpoint)\n" +
+          "  - --apiKey <key> on the command line\n" +
+          "  - Add `appwriteKey: <key>` to your config.yaml\n" +
+          "  - Re-run with --debug for verbose [Session]/[Auth] logs"
         );
-        logger.error("Failed to create client - no authentication", { prefix: "ClientFactory" });
+        logger.error("Failed to create client - no authentication", {
+          prefix: "ClientFactory",
+          authDiagnostic: diagnostic,
+        });
         throw error;
       }
     }

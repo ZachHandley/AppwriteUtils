@@ -13,7 +13,12 @@ import { fetchAllCollections } from "./collections/methods.js";
 import type { Specification } from "appwrite-utils";
 import chalk from "chalk";
 import { listSpecifications } from "./functions/methods.js";
-import { MessageFormatter, logger, AuthenticationError } from "appwrite-utils-helpers";
+import {
+  MessageFormatter,
+  logger,
+  AuthenticationError,
+  configureLoggingPreset,
+} from "appwrite-utils-helpers";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 import { SelectionDialogs } from "./shared/selectionDialogs.js";
 import type { SyncSelectionSummary, DatabaseSelection, BucketSelection } from "./shared/selectionDialogs.js";
@@ -71,6 +76,7 @@ interface CliOptions {
   migrateCollectionsToTables?: boolean;
   useSession?: boolean;
   sessionCookie?: string;
+  debug?: boolean;
   listBackups?: boolean;
   autoSync?: boolean;
   selectBuckets?: boolean;
@@ -686,6 +692,11 @@ const argv = yargs(hideBin(process.argv))
     type: "boolean",
     description: "Re-run the selective post-link pull (functions + tables + filtered buckets, never teams by default). Useful after --link or when remote schema changed.",
   })
+  .option("debug", {
+    type: "boolean",
+    default: false,
+    description: "Enable verbose helpers logging (debug level + console transport). Use when auth/discovery is failing silently.",
+  })
   .parse() as ParsedArgv;
 
 // Idempotent process-wide exit. Multiple SIGINTs (or SIGINT-then-SIGTERM)
@@ -704,6 +715,15 @@ process.on("SIGTERM", () => __awuExit(143));
 async function main() {
   const startTime = Date.now();
   const operationStats: Record<string, number> = {};
+
+  // --debug: flip the helpers winston logger from silent default to
+  // debug-level with console transport. Without this, all the diagnostic
+  // logs in SessionAuthService/ConfigManager are invisible — the silent
+  // default is great for production but useless when something's broken.
+  if (argv.debug) {
+    configureLoggingPreset("debug");
+    MessageFormatter.info("Debug logging enabled (helpers logs → console at debug level)", { prefix: "CLI" });
+  }
 
   if (argv.it) {
     const cli = new InteractiveCLI(process.cwd(), {

@@ -18,6 +18,7 @@ import { MessageFormatter } from "../shared/messageFormatter.js";
 import { logger } from "../shared/logging.js";
 import { detectAppwriteVersionCached, type ApiMode } from "../utils/versionDetection.js";
 import { ClientFactory } from "../clients/ClientFactory.js";
+import { buildAppwriteClient } from "../clients/buildAppwriteClient.js";
 
 /**
  * Database type from AppwriteConfig
@@ -428,11 +429,86 @@ export class ConfigManager {
       }
     }
 
+    // Track the auth-resolution chain for diagnostics. Whatever ends up in
+    // here gets stashed on the config (non-enumerably) and surfaced by
+    // ClientFactory if it has to throw "No authentication method available."
+    const authChain: string[] = [];
+
     // 5. Merge session into config
     if (session) {
       logger.debug("Merging session authentication into config", { prefix: "ConfigManager" });
       config = this.mergeService.mergeSession(config, session);
       this.cachedSession = session;
+      authChain.push(
+        `cookie session merged (source: prefs.json[${sessionPrefsKey ?? "?"}], email: ${session.email ?? "?"})`
+      );
+    } else if (
+      !config.appwriteKey &&
+      config.appwriteProject &&
+      config.appwriteEndpoint
+    ) {
+      // 5b. Fallback chain: no cookie session worked → try API key entries
+      // in prefs.json. Covers users whose prefs.json has `{endpoint, key}`
+      // shape (Socialaize-style projects, or `appwrite client --key` setups)
+      // instead of cookie sessions. The helpers below DO handle API keys
+      // (unlike findWorkingSession which is cookie-only) but ConfigManager
+      // never called them — this fills that gap.
+      authChain.push(
+        `findWorkingSession(${config.appwriteEndpoint}, ${config.appwriteProject}) → no usable cookie session (see [Session] warn logs above for probe failures)`
+      );
+
+      const projEntry = await this.sessionService.findEntryForProject(
+        config.appwriteProject
+      );
+      if (projEntry?.apiKey) {
+        config.appwriteKey = projEntry.apiKey;
+        config.authMethod = "apikey";
+        logger.info(
+          `Resolved API key from ~/.appwrite/prefs.json[${config.appwriteProject}]`,
+          { prefix: "Auth" }
+        );
+        authChain.push(
+          `findEntryForProject(${config.appwriteProject}) → API key resolved`
+        );
+      } else {
+        authChain.push(
+          `findEntryForProject(${config.appwriteProject}) → no API key in matching prefs entry`
+        );
+        // Cross-project fallback: "12 projects on one console login" — a
+        // sibling entry on the same endpoint might have the key we need.
+        const endpointEntry = await this.sessionService.findAuthForEndpoint(
+          config.appwriteEndpoint
+        );
+        if (endpointEntry?.apiKey) {
+          config.appwriteKey = endpointEntry.apiKey;
+          config.authMethod = "apikey";
+          logger.info(
+            `Resolved API key from ~/.appwrite/prefs.json by endpoint match (source project: ${endpointEntry.sourceProjectId})`,
+            { prefix: "Auth" }
+          );
+          authChain.push(
+            `findAuthForEndpoint(${config.appwriteEndpoint}) → API key resolved from prefs.json[${endpointEntry.sourceProjectId}]`
+          );
+        } else {
+          authChain.push(
+            `findAuthForEndpoint(${config.appwriteEndpoint}) → no usable auth on any prefs entry matching endpoint`
+          );
+        }
+      }
+    }
+
+    // Stash the auth-resolution chain on the config (non-enumerable so it
+    // doesn't pollute serialization, YAML re-writes, etc.). ClientFactory
+    // reads this from `(config as any)._authDiagnostic` if it has to throw
+    // "No authentication method available" — gives the user a clear picture
+    // of exactly what was tried instead of a generic suggestion list.
+    if (authChain.length > 0) {
+      Object.defineProperty(config, "_authDiagnostic", {
+        value: authChain.join("\n  - "),
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      });
     }
 
     // 6. Apply CLI/env overrides
@@ -561,10 +637,31 @@ export class ConfigManager {
     this.lastLoadTimestamp = Date.now();
     this.isInitialized = true;
 
+    // 10b. Eagerly build the shared client via the single source of truth
+    // (`buildAppwriteClient`). All subsequent paths — `getClient()`,
+    // `ClientFactory.createFromConfig`, AdapterFactory consumers — should
+    // reuse THIS instance via `getCachedClient()`. Eliminates the
+    // probe-then-rebuild double-construction pattern that had testSession
+    // and production code spinning up separate clients for the same auth.
+    if (config.sessionCookie || (config.appwriteKey && config.appwriteKey.trim())) {
+      this.cachedClient = buildAppwriteClient({
+        endpoint: config.appwriteEndpoint,
+        projectId: config.appwriteProject,
+        sessionCookie: config.sessionCookie,
+        apiKey: config.appwriteKey,
+        authMethod: config.authMethod,
+      });
+    } else {
+      // No auth resolved — leave cachedClient null so getClient() throws
+      // with the canonical error (which also reads _authDiagnostic).
+      this.cachedClient = null;
+    }
+
     logger.debug("Config loaded and cached successfully", {
       prefix: "ConfigManager",
       path: configPath,
       hasSession: !!session,
+      cachedClient: !!this.cachedClient,
     });
 
     return config;
@@ -847,37 +944,49 @@ export class ConfigManager {
     }
 
     if (!this.cachedClient) {
-      // Use ClientFactory which has correct cookie header auth
-      const client = new Client()
-        .setEndpoint(this.cachedConfig.appwriteEndpoint)
-        .setProject(this.cachedConfig.appwriteProject);
-
-      // Apply authentication using the correct cookie header approach
-      if (this.cachedConfig.sessionCookie) {
-        // Set cookie header directly - sessionCookie is in full HTTP cookie format
-        client.headers['cookie'] = this.cachedConfig.sessionCookie;
-        client.headers['X-Appwrite-Mode'] = 'admin';
-        logger.debug("Client created with session authentication", {
-          prefix: "ConfigManager",
-          email: this.cachedConfig.sessionMetadata?.email
-        });
-      } else if (this.cachedConfig.appwriteKey && this.cachedConfig.appwriteKey.trim().length > 0) {
-        client.setKey(this.cachedConfig.appwriteKey);
-        client.headers['X-Appwrite-Mode'] = 'default';
-        logger.debug("Client created with API key authentication", {
-          prefix: "ConfigManager"
-        });
-      } else {
+      // Single source of truth for client construction — see
+      // `clients/buildAppwriteClient.ts`. Cookie + admin OR setKey + default
+      // wire shape lives in exactly one place now.
+      if (
+        !this.cachedConfig.sessionCookie &&
+        (!this.cachedConfig.appwriteKey ||
+          this.cachedConfig.appwriteKey.trim().length === 0)
+      ) {
         throw new Error(
           "No authentication method available in configuration.\n" +
           "Expected either sessionCookie or appwriteKey to be set.\n" +
           "Suggestion: Run 'appwrite login' or add an API key to your config."
         );
       }
-
-      this.cachedClient = client;
+      this.cachedClient = buildAppwriteClient({
+        endpoint: this.cachedConfig.appwriteEndpoint,
+        projectId: this.cachedConfig.appwriteProject,
+        sessionCookie: this.cachedConfig.sessionCookie,
+        apiKey: this.cachedConfig.appwriteKey,
+        authMethod: this.cachedConfig.authMethod,
+      });
+      logger.debug(
+        this.cachedConfig.sessionCookie
+          ? "Client created (cached) with session authentication"
+          : "Client created (cached) with API key authentication",
+        {
+          prefix: "ConfigManager",
+          email: this.cachedConfig.sessionMetadata?.email,
+        }
+      );
     }
 
+    return this.cachedClient;
+  }
+
+  /**
+   * Return the cached client if loadConfig() has already populated one.
+   * Used by `ClientFactory.createFromConfig` (and any other code that wants
+   * to reuse the shared instance instead of re-building) to avoid the
+   * "probe-then-rebuild" double-construction pattern. Returns `null` when
+   * no config is loaded yet OR no client has been cached.
+   */
+  public getCachedClient(): Client | null {
     return this.cachedClient;
   }
 

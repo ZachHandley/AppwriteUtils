@@ -13,6 +13,7 @@
 import { logger } from '../shared/logging.js';
 import { MessageFormatter } from '../shared/messageFormatter.js';
 import { Client, Databases, TablesDB, Query } from 'node-appwrite';
+import { buildAppwriteClient } from '../clients/buildAppwriteClient.js';
 
 export type ApiMode = 'legacy' | 'tablesdb';
 
@@ -74,20 +75,17 @@ export async function detectAppwriteVersion(
       operation: 'detectAppwriteVersion'
     });
 
-    // Use provided client or create a new one
-    const testClient = client || new Client().setEndpoint(cleanEndpoint).setProject(project);
-
-    // If creating a new client, apply authentication
-    if (!client) {
-      if (sessionCookie) {
-        // Use session cookie with admin mode
-        testClient.headers['cookie'] = sessionCookie;
-        testClient.headers['X-Appwrite-Mode'] = 'admin';
-      } else if (apiKey && apiKey.trim().length > 0) {
-        // Use API key
-        testClient.setKey(apiKey);
-      }
-    }
+    // Reuse the caller's client when provided (shared instance). Otherwise
+    // construct via the single source of truth — same wire shape as
+    // production callsites (cookie + admin OR setKey + default).
+    const testClient = client
+      ? client
+      : buildAppwriteClient({
+          endpoint: cleanEndpoint,
+          projectId: project,
+          sessionCookie,
+          apiKey,
+        });
 
     const databases = new Databases(testClient);
     // Try to get a database id to probe tables listing

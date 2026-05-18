@@ -290,8 +290,13 @@ export class UtilsController {
       updateLogger();
     }
 
-    // Create client and adapter (session already in config from ConfigManager)
-    const { client, adapter } = await ClientFactory.createFromConfig(config);
+    // Reuse the client ConfigManager already built via buildAppwriteClient.
+    // Eliminates double-construction (probe then rebuild) and guarantees the
+    // probed-and-validated instance is the same one we now use for ops.
+    const cachedClient = configManager.getCachedClient() ?? undefined;
+    const { client, adapter } = await ClientFactory.createFromConfig(config, {
+      reuse: cachedClient,
+    });
 
     this.appwriteServer = client;
     this.adapter = adapter;
@@ -330,8 +335,12 @@ export class UtilsController {
       updateLogger();
     }
 
-    // Recreate client and adapter
-    const { client, adapter } = await ClientFactory.createFromConfig(config);
+    // Recreate client and adapter. Reuse ConfigManager's freshly-built
+    // client (reloadConfig clears+rebuilds cachedClient).
+    const cachedClient = configManager.getCachedClient() ?? undefined;
+    const { client, adapter } = await ClientFactory.createFromConfig(config, {
+      reuse: cachedClient,
+    });
 
     this.appwriteServer = client;
     this.adapter = adapter;

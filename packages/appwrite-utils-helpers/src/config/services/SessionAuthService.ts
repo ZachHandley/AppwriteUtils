@@ -6,6 +6,7 @@ import { MessageFormatter } from "../../shared/messageFormatter.js";
 import { logger } from "../../shared/logging.js";
 import { isValidSessionCookie as isValidSessionCookieShared } from "../../clients/sessionAuth.js";
 import { fetchServerVersion, isVersionAtLeast } from "../../utils/versionDetection.js";
+import { buildAppwriteClient } from "../../clients/buildAppwriteClient.js";
 
 /**
  * Session preferences stored in ~/.appwrite/prefs.json.
@@ -833,9 +834,15 @@ export class SessionAuthService {
       }
     }
 
-    logger.debug("No working session found after testing all candidates", {
+    // No candidate session passed both probes. Promote to warn so the user
+    // sees that we DID try N sessions and they all failed — previously this
+    // was a silent debug log that made the auth error look like "we found
+    // nothing" instead of "we found these and rejected them."
+    logger.warn("No working session found after testing all candidates", {
       prefix: "Session",
-      testedCount: candidates.length
+      endpoint,
+      targetProjectId,
+      testedCount: candidates.length,
     });
 
     return null;
@@ -873,20 +880,17 @@ export class SessionAuthService {
     if (!input.apiKey && !input.sessionCookie) return "invalid-auth";
 
     try {
-      const { Client, Databases, TablesDB, Query } = await import("node-appwrite");
+      const { Databases, TablesDB, Query } = await import("node-appwrite");
 
-      const client = new Client()
-        .setEndpoint(input.endpoint)
-        .setProject(input.projectId);
-
-      if (input.sessionCookie) {
-        // Same wire shape ClientFactory uses — set raw Cookie header + admin mode.
-        client.headers["cookie"] = input.sessionCookie;
-        client.headers["X-Appwrite-Mode"] = "admin";
-      } else if (input.apiKey) {
-        client.setKey(input.apiKey);
-        client.headers["X-Appwrite-Mode"] = "default";
-      }
+      // Use the shared builder — same wire shape every other site uses
+      // (cookie + admin OR setKey + default). Eliminates the open-coded
+      // duplicate that used to live here.
+      const client = buildAppwriteClient({
+        endpoint: input.endpoint,
+        projectId: input.projectId,
+        sessionCookie: input.sessionCookie,
+        apiKey: input.apiKey,
+      });
 
       const serverVersion = await fetchServerVersion(input.endpoint);
       const useTables = !!(serverVersion && isVersionAtLeast(serverVersion, "1.8.0"));
@@ -991,26 +995,36 @@ export class SessionAuthService {
     endpoint: string,
     projectId: string,
     cookie: string,
-    options: { useTables?: boolean; serverVersion?: string | null } = {}
+    options: {
+      useTables?: boolean;
+      serverVersion?: string | null;
+      /** Reuse an already-built Client (rebound to this endpoint+project+cookie). */
+      reuse?: import('node-appwrite').Client;
+    } = {}
   ): Promise<boolean> {
+    const { Account, Databases, TablesDB, Query } = await import('node-appwrite');
+
+    // Build (or rebind) via the shared builder — same wire shape every
+    // other site uses, no risk of "probe accepted but production rejects"
+    // due to subtle header drift.
+    const client = buildAppwriteClient({
+      endpoint,
+      projectId,
+      sessionCookie: cookie,
+      authMethod: "session",
+      reuse: options.reuse,
+    });
+
+    let useTables = options.useTables;
+    if (useTables === undefined) {
+      const version = options.serverVersion ?? await fetchServerVersion(endpoint);
+      useTables = !!(version && isVersionAtLeast(version, "1.8.0"));
+    }
+
+    // PRIMARY probe — project-scoped read. Hits TablesDB on ≥1.8, Databases
+    // otherwise. Requires the session to have `tables.read`/`databases.read`
+    // for THIS project. Console sessions for admins/owners usually do.
     try {
-      const { Client, Databases, TablesDB, Query } = await import('node-appwrite');
-
-      const client = new Client()
-        .setEndpoint(endpoint)
-        .setProject(projectId);
-
-      // Set cookie header directly - cookie is in full HTTP cookie format
-      client.headers['cookie'] = cookie;
-      // Set admin mode header for session testing
-      client.headers['X-Appwrite-Mode'] = 'admin';
-
-      let useTables = options.useTables;
-      if (useTables === undefined) {
-        const version = options.serverVersion ?? await fetchServerVersion(endpoint);
-        useTables = !!(version && isVersionAtLeast(version, "1.8.0"));
-      }
-
       if (useTables) {
         const tables = new TablesDB(client);
         await tables.list({ queries: [Query.limit(1)] });
@@ -1019,22 +1033,47 @@ export class SessionAuthService {
         await databases.list({ queries: [Query.limit(1)] });
       }
 
-      logger.debug("Session test successful", {
-        prefix: "Session",
-        endpoint,
-        projectId
-      });
-
-      return true;
-    } catch (error) {
-      logger.debug("Session test failed", {
+      logger.debug("Session test successful via project-scoped read", {
         prefix: "Session",
         endpoint,
         projectId,
-        error: error instanceof Error ? error.message : String(error)
       });
+      return true;
+    } catch (projScopeErr) {
+      // FALLBACK probe — `account.get()` validates the cookie against the
+      // user without needing any project-scoped permission. If the cookie
+      // is a valid console session for this endpoint+project pair, this
+      // succeeds even when the project-scoped read above 404s (version
+      // misdetect on a server without TablesDB) or 401s (cookie real but
+      // missing the specific scope we tried). The session IS usable — the
+      // failure was the strict probe, not the auth itself.
+      try {
+        const account = new Account(client);
+        await account.get();
 
-      return false;
+        logger.warn(
+          "Session valid via account.get() but project-scoped probe failed — using session anyway",
+          {
+            prefix: "Session",
+            endpoint,
+            projectId,
+            projectProbeError:
+              projScopeErr instanceof Error ? projScopeErr.message : String(projScopeErr),
+          }
+        );
+        return true;
+      } catch (acctErr) {
+        // Both probes failed → cookie is genuinely unusable.
+        logger.warn("Session test failed on both project-scoped probe and account.get()", {
+          prefix: "Session",
+          endpoint,
+          projectId,
+          projectProbeError:
+            projScopeErr instanceof Error ? projScopeErr.message : String(projScopeErr),
+          accountProbeError: acctErr instanceof Error ? acctErr.message : String(acctErr),
+        });
+        return false;
+      }
     }
   }
 }
