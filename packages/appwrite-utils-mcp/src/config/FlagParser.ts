@@ -38,6 +38,13 @@ export interface ServerFlags {
    * Used by per-group binaries (appwrite-mcp-storage, etc.).
    */
   lockedScope?: boolean;
+
+  /**
+   * Optional absolute path to append tool-error log lines to. When set, every
+   * call to `logToolError` writes one JSON line to this file in addition to
+   * the always-on stderr output. Default: undefined (stderr only).
+   */
+  logFile?: string;
 }
 
 /**
@@ -123,6 +130,12 @@ export function parseFlags(argv: string[]): ServerFlags {
       type: 'string',
       description: 'Instance identifier for multi-instance',
     })
+    .option('logFile', {
+      type: 'string',
+      description:
+        'Optional absolute path to append tool-error log lines to (JSON-per-line). ' +
+        'Default: stderr only.',
+    })
     .help()
     .alias('help', 'h')
     .version()
@@ -147,6 +160,7 @@ export function parseFlags(argv: string[]): ServerFlags {
     apiKey: parsed.apiKey,
     configDir: parsed.configDir,
     instanceId: parsed.instanceId,
+    logFile: parsed.logFile,
   };
 }
 

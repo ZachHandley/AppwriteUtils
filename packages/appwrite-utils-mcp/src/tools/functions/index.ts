@@ -105,6 +105,14 @@ const getExecutionSchema = z.object({
 });
 
 /**
+ * Schema for get_execution_logs - Requires functionId + executionId
+ */
+const getExecutionLogsSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+  executionId: z.string().min(1, 'Execution ID is required'),
+});
+
+/**
  * Schema for create_execution - Trigger a function execution
  */
 const createExecutionSchema = z.object({
@@ -599,6 +607,56 @@ async function handleGetExecution(
 }
 
 /**
+ * Get just the logs + errors for a single execution. Slim projection optimized
+ * for failure triage — drops responseBody, headers, request method/path which
+ * are noise when you're trying to find out what crashed.
+ *
+ * Appwrite caps `logs` and `errors` at the last 4000 chars each, and only
+ * populates them when the request was authenticated with an API key (not a
+ * session cookie). If they come back empty, double-check the auth method.
+ */
+async function handleGetExecutionLogs(
+  input: unknown,
+  context: ToolContext
+): Promise<{
+  $id: string;
+  $createdAt: string;
+  status: string;
+  trigger: string;
+  duration: number;
+  responseStatusCode: number;
+  scheduledAt?: string;
+  logs: string;
+  errors: string;
+}> {
+  const validated = getExecutionLogsSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  const ex: any = await functionManager.getExecution(validated.functionId, validated.executionId);
+
+  return {
+    $id: ex.$id,
+    $createdAt: ex.$createdAt,
+    status: ex.status,
+    trigger: ex.trigger,
+    duration: ex.duration,
+    responseStatusCode: ex.responseStatusCode,
+    scheduledAt: ex.scheduledAt,
+    logs: ex.logs ?? '',
+    errors: ex.errors ?? '',
+  };
+}
+
+/**
  * Trigger a function execution.
  */
 async function handleCreateExecution(
@@ -1028,7 +1086,7 @@ const deployFunctionViaCliTool: ToolDefinition = {
 const listExecutionsTool: ToolDefinition = {
   name: 'list_executions',
   description:
-    'List executions for a function. Returns a slim per-row projection ($id, status, trigger, responseStatusCode, duration, $createdAt, short errorExcerpt). Use get_execution for full logs/errors.',
+    'List executions for a function. Returns a slim per-row projection ($id, status, trigger, responseStatusCode, duration, $createdAt, short errorExcerpt). Logs and full errors are intentionally NOT included — use get_execution_logs(functionId, executionId) for just logs/errors/status, or get_execution for the full payload (logs + responseBody + headers).',
   inputSchema: listExecutionsSchema,
   handler: handleListExecutions,
   requiresAuth: true,
@@ -1037,9 +1095,18 @@ const listExecutionsTool: ToolDefinition = {
 const getExecutionTool: ToolDefinition = {
   name: 'get_execution',
   description:
-    'Get a single function execution by ID including full logs, errors, request and response details.',
+    'Get a single function execution by ID — returns the FULL payload (logs, errors, responseBody, request/response headers, request method/path, duration, scheduledAt). For just logs + errors + status (smaller payload, better for failure triage), use get_execution_logs.',
   inputSchema: getExecutionSchema,
   handler: handleGetExecution,
+  requiresAuth: true,
+};
+
+const getExecutionLogsTool: ToolDefinition = {
+  name: 'get_execution_logs',
+  description:
+    'Get logs + errors for a single function execution. Returns a slim projection ($id, status, trigger, duration, responseStatusCode, scheduledAt, $createdAt, logs, errors) — drops responseBody and request/response headers. Use this for failure triage. Appwrite caps logs/errors at the last 4000 chars each and only populates them when the request was authenticated with an API key.',
+  inputSchema: getExecutionLogsSchema,
+  handler: handleGetExecutionLogs,
   requiresAuth: true,
 };
 
@@ -1157,6 +1224,7 @@ export const functionsToolGroup: ToolGroupDefinition = {
     deployFunctionViaCliTool,
     listExecutionsTool,
     getExecutionTool,
+    getExecutionLogsTool,
     createExecutionTool,
     deleteExecutionTool,
     listDeploymentsTool,

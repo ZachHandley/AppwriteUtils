@@ -18,6 +18,7 @@ console.warn = console.error.bind(console);
 import { basename } from 'node:path';
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags, type ServerFlags } from '../config/FlagParser.js';
+import { logToolError } from '../utils/errorLogger.js';
 
 const BIN_PREFIX = 'appwrite-mcp-';
 
@@ -116,12 +117,20 @@ async function main() {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 
     process.on('uncaughtException', (error) => {
-      console.error(`[appwrite-mcp-${group}] Uncaught exception:`, error);
+      logToolError({
+        toolName: `<process:uncaughtException:${group}>`,
+        args: {},
+        error,
+      });
       process.exit(1);
     });
 
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error(`[appwrite-mcp-${group}] Unhandled rejection at:`, promise, 'reason:', reason);
+    process.on('unhandledRejection', (reason) => {
+      logToolError({
+        toolName: `<process:unhandledRejection:${group}>`,
+        args: {},
+        error: reason,
+      });
       process.exit(1);
     });
   } catch (error) {

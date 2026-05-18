@@ -14,6 +14,7 @@ console.warn = console.error.bind(console);
 
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags } from '../config/FlagParser.js';
+import { logToolError } from '../utils/errorLogger.js';
 
 /**
  * Main entry point for the Appwrite MCP server
@@ -49,14 +50,16 @@ async function main() {
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-    // Handle uncaught errors
+    // Handle uncaught errors — route through the unified error logger so the
+    // event is captured to the log file too (if --logFile was set) and gets a
+    // structured JSON line on stderr instead of a bare console.error dump.
     process.on('uncaughtException', (error) => {
-      console.error('[appwrite-mcp] Uncaught exception:', error);
+      logToolError({ toolName: '<process:uncaughtException>', args: {}, error });
       process.exit(1);
     });
 
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('[appwrite-mcp] Unhandled rejection at:', promise, 'reason:', reason);
+    process.on('unhandledRejection', (reason) => {
+      logToolError({ toolName: '<process:unhandledRejection>', args: {}, error: reason });
       process.exit(1);
     });
 

@@ -18,6 +18,7 @@ import { ClientRegistry } from './state/ClientRegistry.js';
 import { StateManager } from './state/StateManager.js';
 import { ToolRegistry } from './tools/ToolRegistry.js';
 import type { ToolContext } from './tools/ToolGroup.js';
+import { configureErrorLogger, formatErrorForAgent, logToolError } from './utils/errorLogger.js';
 import { randomUUID } from 'crypto';
 
 // Import tool groups
@@ -73,6 +74,12 @@ export class AppwriteMCPServer {
   constructor(flags: ServerFlags) {
     this.flags = flags;
     this.instanceId = flags.instanceId || randomUUID();
+
+    // Wire optional log file. Stderr output is always on; this only adds
+    // append-to-file when --logFile was passed at startup.
+    if (flags.logFile) {
+      configureErrorLogger({ logFilePath: flags.logFile });
+    }
 
     // Initialize core components
     this.authResolver = new AuthResolver({
@@ -274,6 +281,7 @@ Server instance ID: ${this.instanceId}
     // Handle tools/call request - routes to ToolRegistry
     this.server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
       const { name, arguments: args } = request.params;
+      const started = Date.now();
 
       // Create tool context
       const context: ToolContext = {
@@ -305,16 +313,35 @@ Server instance ID: ${this.instanceId}
           ],
         };
       } catch (error) {
-        // Record failed operation
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.stateManager.recordOperation(name, args, false, errorMessage);
+        // Centralized error logging — stderr (always) + log file (if configured),
+        // with secret-redacted args. See utils/errorLogger.ts for redaction rules.
+        const durationMs = Date.now() - started;
+        logToolError({
+          toolName: name,
+          args,
+          error,
+          instanceId: this.instanceId,
+          durationMs,
+        });
 
-        // Return error
+        // Record failed operation (uses the plain message — state manager is
+        // internal only, not surfaced to the client).
+        const formatted = formatErrorForAgent(error);
+        this.stateManager.recordOperation(name, args, false, formatted.message);
+
+        // Build the agent-visible message. Surface Appwrite code/type so the
+        // agent can react (404 missing collection vs 401 missing scope, etc.).
+        const suffix =
+          (formatted.code !== undefined ? ` [code=${formatted.code}]` : '') +
+          (formatted.type ? ` [type=${formatted.type}]` : '');
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Error executing tool '${name}': ${errorMessage}`,
+              text: this.guardLargeText(
+                `Error executing tool '${name}': ${formatted.message}${suffix}`
+              ),
             },
           ],
           isError: true,
