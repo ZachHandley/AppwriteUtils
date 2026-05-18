@@ -240,6 +240,40 @@ export class ConfigLoaderService {
           `Loaded ${fromTables} tables from tables/`,
           { prefix: "Config" }
         );
+      } else {
+        // Zero items loaded from BOTH directories — almost always a path
+        // misconfiguration (e.g. user set `schemas.tablesDirectory: appwrite/tables`
+        // while their config.yaml is already inside `appwrite/`, producing a
+        // doubled path that doesn't exist). Give the AI agent and the human
+        // everything they need to fix it in one log block.
+        const tablesDirRaw = config.schemaConfig?.tablesDirectory || "tables";
+        const collectionsDirRaw = config.schemaConfig?.collectionsDirectory || "collections";
+        const tablesExists = fs.existsSync(tablesDir);
+        const collectionsExists = fs.existsSync(collectionsDir);
+        const dirState = (abs: string, exists: boolean) => {
+          if (!exists) return "does not exist";
+          try {
+            const entries = fs.readdirSync(abs).filter(f =>
+              f.endsWith(".yaml") || f.endsWith(".yml") || f.endsWith(".ts")
+            );
+            return `exists, ${entries.length} schema file(s)`;
+          } catch {
+            return "exists, unreadable";
+          }
+        };
+        MessageFormatter.warning(
+          [
+            `No tables or collections loaded from disk — push/pull will have nothing to operate on.`,
+            `  Config file:        ${yamlPath}`,
+            `  Resolved tables:    ${tablesDir}  (${dirState(tablesDir, tablesExists)})`,
+            `    schemas.tablesDirectory in config: "${tablesDirRaw}"`,
+            `  Resolved collections: ${collectionsDir}  (${dirState(collectionsDir, collectionsExists)})`,
+            `    schemas.collectionsDirectory in config: "${collectionsDirRaw}"`,
+            `  Hint: schemas.* paths are resolved relative to the CONFIG FILE'S directory (${configDir}), not the repo root.`,
+            `        If your YAML schemas live at "${path.join(configDir, "tables")}", set schemas.tablesDirectory to "tables" (NOT "appwrite/tables").`,
+          ].join("\n"),
+          { prefix: "Config" }
+        );
       }
 
       // Report conflicts

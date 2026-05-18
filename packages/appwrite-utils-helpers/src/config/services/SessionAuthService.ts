@@ -769,30 +769,32 @@ export class SessionAuthService {
       return null;
     }
 
-    let candidates = this.getSessionsForEndpoint(prefs, endpoint);
-    if (candidates.length === 0) {
-      logger.debug("No endpoint-matched sessions, trying all sessions as cross-endpoint fallback", {
-        prefix: "Session",
-        endpoint,
-        normalizedEndpoint: this.normalizeEndpoint(endpoint)
-      });
-      // Fallback: try ALL sessions regardless of endpoint (handles custom domains like
-      // appwrite.socialaize.com pointing to cloud.appwrite.io)
-      candidates = Object.entries(prefs)
-        .filter(([key, data]) =>
-          key !== 'current' &&
-          typeof data === 'object' &&
-          data?.endpoint &&
-          data?.cookie
-        ) as typeof candidates;
-    }
-    if (candidates.length === 0) {
+    // Pass 1: endpoint-matched cookies (most likely to work, test first).
+    const endpointMatched = this.getSessionsForEndpoint(prefs, endpoint);
+    // Pass 2: cross-endpoint cookies — handles CNAME aliasing where the user
+    // logged in against the canonical endpoint (e.g. cloud.appwrite.io) but is
+    // pushing against an aliased custom domain (e.g. appwrite.socialaize.com),
+    // OR vice-versa. The cookie minted by Appwrite is valid against ANY
+    // hostname that proxies/CNAMEs to the same backend; the SDK's `Cookie:`
+    // header doesn't pin the cookie to the issuing domain on our wire shape.
+    const matchedKeys = new Set(endpointMatched.map(([key]) => key));
+    const crossEndpoint = Object.entries(prefs)
+      .filter(([key, data]) =>
+        key !== 'current' &&
+        !matchedKeys.has(key) &&
+        typeof data === 'object' &&
+        (data as any)?.endpoint &&
+        (data as any)?.cookie
+      ) as typeof endpointMatched;
+
+    if (endpointMatched.length === 0 && crossEndpoint.length === 0) {
       return null;
     }
 
-    logger.debug(`Testing ${candidates.length} candidate sessions`, {
+    logger.debug(`Found ${endpointMatched.length} endpoint-matched + ${crossEndpoint.length} cross-endpoint candidate sessions`, {
       prefix: "Session",
       endpoint,
+      normalizedEndpoint: this.normalizeEndpoint(endpoint),
       targetProjectId
     });
 
@@ -805,44 +807,77 @@ export class SessionAuthService {
       useTables
     });
 
-    for (const [prefsKey, sessionData] of candidates) {
-      logger.debug(`Testing session for project key: ${prefsKey}`, { prefix: "Session" });
+    const tryCandidates = async (
+      list: typeof endpointMatched,
+      passLabel: "endpoint-matched" | "cross-endpoint"
+    ): Promise<{ session: SessionAuthInfo; prefsKey: string } | null> => {
+      for (const [prefsKey, sessionData] of list) {
+        logger.debug(`Testing session [${passLabel}] for prefs key: ${prefsKey}`, { prefix: "Session" });
 
-      // Test this session against the target project
-      const works = await this.testSession(endpoint, targetProjectId, sessionData.cookie, {
-        useTables,
-        serverVersion
-      });
-
-      if (works) {
-        logger.info(`Found working session for project ${targetProjectId}`, {
-          prefix: "Session",
-          prefsKey,
-          email: sessionData.email
+        const works = await this.testSession(endpoint, targetProjectId, sessionData.cookie, {
+          useTables,
+          serverVersion
         });
 
-        return {
-          session: {
-            endpoint,
-            projectId: targetProjectId,
-            cookie: sessionData.cookie,
-            email: sessionData.email,
-            expiresAt: sessionData.expiresAt
-          },
-          prefsKey
-        };
+        if (works) {
+          if (passLabel === "cross-endpoint") {
+            // Note: we matched a cookie that wasn't minted for THIS endpoint —
+            // most commonly because the target endpoint is a CNAME alias of
+            // the cookie's issuing endpoint. Surface it at warn so the user
+            // can see we're using an alias, which is useful for debugging
+            // unexpected cross-project access.
+            logger.warn(`Cross-endpoint session match — cookie from prefs key ${prefsKey} is being used against endpoint ${endpoint}`, {
+              prefix: "Session",
+              prefsKey,
+              cookieEndpoint: sessionData.endpoint,
+              targetEndpoint: endpoint,
+              email: sessionData.email
+            });
+          } else {
+            logger.info(`Found working session for project ${targetProjectId}`, {
+              prefix: "Session",
+              prefsKey,
+              email: sessionData.email
+            });
+          }
+          return {
+            session: {
+              endpoint,
+              projectId: targetProjectId,
+              cookie: sessionData.cookie,
+              email: sessionData.email,
+              expiresAt: sessionData.expiresAt
+            },
+            prefsKey
+          };
+        }
       }
+      return null;
+    };
+
+    const matchedResult = await tryCandidates(endpointMatched, "endpoint-matched");
+    if (matchedResult) return matchedResult;
+
+    if (crossEndpoint.length > 0) {
+      logger.debug(`All ${endpointMatched.length} endpoint-matched sessions rejected; trying ${crossEndpoint.length} cross-endpoint candidate(s) for CNAME aliasing`, {
+        prefix: "Session",
+        endpoint,
+        targetProjectId
+      });
+      const aliasResult = await tryCandidates(crossEndpoint, "cross-endpoint");
+      if (aliasResult) return aliasResult;
     }
 
     // No candidate session passed both probes. Promote to warn so the user
     // sees that we DID try N sessions and they all failed — previously this
     // was a silent debug log that made the auth error look like "we found
     // nothing" instead of "we found these and rejected them."
-    logger.warn("No working session found after testing all candidates", {
+    logger.warn("No working session found after testing all candidates (endpoint-matched + cross-endpoint)", {
       prefix: "Session",
       endpoint,
       targetProjectId,
-      testedCount: candidates.length,
+      endpointMatchedCount: endpointMatched.length,
+      crossEndpointCount: crossEndpoint.length,
     });
 
     return null;

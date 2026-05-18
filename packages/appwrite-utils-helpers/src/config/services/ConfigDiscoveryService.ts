@@ -74,53 +74,78 @@ export interface DiscoveryResult {
  * 2. JSON configs (appwrite.config.json, appwrite.json)
  * 3. TypeScript configs (appwriteConfig.ts)
  */
+// ──────────────────────────────────────────────────────────────────────────
+// SOURCE OF TRUTH — config discovery filename patterns.
+//
+// These are module-level exports (not class fields) so the legacy sync entry
+// points like `findYamlConfig` / `findAppwriteConfig` in yamlConfig.ts /
+// configDiscovery.ts can share the EXACT same list as ConfigDiscoveryService.
+// When users invent a new layout (e.g. `awconfig/appwriteConfig.yaml`),
+// add it HERE in one place and every discovery path picks it up.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * YAML configuration file paths to search for (strict / fast path).
+ *
+ * Includes both the canonical `.appwrite/` (dot-prefix) location and the
+ * common `appwrite/` (no-dot) sibling layout that people set up by hand.
+ * Anything outside this list still has a chance via the schema-sniff
+ * fallback in {@link ConfigDiscoveryService.findYamlConfig}.
+ */
+export const YAML_FILENAMES: readonly string[] = Object.freeze([
+  ".appwrite/config.yaml",
+  ".appwrite/config.yml",
+  ".appwrite/appwriteConfig.yaml",
+  ".appwrite/appwriteConfig.yml",
+  "appwrite/config.yaml",
+  "appwrite/config.yml",
+  "appwrite/appwriteConfig.yaml",
+  "appwrite/appwriteConfig.yml",
+  "appwrite.yaml",
+  "appwrite.yml",
+]);
+
+/**
+ * JSON configuration file names to search for (strict / fast path).
+ * Sniff fallback also looks for these basenames in any subdirectory.
+ */
+export const JSON_FILENAMES: readonly string[] = Object.freeze([
+  "appwrite.config.json",
+  "appwrite.json",
+]);
+
+/**
+ * Basenames the schema-sniff fallback is allowed to open.
+ * Kept narrow so we never accidentally parse e.g. a Vite `config.yaml`.
+ */
+export const YAML_SNIFF_BASENAMES: readonly string[] = Object.freeze([
+  "config.yaml",
+  "config.yml",
+  "appwriteConfig.yaml",
+  "appwriteConfig.yml",
+  "appwrite.yaml",
+  "appwrite.yml",
+]);
+
+export const JSON_SNIFF_BASENAMES: readonly string[] = Object.freeze([
+  "appwrite.config.json",
+  "appwrite.json",
+]);
+
+/**
+ * TypeScript configuration file names to search for
+ */
+export const TS_FILENAMES: readonly string[] = Object.freeze(["appwriteConfig.ts"]);
+
 export class ConfigDiscoveryService {
-  /**
-   * YAML configuration file names to search for (strict / fast path).
-   *
-   * Includes both the canonical `.appwrite/` (dot-prefix) location and the
-   * common `appwrite/` (no-dot) sibling layout that people set up by hand.
-   * Anything outside this list still has a chance via the schema-sniff
-   * fallback in {@link findYamlConfig}.
-   */
-  private readonly YAML_FILENAMES = [
-    ".appwrite/config.yaml",
-    ".appwrite/config.yml",
-    ".appwrite/appwriteConfig.yaml",
-    ".appwrite/appwriteConfig.yml",
-    "appwrite/config.yaml",
-    "appwrite/config.yml",
-    "appwrite/appwriteConfig.yaml",
-    "appwrite/appwriteConfig.yml",
-    "appwrite.yaml",
-    "appwrite.yml",
-  ];
-
-  /**
-   * JSON configuration file names to search for (strict / fast path).
-   * Sniff fallback also looks for these basenames in any subdirectory.
-   */
-  private readonly JSON_FILENAMES = ["appwrite.config.json", "appwrite.json"];
-
-  /**
-   * Basenames the schema-sniff fallback is allowed to open.
-   * Kept narrow so we never accidentally parse e.g. a Vite `config.yaml`.
-   */
-  private readonly YAML_SNIFF_BASENAMES = [
-    "config.yaml",
-    "config.yml",
-    "appwriteConfig.yaml",
-    "appwriteConfig.yml",
-    "appwrite.yaml",
-    "appwrite.yml",
-  ];
-
-  private readonly JSON_SNIFF_BASENAMES = ["appwrite.config.json", "appwrite.json"];
-
-  /**
-   * TypeScript configuration file names to search for
-   */
-  private readonly TS_FILENAMES = ["appwriteConfig.ts"];
+  // Filename constants live at module scope (see top of file). Keep these
+  // private aliases so existing `this.X` call sites in this class continue to
+  // work without churn.
+  private readonly YAML_FILENAMES = YAML_FILENAMES;
+  private readonly JSON_FILENAMES = JSON_FILENAMES;
+  private readonly YAML_SNIFF_BASENAMES = YAML_SNIFF_BASENAMES;
+  private readonly JSON_SNIFF_BASENAMES = JSON_SNIFF_BASENAMES;
+  private readonly TS_FILENAMES = TS_FILENAMES;
 
   /**
    * Finds the git repository root directory
@@ -146,7 +171,7 @@ export class ConfigDiscoveryService {
    */
   private async searchDownward(
     dir: string,
-    patterns: string[],
+    patterns: readonly string[],
     maxDepth: number = 5,
     currentDepth: number = 0
   ): Promise<string | null> {
@@ -194,7 +219,7 @@ export class ConfigDiscoveryService {
    */
   private async searchDownwardWithSniff(
     dir: string,
-    basenames: string[],
+    basenames: readonly string[],
     validate: (absPath: string) => Promise<boolean>,
     maxDepth: number = 6,
     currentDepth: number = 0

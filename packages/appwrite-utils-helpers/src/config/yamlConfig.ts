@@ -5,6 +5,7 @@ import path from "path";
 import { AppwriteConfigSchema, type AppwriteConfig, RuntimeSchema, FunctionScopes, FunctionSpecifications, permissionsSchema, PermissionToAppwritePermission, type AppwriteFunction, type AppwriteSite, FrameworkSchema, AdapterSchema, BuildRuntimeSchema } from "appwrite-utils";
 import { shouldIgnoreDirectory } from "../utils/directoryUtils.js";
 import { MessageFormatter } from "../shared/messageFormatter.js";
+import { YAML_FILENAMES } from "./services/ConfigDiscoveryService.js";
 
 const YamlConfigSchema = z.object({
   appwrite: z.object({
@@ -391,91 +392,72 @@ export const loadYamlConfig = async (configPath: string): Promise<AppwriteConfig
   }
 };
 
+/**
+ * Sync YAML config discovery — sibling of ConfigDiscoveryService.findYamlConfig
+ * (the async/strict version). Walks startDir + one level up + subdirectories
+ * (capped depth), trying every pattern in the SHARED `YAML_FILENAMES` list at
+ * each location. The pattern list itself lives in ConfigDiscoveryService so
+ * adding a new layout is a single-line change there — both the sync and async
+ * discovery paths pick it up automatically.
+ */
 export const findYamlConfig = (startDir: string): string | null => {
-  // First check current directory for YAML configs
-  const possiblePaths = [
-    path.join(startDir, ".appwrite", "config.yaml"),
-    path.join(startDir, ".appwrite", "config.yml"),
-    path.join(startDir, ".appwrite", "appwriteConfig.yaml"),
-    path.join(startDir, ".appwrite", "appwriteConfig.yml"),
-    path.join(startDir, "appwrite.yaml"),
-    path.join(startDir, "appwrite.yml"),
-  ];
-
-  for (const configPath of possiblePaths) {
-    if (fs.existsSync(configPath)) {
-      return configPath;
-    }
-  }
-
-  // Recursively search subdirectories for .appwrite folders
-  const yamlConfigInSubdirs = findYamlConfigRecursive(startDir);
-  if (yamlConfigInSubdirs) {
-    return yamlConfigInSubdirs;
-  }
-
-  // Only check one level up to avoid infinite traversal
-  const parentDir = path.dirname(startDir);
-  if (parentDir !== startDir && path.basename(parentDir) !== 'node_modules') {
-    const parentPossiblePaths = [
-      path.join(parentDir, ".appwrite", "config.yaml"),
-      path.join(parentDir, ".appwrite", "config.yml"),
-      path.join(parentDir, ".appwrite", "appwriteConfig.yaml"),
-      path.join(parentDir, ".appwrite", "appwriteConfig.yml"),
-      path.join(parentDir, "appwrite.yaml"),
-      path.join(parentDir, "appwrite.yml"),
-    ];
-
-    for (const configPath of parentPossiblePaths) {
-      if (fs.existsSync(configPath)) {
-        return configPath;
+  const tryPatternsAt = (dir: string): string | null => {
+    for (const pattern of YAML_FILENAMES) {
+      const candidate = path.join(dir, pattern);
+      if (fs.existsSync(candidate)) {
+        return candidate;
       }
     }
+    return null;
+  };
+
+  // 1. Current directory.
+  const here = tryPatternsAt(startDir);
+  if (here) return here;
+
+  // 2. Subdirectories (recursive, capped depth, ignores node_modules/.git/etc).
+  const inSubdirs = findYamlConfigRecursive(startDir, tryPatternsAt);
+  if (inSubdirs) return inSubdirs;
+
+  // 3. One level up only (no further — keeps discovery bounded to repo scope).
+  const parentDir = path.dirname(startDir);
+  if (parentDir !== startDir && path.basename(parentDir) !== "node_modules") {
+    const above = tryPatternsAt(parentDir);
+    if (above) return above;
   }
 
   return null;
 };
 
-const findYamlConfigRecursive = (dir: string, depth: number = 0): string | null => {
-  // Limit search depth to prevent infinite recursion
-  if (depth > 5) {
-    return null;
-  }
+const findYamlConfigRecursive = (
+  dir: string,
+  tryPatternsAt: (d: string) => string | null,
+  depth: number = 0
+): string | null => {
+  if (depth > 5) return null;
+  if (shouldIgnoreDirectory(path.basename(dir))) return null;
 
-  if (shouldIgnoreDirectory(path.basename(dir))) {
-    return null;
-  }
-
+  let entries: fs.Dirent[];
   try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
 
-    for (const entry of entries) {
-      if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
-        const fullPath = path.join(dir, entry.name);
-        
-        // Check if this is an .appwrite directory
-        if (entry.name === ".appwrite") {
-          const configPaths = [
-            path.join(fullPath, "config.yaml"),
-            path.join(fullPath, "config.yml"),
-            path.join(fullPath, "appwriteConfig.yaml"),
-            path.join(fullPath, "appwriteConfig.yml"),
-          ];
-          
-          for (const configPath of configPaths) {
-            if (fs.existsSync(configPath)) {
-              return configPath;
-            }
-          }
-        }
-        
-        // Recurse into other directories with increased depth
-        const result = findYamlConfigRecursive(fullPath, depth + 1);
-        if (result) return result;
-      }
-    }
-  } catch (error) {
-    // Ignore directory access errors
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (shouldIgnoreDirectory(entry.name)) continue;
+
+    const fullPath = path.join(dir, entry.name);
+
+    // Try every pattern from YAML_FILENAMES at this directory. This subsumes
+    // the prior `.appwrite`-only special-case AND picks up `appwrite/` AND
+    // any future layouts added to the shared YAML_FILENAMES list.
+    const hit = tryPatternsAt(fullPath);
+    if (hit) return hit;
+
+    const deeper = findYamlConfigRecursive(fullPath, tryPatternsAt, depth + 1);
+    if (deeper) return deeper;
   }
 
   return null;
