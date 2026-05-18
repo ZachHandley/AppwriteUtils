@@ -51,6 +51,56 @@ function redactSecretValue(variable: any): FunctionVariableOut {
 }
 
 // ──────────────────────────────────────────────────
+// EXECUTION PAYLOAD HELPERS (size guard + tail slice)
+// ──────────────────────────────────────────────────
+
+/** Threshold above which a single execution field auto-truncates. */
+const EXECUTION_FIELD_TRUNCATE_THRESHOLD = 60_000;
+/** Size of the auto-truncated prefix returned in the first response. */
+const EXECUTION_FIELD_FIRST_CHUNK = 50_000;
+
+/**
+ * Apply tail slicing: return only the last N lines of a string. If the input
+ * has fewer than N lines, returns the whole string unchanged.
+ */
+function tailLines(text: string, n: number): string {
+  if (!text) return text;
+  const lines = text.split(/\r?\n/);
+  if (lines.length <= n) return text;
+  return lines.slice(-n).join('\n');
+}
+
+/**
+ * Build the "truncated field + fetch hint" shape for a large execution field.
+ * The agent sees enough of the content to decide whether to keep fetching,
+ * plus an explicit instruction on which fetch_execution_chunk call to make.
+ */
+function truncateWithHint(
+  field: 'responseBody' | 'logs' | 'errors',
+  value: string,
+  functionId: string,
+  executionId: string
+): {
+  value: string;
+  truncated: boolean;
+  total?: number;
+  hint?: string;
+} {
+  if (!value || value.length <= EXECUTION_FIELD_TRUNCATE_THRESHOLD) {
+    return { value: value ?? '', truncated: false };
+  }
+  return {
+    value: value.slice(0, EXECUTION_FIELD_FIRST_CHUNK),
+    truncated: true,
+    total: value.length,
+    hint:
+      `Field '${field}' is ${value.length} chars — truncated to first ${EXECUTION_FIELD_FIRST_CHUNK}. ` +
+      `Call fetch_execution_chunk(functionId='${functionId}', executionId='${executionId}', ` +
+      `field='${field}', offset=${EXECUTION_FIELD_FIRST_CHUNK}) for the next chunk.`,
+  };
+}
+
+// ──────────────────────────────────────────────────
 // INPUT SCHEMAS
 // ──────────────────────────────────────────────────
 
@@ -102,14 +152,58 @@ const listExecutionsSchema = z.object({
 const getExecutionSchema = z.object({
   functionId: z.string().min(1, 'Function ID is required'),
   executionId: z.string().min(1, 'Execution ID is required'),
+  excludeResponseBody: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'Drop the responseBody field from the response. Most common overflow trigger ' +
+        '(responseBody can be ~1MB). Set true when you only need metadata/logs/errors/headers.'
+    ),
 });
 
 /**
- * Schema for get_execution_logs - Requires functionId + executionId
+ * Schema for get_execution_logs - Requires functionId + executionId, optional tail
  */
 const getExecutionLogsSchema = z.object({
   functionId: z.string().min(1, 'Function ID is required'),
   executionId: z.string().min(1, 'Execution ID is required'),
+  tail: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Return only the last N lines of logs and errors. Useful when each field ' +
+        'is near the 4KB Appwrite cap and you only want the failure tail.'
+    ),
+});
+
+/**
+ * Schema for fetch_execution_chunk - Pull a slice of one large execution field.
+ *
+ * Pagination primitive for execution payloads that exceed the MCP result cap.
+ * When `get_execution` or `get_execution_logs` truncates a field, it includes
+ * a hint pointing at this tool with the right offset.
+ */
+const fetchExecutionChunkSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+  executionId: z.string().min(1, 'Execution ID is required'),
+  field: z
+    .enum(['responseBody', 'logs', 'errors'])
+    .describe('Which large field to slice.'),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(0)
+    .describe('Byte offset to start reading from. Default 0.'),
+  length: z
+    .number()
+    .int()
+    .positive()
+    .default(50_000)
+    .describe('Max bytes to return in this chunk. Default 50_000.'),
 });
 
 /**
@@ -552,27 +646,19 @@ async function handleListExecutions(
 
 /**
  * Get a single execution including full logs and errors.
+ *
+ * Large string fields (`responseBody`, `logs`, `errors`) auto-truncate to
+ * `EXECUTION_FIELD_FIRST_CHUNK` chars when they exceed `EXECUTION_FIELD_TRUNCATE_THRESHOLD`.
+ * When truncation happens, the returned object gets sibling fields like
+ * `responseBodyTruncated: true`, `responseBodyTotal: <full length>`, and a
+ * `responseBodyFetchHint` string telling the agent exactly which
+ * `fetch_execution_chunk` call to make. This prevents the MCP 90K result cap
+ * from silently dropping payloads.
  */
 async function handleGetExecution(
   input: unknown,
   context: ToolContext
-): Promise<{
-  $id: string;
-  $createdAt: string;
-  $updatedAt: string;
-  functionId: string;
-  deploymentId: string;
-  trigger: string;
-  status: string;
-  requestMethod: string;
-  requestPath: string;
-  responseStatusCode: number;
-  responseBody: string;
-  logs: string;
-  errors: string;
-  duration: number;
-  scheduledAt?: string;
-}> {
+): Promise<Record<string, unknown>> {
   const validated = getExecutionSchema.parse(input);
 
   const authResult = await context.authResolver.resolve();
@@ -587,7 +673,7 @@ async function handleGetExecution(
   const functionManager = new FunctionManager(client);
   const ex: any = await functionManager.getExecution(validated.functionId, validated.executionId);
 
-  return {
+  const out: Record<string, unknown> = {
     $id: ex.$id,
     $createdAt: ex.$createdAt,
     $updatedAt: ex.$updatedAt,
@@ -598,12 +684,56 @@ async function handleGetExecution(
     requestMethod: ex.requestMethod,
     requestPath: ex.requestPath,
     responseStatusCode: ex.responseStatusCode,
-    responseBody: ex.responseBody,
-    logs: ex.logs,
-    errors: ex.errors,
     duration: ex.duration,
     scheduledAt: ex.scheduledAt,
   };
+
+  // responseBody — the most common overflow trigger. Optional drop via
+  // excludeResponseBody, otherwise auto-truncate if oversized.
+  if (!validated.excludeResponseBody) {
+    const rb = truncateWithHint(
+      'responseBody',
+      ex.responseBody ?? '',
+      validated.functionId,
+      validated.executionId
+    );
+    out.responseBody = rb.value;
+    if (rb.truncated) {
+      out.responseBodyTruncated = true;
+      out.responseBodyTotal = rb.total;
+      out.responseBodyFetchHint = rb.hint;
+    }
+  }
+
+  // logs and errors — auto-truncate too (defensive; Appwrite caps both at
+  // ~4KB but this future-proofs if that ever changes).
+  const logs = truncateWithHint(
+    'logs',
+    ex.logs ?? '',
+    validated.functionId,
+    validated.executionId
+  );
+  out.logs = logs.value;
+  if (logs.truncated) {
+    out.logsTruncated = true;
+    out.logsTotal = logs.total;
+    out.logsFetchHint = logs.hint;
+  }
+
+  const errors = truncateWithHint(
+    'errors',
+    ex.errors ?? '',
+    validated.functionId,
+    validated.executionId
+  );
+  out.errors = errors.value;
+  if (errors.truncated) {
+    out.errorsTruncated = true;
+    out.errorsTotal = errors.total;
+    out.errorsFetchHint = errors.hint;
+  }
+
+  return out;
 }
 
 /**
@@ -618,17 +748,7 @@ async function handleGetExecution(
 async function handleGetExecutionLogs(
   input: unknown,
   context: ToolContext
-): Promise<{
-  $id: string;
-  $createdAt: string;
-  status: string;
-  trigger: string;
-  duration: number;
-  responseStatusCode: number;
-  scheduledAt?: string;
-  logs: string;
-  errors: string;
-}> {
+): Promise<Record<string, unknown>> {
   const validated = getExecutionLogsSchema.parse(input);
 
   const authResult = await context.authResolver.resolve();
@@ -643,7 +763,18 @@ async function handleGetExecutionLogs(
   const functionManager = new FunctionManager(client);
   const ex: any = await functionManager.getExecution(validated.functionId, validated.executionId);
 
-  return {
+  // Apply tail slicing BEFORE truncation so `tail` doesn't fight `auto-truncate`.
+  let logsStr = ex.logs ?? '';
+  let errorsStr = ex.errors ?? '';
+  if (validated.tail !== undefined) {
+    logsStr = tailLines(logsStr, validated.tail);
+    errorsStr = tailLines(errorsStr, validated.tail);
+  }
+
+  const logs = truncateWithHint('logs', logsStr, validated.functionId, validated.executionId);
+  const errors = truncateWithHint('errors', errorsStr, validated.functionId, validated.executionId);
+
+  const out: Record<string, unknown> = {
     $id: ex.$id,
     $createdAt: ex.$createdAt,
     status: ex.status,
@@ -651,8 +782,66 @@ async function handleGetExecutionLogs(
     duration: ex.duration,
     responseStatusCode: ex.responseStatusCode,
     scheduledAt: ex.scheduledAt,
-    logs: ex.logs ?? '',
-    errors: ex.errors ?? '',
+    logs: logs.value,
+    errors: errors.value,
+  };
+  if (logs.truncated) {
+    out.logsTruncated = true;
+    out.logsTotal = logs.total;
+    out.logsFetchHint = logs.hint;
+  }
+  if (errors.truncated) {
+    out.errorsTruncated = true;
+    out.errorsTotal = errors.total;
+    out.errorsFetchHint = errors.hint;
+  }
+  return out;
+}
+
+/**
+ * Fetch a slice of a single large execution field. Pagination primitive that
+ * the agent uses to walk past the MCP 90K result cap when `get_execution` or
+ * `get_execution_logs` had to truncate. Always re-fetches the execution from
+ * Appwrite (no MCP-side caching — keeps state simple, retry-safe, and
+ * tolerant of executions that change mid-loop).
+ */
+async function handleFetchExecutionChunk(
+  input: unknown,
+  context: ToolContext
+): Promise<{
+  field: string;
+  offset: number;
+  length: number;
+  total: number;
+  content: string;
+  hasMore: boolean;
+}> {
+  const validated = fetchExecutionChunkSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  const ex: any = await functionManager.getExecution(validated.functionId, validated.executionId);
+  const full: string = ex[validated.field] ?? '';
+  const total = full.length;
+  const start = Math.min(validated.offset, total);
+  const end = Math.min(start + validated.length, total);
+  const content = full.slice(start, end);
+
+  return {
+    field: validated.field,
+    offset: start,
+    length: end - start,
+    total,
+    content,
+    hasMore: end < total,
   };
 }
 
@@ -1104,9 +1293,18 @@ const getExecutionTool: ToolDefinition = {
 const getExecutionLogsTool: ToolDefinition = {
   name: 'get_execution_logs',
   description:
-    'Get logs + errors for a single function execution. Returns a slim projection ($id, status, trigger, duration, responseStatusCode, scheduledAt, $createdAt, logs, errors) — drops responseBody and request/response headers. Use this for failure triage. Appwrite caps logs/errors at the last 4000 chars each and only populates them when the request was authenticated with an API key.',
+    'Get logs + errors for a single function execution. Returns a slim projection ($id, status, trigger, duration, responseStatusCode, scheduledAt, $createdAt, logs, errors) — drops responseBody and request/response headers. Optional `tail: N` returns only the last N lines of logs/errors. Fields that exceed ~60K chars auto-truncate to first 50K with a `*FetchHint` pointing at fetch_execution_chunk. Use this for failure triage. Appwrite caps logs/errors at the last 4000 chars each and only populates them when the request was authenticated with an API key.',
   inputSchema: getExecutionLogsSchema,
   handler: handleGetExecutionLogs,
+  requiresAuth: true,
+};
+
+const fetchExecutionChunkTool: ToolDefinition = {
+  name: 'fetch_execution_chunk',
+  description:
+    'Fetch a slice of one large execution field (responseBody, logs, or errors). Pagination primitive — when get_execution or get_execution_logs truncates a field (responseBody can be ~1MB), it emits a hint pointing at this tool with the right offset. Loop until hasMore=false, concatenating `content` chunks to reassemble the full field.',
+  inputSchema: fetchExecutionChunkSchema,
+  handler: handleFetchExecutionChunk,
   requiresAuth: true,
 };
 
@@ -1225,6 +1423,7 @@ export const functionsToolGroup: ToolGroupDefinition = {
     listExecutionsTool,
     getExecutionTool,
     getExecutionLogsTool,
+    fetchExecutionChunkTool,
     createExecutionTool,
     deleteExecutionTool,
     listDeploymentsTool,
