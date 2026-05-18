@@ -60,20 +60,36 @@ async function getConfig(
     : null;
 
   // prefs.current pointer — what the user most recently `appwrite use`'d.
+  // entryKind tells the agent whether the entry carries a real project ID
+  // (`project-key` from `appwrite client --project-id X --key Y`) or only
+  // user-level auth (`user-session` from `appwrite login`). For the latter,
+  // projectId is null because the prefs entry key is a user/session ID, not
+  // a project ID — using it as X-Appwrite-Project would 404.
   let prefsCurrent: {
     endpoint: string;
-    projectId: string;
+    projectId: string | null;
     hasApiKey: boolean;
     hasCookie: boolean;
+    entryKind: "project-key" | "user-session";
+    note?: string;
   } | null = null;
   try {
     const current = await sessionService.findCurrentSession();
     if (current) {
+      const entryKind = current.projectId ? "project-key" : "user-session";
       prefsCurrent = {
         endpoint: current.endpoint,
-        projectId: current.projectId,
+        projectId: current.projectId ?? null,
         hasApiKey: !!current.apiKey,
         hasCookie: !!current.sessionCookie,
+        entryKind,
+        ...(entryKind === "user-session"
+          ? {
+              note:
+                "endpoint+auth resolved from prefs.current but no project ID — " +
+                "supply --projectId / endpoint via flags or a CWD config file",
+            }
+          : {}),
       };
     }
   } catch {

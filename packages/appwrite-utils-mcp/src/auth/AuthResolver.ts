@@ -437,10 +437,16 @@ export class AuthResolver {
 
     // Tier 5: bare prefs.current — only kicks in when no CWD config exists
     // (otherwise tier 4 already consulted prefs.current as a sub-step).
+    //
+    // IMPORTANT: only push a candidate when `current.projectId` is truthy.
+    // For user-session entries (`appwrite login`), findCurrentSession returns
+    // projectId: undefined because the entry key is the user/session ID, not
+    // a project ID — manufacturing a candidate with that key would 404 with
+    // `project_not_found` and waste a probe round-trip.
     if (!project) {
       try {
         const current = await this.sessionService.findCurrentSession();
-        if (current) {
+        if (current && current.projectId) {
           if (current.sessionCookie) {
             pushIfComplete({
               endpoint: current.endpoint,

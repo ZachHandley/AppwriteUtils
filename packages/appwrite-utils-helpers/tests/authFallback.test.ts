@@ -1,4 +1,7 @@
 import { describe, expect, test, mock } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Tests for the auth-resolution refinements landed alongside the user's
@@ -6,6 +9,10 @@ import { describe, expect, test, mock } from "bun:test";
  *   - testSession: account.get() fallback when project-scoped probe fails
  *   - ConfigManager: API-key fallback chain after findWorkingSession returns null
  *   - ClientFactory: enriched "no auth" error with discovery diagnostic
+ *   - findCurrentSession: only surfaces projectId when entry has explicit
+ *     `project` field; user-session entries (cookie/login) return undefined
+ *     so AuthResolver doesn't 404 by sending the user-account-ID as
+ *     X-Appwrite-Project.
  */
 
 // Hooks for swapping node-appwrite class behaviour per-test. We replace the
@@ -132,5 +139,91 @@ describe("testSession — account.get() fallback", () => {
       ""
     );
     expect(ok).toBe(false);
+  });
+});
+
+describe("findCurrentSession — entry-key vs entry.project disambiguation", () => {
+  // Helper: write a custom prefs.json to a tmpdir and point the service at it
+  // via the constructor's `prefsPath` parameter. We DON'T touch the real
+  // ~/.appwrite/prefs.json — that's the user's file and we have a hard rule
+  // against mutating it.
+  const writePrefs = (content: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), "awu-currentSession-"));
+    const path = join(dir, "prefs.json");
+    writeFileSync(path, JSON.stringify(content), { mode: 0o600 });
+    return path;
+  };
+
+  test("user-session entry (cookie only, no entry.project) → projectId undefined", async () => {
+    // Reproduces the prod bug: prefs.current points at an entry created by
+    // `appwrite login`. The entry KEY is the user/session ID, NOT a project
+    // ID. findCurrentSession MUST NOT propagate the entry key as projectId.
+    const prefsPath = writePrefs({
+      current: "user-session-id-xyz",
+      "user-session-id-xyz": {
+        endpoint: "https://cloud.appwrite.io/v1",
+        email: "test@example.com",
+        cookie: "a_session_console=value",
+        // NO `project` field — this is what `appwrite login` writes
+      },
+    });
+
+    try {
+      const svc = new SessionAuthService(prefsPath);
+      const current = await svc.findCurrentSession();
+      expect(current).not.toBeNull();
+      expect(current!.endpoint).toBe("https://cloud.appwrite.io/v1");
+      expect(current!.sessionCookie).toBe("a_session_console=value");
+      expect(current!.email).toBe("test@example.com");
+      // CRITICAL: projectId must NOT be the entry key
+      expect(current!.projectId).toBeUndefined();
+    } finally {
+      rmSync(prefsPath, { recursive: true, force: true });
+    }
+  });
+
+  test("project-key entry (has entry.project + entry.key) → projectId = entry.project", async () => {
+    // `appwrite client --project-id real-project --key standard_xxx` writes an
+    // entry with both `project` AND `key` fields. The entry key in prefs.json
+    // also happens to equal the project ID for this kind of entry. We pick
+    // up the explicit `project` field — that's the source of truth.
+    const prefsPath = writePrefs({
+      current: "real-project",
+      "real-project": {
+        endpoint: "https://appwrite.example.test/v1",
+        project: "real-project",
+        key: "standard_aaaabbbbccccdddd",
+      },
+    });
+
+    try {
+      const svc = new SessionAuthService(prefsPath);
+      const current = await svc.findCurrentSession();
+      expect(current).not.toBeNull();
+      expect(current!.endpoint).toBe("https://appwrite.example.test/v1");
+      expect(current!.projectId).toBe("real-project");
+      expect(current!.apiKey).toBe("standard_aaaabbbbccccdddd");
+      expect(current!.sessionCookie).toBeUndefined();
+    } finally {
+      rmSync(prefsPath, { recursive: true, force: true });
+    }
+  });
+
+  test("current points at a missing entry → returns null", async () => {
+    const prefsPath = writePrefs({
+      current: "nonexistent-id",
+      "some-other-id": {
+        endpoint: "https://cloud.appwrite.io/v1",
+        cookie: "a_session_x=y",
+      },
+    });
+
+    try {
+      const svc = new SessionAuthService(prefsPath);
+      const current = await svc.findCurrentSession();
+      expect(current).toBeNull();
+    } finally {
+      rmSync(prefsPath, { recursive: true, force: true });
+    }
   });
 });

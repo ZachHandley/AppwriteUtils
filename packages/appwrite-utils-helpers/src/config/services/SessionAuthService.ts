@@ -31,9 +31,20 @@ export interface AppwriteSessionPrefs {
 /**
  * Resolved "current" CLI session — what `~/.appwrite/prefs.json`'s `current`
  * pointer dereferences to. Carries either an apiKey or a sessionCookie (or both).
+ *
+ * `projectId` is OPTIONAL because the prefs entry key (which is what `current`
+ * names) is NOT always a project ID:
+ *   - For project-key entries created via `appwrite client --project-id X --key Y`,
+ *     the entry key IS the project ID AND the entry has an explicit `project:`
+ *     field. We surface that as `projectId`.
+ *   - For user-session entries created via `appwrite login`, the entry key is
+ *     the user's account/session ID and the entry has NO `project:` field.
+ *     In that case we leave `projectId` undefined — sending the account ID as
+ *     `X-Appwrite-Project` would 404 with `project_not_found`. Callers must
+ *     supply a projectId via flags or config file.
  */
 export interface CurrentSessionInfo {
-  projectId: string;
+  projectId?: string;
   endpoint: string;
   apiKey?: string;
   sessionCookie?: string;
@@ -242,6 +253,7 @@ export class SessionAuthService {
       email?: unknown;
       cookie?: unknown;
       key?: unknown;
+      project?: unknown;
     };
 
     if (typeof entry.endpoint !== "string" || !entry.endpoint) return null;
@@ -253,8 +265,18 @@ export class SessionAuthService {
     // Need at least one usable auth credential
     if (!apiKey && !sessionCookie) return null;
 
+    // Project-key entries (created via `appwrite client --project-id X --key Y`)
+    // store the explicit project ID in `entry.project`. User-session entries
+    // (created via `appwrite login`) do NOT — their entry KEY is the user/
+    // session ID, not a project ID. Only surface a projectId when the entry
+    // actually carries one.
+    const entryProjectId =
+      typeof entry.project === "string" && entry.project.length > 0
+        ? entry.project
+        : undefined;
+
     return {
-      projectId: currentId,
+      projectId: entryProjectId,
       endpoint: entry.endpoint,
       apiKey,
       sessionCookie,
