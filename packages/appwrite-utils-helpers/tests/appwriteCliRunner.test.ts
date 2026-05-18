@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import * as realOs from "node:os";
 import { tmpdir } from "node:os";
@@ -14,23 +15,51 @@ mock.module("node:os", () => ({
   homedir: () => homeState.current,
 }));
 
-// We replace `execa` with a mock that records all calls and returns a
-// success result. The mock must be installed BEFORE we import the module
-// under test so that the module captures the mocked binding at top level.
-type ExecaCall = { args: unknown[]; opts: unknown };
+// We replace `execa` with a mock that records all calls AND snapshots the
+// tmpdir prefs.json AT THE TIME OF CALL — because the runner deletes the
+// tmpdir in `finally`, the prefs file is gone by the time the test
+// assertions run. Capturing inside the mock gives us the file shape that
+// the real `appwrite` subprocess WOULD have seen.
+type ExecaCall = {
+  args: unknown[];
+  opts: unknown;
+  /** env.HOME the subprocess would have seen. */
+  envHome?: string;
+  /** Snapshot of tmpdir/.appwrite/prefs.json contents at call time. */
+  tmpdirPrefs?: unknown;
+};
 const execaCalls: ExecaCall[] = [];
 
 mock.module("execa", () => ({
   execa: (...callArgs: unknown[]) => {
-    execaCalls.push({ args: callArgs.slice(0, -1), opts: callArgs[callArgs.length - 1] });
+    const opts = callArgs[callArgs.length - 1] as
+      | { env?: Record<string, string> }
+      | undefined;
+    const envHome = opts?.env?.HOME;
+    let tmpdirPrefs: unknown;
+    if (envHome) {
+      const prefsPath = join(envHome, ".appwrite", "prefs.json");
+      if (existsSync(prefsPath)) {
+        try {
+          tmpdirPrefs = JSON.parse(readFileSync(prefsPath, "utf-8"));
+        } catch {
+          // Leave undefined on parse errors.
+        }
+      }
+    }
+    execaCalls.push({
+      args: callArgs.slice(0, -1),
+      opts,
+      envHome,
+      tmpdirPrefs,
+    });
     return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
   },
 }));
 
 // Dynamic import so the mock is wired before the module evaluates.
-const { runAppwriteCli, hasCliPrefsFor } = await import(
-  "../src/cli/appwriteCliRunner.js"
-);
+const { runAppwriteCli, runAppwriteCliIsolated, injectCredentials, hasCliPrefsFor } =
+  await import("../src/cli/appwriteCliRunner.js");
 
 let tempHome: string;
 
@@ -84,8 +113,11 @@ describe("appwriteCliRunner auth bridge", () => {
     expect(finalArgs).toContain("whoami");
   });
 
-  test("#18 — prefs.json miss: 4 sequential client calls before the actual command", async () => {
-    // No prefs.json written → hasCliPrefsFor returns false → injectCredentials runs.
+  test("#18 — prefs miss + creds: prefs is written into tmpdir, not into homedir()", async () => {
+    // No prefs.json under tempHome (homedir() mock) — and we supply creds.
+    // Under the always-isolated design: runAppwriteCli mkdtemps an isolated
+    // home, writes our creds there, then runs `whoami` with env.HOME → tmpdir.
+    // The real prefs.json (here: tempHome/.appwrite/prefs.json) is NEVER created.
     await runAppwriteCli(["whoami"], {
       credentials: {
         endpoint: "https://example.test/v1",
@@ -94,29 +126,43 @@ describe("appwriteCliRunner auth bridge", () => {
       },
     });
 
+    // No `appwrite client` subprocesses — Appwrite's state-mutation surface
+    // is never invoked.
     const clientCalls = execaCalls.filter((c) => {
       const args = c.args[1] as string[] | undefined;
       return Array.isArray(args) && args.includes("client");
     });
+    expect(clientCalls.length).toBe(0);
 
-    // reset → endpoint → project-id → key
-    expect(clientCalls.length).toBe(4);
+    // Exactly one execa call: the `appwrite whoami` invocation.
+    expect(execaCalls.length).toBe(1);
+    const call = execaCalls[0]!;
+    const finalArgs = call.args[1] as string[];
+    expect(finalArgs).toContain("whoami");
 
-    const flags = clientCalls.map((c) => {
-      const args = c.args[1] as string[];
-      return args.slice(args.indexOf("client") + 1);
-    });
+    // The subprocess saw env.HOME pointing at a tmpdir under our prefix —
+    // NOT at the mocked homedir().
+    expect(call.envHome).toBeDefined();
+    expect(call.envHome).not.toBe(tempHome);
+    expect(call.envHome!.includes("appwrite-mcp-cli-")).toBe(true);
 
-    expect(flags[0]).toEqual(["--reset"]);
-    expect(flags[1]).toEqual(["--endpoint", "https://example.test/v1"]);
-    expect(flags[2]).toEqual(["--project-id", "proj-123"]);
-    expect(flags[3]).toEqual(["--key", "my-key"]);
+    // Inside the tmpdir, the prefs file has the shape we wrote.
+    expect(call.tmpdirPrefs).toBeDefined();
+    const prefs = call.tmpdirPrefs as Record<string, any>;
+    expect(typeof prefs.current).toBe("string");
+    expect(prefs.current.length).toBeGreaterThan(0);
+    const session = prefs[prefs.current];
+    expect(session.endpoint).toBe("https://example.test/v1");
+    expect(session.project).toBe("proj-123");
+    expect(session.key).toBe("my-key");
+    expect(session.cookie).toBeUndefined();
 
-    // Plus one more for the actual whoami.
-    expect(execaCalls.length).toBe(5);
+    // CRITICAL — the user's real prefs path (tempHome/.appwrite/prefs.json
+    // under the mocked homedir()) was NEVER created.
+    expect(existsSync(join(tempHome, ".appwrite", "prefs.json"))).toBe(false);
   });
 
-  test("#18b — apiKey omitted: only 3 client calls (no --key)", async () => {
+  test("#18b — apiKey omitted: tmpdir prefs has endpoint+project but no key", async () => {
     await runAppwriteCli(["whoami"], {
       credentials: {
         endpoint: "https://example.test/v1",
@@ -128,12 +174,21 @@ describe("appwriteCliRunner auth bridge", () => {
       const args = c.args[1] as string[] | undefined;
       return Array.isArray(args) && args.includes("client");
     });
-    expect(clientCalls.length).toBe(3);
-    expect(execaCalls.length).toBe(4);
+    expect(clientCalls.length).toBe(0);
+    expect(execaCalls.length).toBe(1);
+
+    const prefs = execaCalls[0]!.tmpdirPrefs as Record<string, any>;
+    const session = prefs[prefs.current];
+    expect(session.endpoint).toBe("https://example.test/v1");
+    expect(session.project).toBe("proj-123");
+    expect(session.key).toBeUndefined();
+    expect(session.cookie).toBeUndefined();
+
+    // Real prefs path untouched.
+    expect(existsSync(join(tempHome, ".appwrite", "prefs.json"))).toBe(false);
   });
 
-  test("#19 — end-to-end via sidecar auth: creds resolved from sidecar are injected", async () => {
-    // Lazy import so the mock is in place and we get the same module instance.
+  test("#19 — sidecar creds land in tmpdir prefs, not in real homedir prefs", async () => {
     const { resolveCliCredentials } = await import(
       "../src/cli/resolveCliCredentials.js"
     );
@@ -156,22 +211,129 @@ describe("appwriteCliRunner auth bridge", () => {
 
     await runAppwriteCli(["whoami"], { credentials });
 
-    const endpointCall = execaCalls.find((c) => {
+    const clientCalls = execaCalls.filter((c) => {
       const args = c.args[1] as string[] | undefined;
-      return Array.isArray(args) && args.includes("--endpoint");
+      return Array.isArray(args) && args.includes("client");
     });
-    expect(endpointCall).toBeDefined();
-    const endpointArgs = endpointCall!.args[1] as string[];
-    expect(endpointArgs[endpointArgs.indexOf("--endpoint") + 1]).toBe(
-      "https://sidecar.example/v1"
+    expect(clientCalls.length).toBe(0);
+
+    const prefs = execaCalls[0]!.tmpdirPrefs as Record<string, any>;
+    const session = prefs[prefs.current];
+    expect(session.endpoint).toBe("https://sidecar.example/v1");
+    expect(session.project).toBe("sidecar-project");
+    expect(session.key).toBe("sidecar-key");
+
+    // Real prefs path untouched.
+    expect(existsSync(join(tempHome, ".appwrite", "prefs.json"))).toBe(false);
+  });
+
+  test("#20 — seed copy: existing real prefs are read-only-copied into the tmpdir for commands without creds", async () => {
+    // The user has an existing `~/.appwrite/prefs.json` (mocked via tempHome).
+    // A creds-less command (think interactive `appwrite whoami`) should still
+    // see that auth state — we copy the file into the tmpdir read-only.
+    await writePrefs({
+      current: "session-abc",
+      "session-abc": {
+        endpoint: "https://existing.example/v1",
+        project: "existing-proj",
+        cookie: "existing-cookie",
+      },
+    });
+    const realPrefsBefore = readFileSync(
+      join(tempHome, ".appwrite", "prefs.json"),
+      "utf-8",
     );
 
-    const keyCall = execaCalls.find((c) => {
-      const args = c.args[1] as string[] | undefined;
-      return Array.isArray(args) && args.includes("--key");
+    await runAppwriteCli(["whoami"]); // no credentials
+
+    expect(execaCalls.length).toBe(1);
+    const call = execaCalls[0]!;
+    expect(call.envHome).not.toBe(tempHome);
+    expect(call.envHome!.includes("appwrite-mcp-cli-")).toBe(true);
+
+    // The tmpdir prefs is the seeded copy of the real file.
+    const prefs = call.tmpdirPrefs as Record<string, any>;
+    expect(prefs.current).toBe("session-abc");
+    expect(prefs["session-abc"].endpoint).toBe("https://existing.example/v1");
+    expect(prefs["session-abc"].cookie).toBe("existing-cookie");
+
+    // And the real prefs file is byte-identical to what we wrote.
+    const realPrefsAfter = readFileSync(
+      join(tempHome, ".appwrite", "prefs.json"),
+      "utf-8",
+    );
+    expect(realPrefsAfter).toBe(realPrefsBefore);
+  });
+
+  test("#21 — existing real prefs + creds: tmpdir prefs is overwritten, real prefs unchanged", async () => {
+    await writePrefs({
+      current: "old-session",
+      "old-session": {
+        endpoint: "https://old.example/v1",
+        project: "old-proj",
+        key: "old-key",
+      },
     });
-    const keyArgs = keyCall!.args[1] as string[];
-    expect(keyArgs[keyArgs.indexOf("--key") + 1]).toBe("sidecar-key");
+    const realPrefsBefore = readFileSync(
+      join(tempHome, ".appwrite", "prefs.json"),
+      "utf-8",
+    );
+
+    await runAppwriteCli(["whoami"], {
+      credentials: {
+        endpoint: "https://new.example/v1",
+        projectId: "new-proj",
+        apiKey: "new-key",
+      },
+    });
+
+    const prefs = execaCalls[0]!.tmpdirPrefs as Record<string, any>;
+    const session = prefs[prefs.current];
+    expect(session.endpoint).toBe("https://new.example/v1");
+    expect(session.project).toBe("new-proj");
+    expect(session.key).toBe("new-key");
+    // Old session should NOT survive the overwrite — writeIsolatedPrefs
+    // replaces the entire file with a fresh shape.
+    expect(prefs["old-session"]).toBeUndefined();
+
+    // Real prefs untouched.
+    expect(
+      readFileSync(join(tempHome, ".appwrite", "prefs.json"), "utf-8"),
+    ).toBe(realPrefsBefore);
+  });
+
+  test("#22 — injectCredentials throws (no longer writes to real prefs)", async () => {
+    await expect(
+      injectCredentials({
+        endpoint: "https://example.test/v1",
+        projectId: "p",
+        apiKey: "k",
+      }),
+    ).rejects.toThrow(/injectCredentials\(\) was removed/);
+
+    // Real prefs untouched.
+    expect(existsSync(join(tempHome, ".appwrite", "prefs.json"))).toBe(false);
+  });
+
+  test("#23 — runAppwriteCliIsolated is an alias for runAppwriteCli", () => {
+    expect(runAppwriteCliIsolated).toBe(runAppwriteCli);
+  });
+
+  test("#24 — disablePrefsSeed: real prefs are NOT copied into the tmpdir when opted out", async () => {
+    await writePrefs({
+      current: "should-not-leak",
+      "should-not-leak": {
+        endpoint: "https://leaked.example/v1",
+        cookie: "leaked-cookie",
+      },
+    });
+
+    await runAppwriteCli(["whoami"], { disablePrefsSeed: true });
+
+    const prefs = execaCalls[0]!.tmpdirPrefs;
+    // No prefs file should exist in the tmpdir because we disabled seeding
+    // and didn't supply creds.
+    expect(prefs).toBeUndefined();
   });
 });
 

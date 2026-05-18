@@ -1,6 +1,8 @@
 // Official Appwrite CLI runner with auth bridging
 export {
   runAppwriteCli,
+  runAppwriteCliIsolated,
+  writeIsolatedPrefs,
   injectCredentials,
   hasCliPrefsFor,
   resolveCredentialsFromEnv,

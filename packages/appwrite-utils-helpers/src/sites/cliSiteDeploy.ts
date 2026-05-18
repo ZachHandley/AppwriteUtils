@@ -12,8 +12,10 @@
  *      elsewhere.
  *   3. Emit a minimal `appwrite.config.json` + `appwrite/sites.json` (split
  *      layout) via {@link import("../cli/configBridge.js").writeOfficialConfig}.
- *   4. Invoke `bunx --bun appwrite push site --site-id <id>` via
- *      {@link import("../cli/appwriteCliRunner.js").runAppwriteCli}.
+ *   4. Invoke `appwrite push site --site-id <id>` via
+ *      {@link import("../cli/appwriteCliRunner.js").runAppwriteCli},
+ *      which always redirects `$HOME` to a tmpdir so the CLI never
+ *      mutates the user's real `~/.appwrite/prefs.json`.
  *   5. Optionally clean up the temp directory.
  *
  * The minimal `appwrite.config.json` carries ONLY the single site entry the
@@ -214,6 +216,8 @@ export async function deploySiteViaCli(
       args.push("--async");
     }
 
+    // runAppwriteCli always redirects $HOME to a throwaway tmpdir so the
+    // CLI's prefs writes never touch the user's real ~/.appwrite/prefs.json.
     const result = await runAppwriteCli(args, {
       cwd,
       credentials,

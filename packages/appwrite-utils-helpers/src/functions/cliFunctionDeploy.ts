@@ -273,6 +273,8 @@ export async function deployFunctionViaCli(
       args.push("--async");
     }
 
+    // runAppwriteCli always redirects $HOME to a throwaway tmpdir so the
+    // CLI's prefs writes never touch the user's real ~/.appwrite/prefs.json.
     const result = await runAppwriteCli(args, {
       cwd,
       stream: opts.stream ?? true,

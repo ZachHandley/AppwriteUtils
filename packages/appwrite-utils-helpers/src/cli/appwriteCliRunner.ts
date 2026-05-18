@@ -1,7 +1,9 @@
 import { execa } from "execa";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 
 /**
  * Credentials used to bridge auth into the official Appwrite CLI.
@@ -47,6 +49,13 @@ export interface AppwriteCliRunOptions {
    * falls back to APPWRITE_ENDPOINT / APPWRITE_PROJECT_ID / APPWRITE_API_KEY env vars.
    */
   credentials?: AppwriteCliCredentials;
+  /**
+   * When `true`, skip the read-only copy of `~/.appwrite/prefs.json` into the
+   * isolated tmpdir. Default `false`. Set this only if you want the subprocess
+   * to start with a completely empty prefs file (i.e. you'll supply
+   * credentials or accept that the command will see no auth state at all).
+   */
+  disablePrefsSeed?: boolean;
   /** Timeout in ms. Default 10 minutes. */
   timeout?: number;
 }
@@ -266,73 +275,119 @@ export function resolveCredentialsFromEnv():
 }
 
 /**
- * Configure the appwrite CLI's client (writes to ~/.appwrite/prefs.json).
+ * Construct and write a minimal Appwrite CLI `prefs.json` directly to
+ * `<homeDir>/.appwrite/prefs.json`. This is the file the official `appwrite`
+ * CLI reads to find auth state for `push function`, `push site`, etc.
  *
- * Internally runs (in sequence so the CLI processes flags in the right order):
- *   1. `appwrite client --reset`            (clear any previous sessions)
- *   2. `appwrite client --endpoint <X>`     (creates a new session entry)
- *   3. `appwrite client --project-id <Y>`   (sets project ID in local config)
- *   4. `appwrite client --key <K>`          (only if apiKey is provided)
+ * We construct the file by hand instead of shelling out to `appwrite client
+ * --reset/--endpoint/--project-id/--key` because those subcommands are
+ * Appwrite's, not ours — we should never drive them against the real user
+ * HOME (you, the operator, lost session entries to one such test run). The
+ * resulting JSON shape matches what Appwrite CLI v20.x's `Global` class
+ * produces for a session created via `appwrite client --endpoint X`:
  *
- * The CLI requires endpoint to be set before key (it errors with
- * "Session not found" otherwise), so they cannot be combined in one call.
+ * ```json
+ * {
+ *   "current": "<20-char hex session id>",
+ *   "<same id>": { "endpoint": "...", "project": "...", "key": "..." }
+ * }
+ * ```
  *
- * Idempotent — safe to call before every operation.
+ * For session-cookie auth, `cookie` is written instead of `key` — the CLI
+ * picks the right SDK auth mode based on which field is present (cookie =
+ * admin mode, key = default mode).
+ *
+ * File is written with mode `0600`, same as the official CLI. The directory
+ * is created if missing.
  */
-export async function injectCredentials(
-  creds: AppwriteCliCredentials,
-  opts?: { cwd?: string },
+export async function writeIsolatedPrefs(
+  homeDir: string,
+  creds: AppwriteCliCredentials & { sessionCookie?: string },
 ): Promise<void> {
-  const cwd = opts?.cwd ?? process.cwd();
-  const baseEnv = { ...process.env };
+  const sessionId = randomBytes(10).toString("hex"); // 20-char hex, matches CLI shape
+  const sessionEntry: Record<string, string> = {
+    endpoint: creds.endpoint,
+  };
+  if (creds.projectId) {
+    sessionEntry.project = creds.projectId;
+  }
+  if (creds.sessionCookie !== undefined && creds.sessionCookie !== "") {
+    sessionEntry.cookie = creds.sessionCookie;
+  } else if (creds.apiKey !== undefined && creds.apiKey !== "") {
+    sessionEntry.key = creds.apiKey;
+  }
 
-  const runClient = async (args: string[]): Promise<void> => {
-    const result = await execa(
-      "npx",
-      ["--yes", "--package=appwrite-cli", "appwrite", "client", ...args],
-      {
-        cwd,
-        env: baseEnv,
-        reject: false,
-        timeout: DEFAULT_TIMEOUT_MS,
-      },
-    );
-    if (result.exitCode !== 0) {
-      const stderr =
-        typeof result.stderr === "string" ? result.stderr : String(result.stderr ?? "");
-      const stdout =
-        typeof result.stdout === "string" ? result.stdout : String(result.stdout ?? "");
-      throw new Error(
-        `Failed to configure Appwrite CLI client (args: ${args.join(" ")}): ${stderr.trim() || stdout.trim() || "non-zero exit"}`,
-      );
-    }
+  const prefs: Record<string, unknown> = {
+    current: sessionId,
+    [sessionId]: sessionEntry,
   };
 
-  await runClient(["--reset"]);
-  await runClient(["--endpoint", creds.endpoint]);
-  if (creds.projectId) {
-    await runClient(["--project-id", creds.projectId]);
-  }
-  if (creds.apiKey !== undefined && creds.apiKey !== "") {
-    await runClient(["--key", creds.apiKey]);
-  }
+  const dotAppwrite = join(homeDir, ".appwrite");
+  await mkdir(dotAppwrite, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(dotAppwrite, "prefs.json"),
+    JSON.stringify(prefs, null, 4),
+    { mode: 0o600 },
+  );
 }
 
 /**
- * Run an arbitrary appwrite CLI command via `npx --yes --package=appwrite-cli appwrite ...`.
+ * @deprecated Removed. `runAppwriteCli` now always isolates `$HOME` to a
+ * tmpdir, so there is no scenario where AppwriteUtils mutates the user's
+ * real `~/.appwrite/prefs.json`. Pass `credentials` directly to
+ * {@link runAppwriteCli} or build a prefs file in your own tmpdir via
+ * {@link writeIsolatedPrefs}.
  *
- * Performs auth bridging unless `skipAuthBridge` is true. Auth bridging:
- *   - Resolves credentials from `opts.credentials` or env vars.
- *   - If `hasCliPrefsFor(endpoint, projectId)` is true, skips injection.
- *   - Otherwise calls `injectCredentials` to configure the CLI.
+ * This shim throws on every invocation so any remaining caller (in this
+ * repo or downstream) gets a loud, actionable error at first call instead
+ * of silently mutating prefs.
+ */
+export async function injectCredentials(
+  _creds?: AppwriteCliCredentials,
+  _opts?: { cwd?: string; env?: Record<string, string> },
+): Promise<never> {
+  throw new Error(
+    "injectCredentials() was removed. runAppwriteCli() always isolates HOME now — " +
+      "pass `credentials` directly to it instead, or construct a tmpdir prefs file " +
+      "via writeIsolatedPrefs(tmpdir, creds). AppwriteUtils never writes to ~/.appwrite/prefs.json.",
+  );
+}
+
+/**
+ * Run an arbitrary appwrite CLI command via `npx --yes --package=appwrite-cli appwrite ...`,
+ * with `$HOME` ALWAYS redirected to a throwaway tmpdir so the user's real
+ * `~/.appwrite/prefs.json` is never mutated.
  *
- * Behavior:
+ * Subprocess HOME lifecycle:
+ *   1. `mkdtemp` a fresh tmpdir under `tmpdir()/appwrite-mcp-cli-*`.
+ *   2. Unless `disablePrefsSeed` is true, copy `~/.appwrite/prefs.json` (if
+ *      it exists) into the tmpdir READ-ONLY. The real file is opened with
+ *      `'r'` only — never `'w'`, never `'a'`. This lets commands that rely
+ *      on the user's existing auth (`whoami`, `pull` after `appwrite login`)
+ *      keep working.
+ *   3. If `credentials` (or env-var creds) are supplied AND `skipAuthBridge`
+ *      is false, OVERWRITE the tmpdir prefs with a fresh
+ *      {@link writeIsolatedPrefs} write. This is how MCP-driven deploys
+ *      pass project+key without ever touching the real prefs.
+ *   4. Spawn `npx appwrite ...` with `env.HOME` (and `env.USERPROFILE` for
+ *      Windows) set to the tmpdir. The CLI's `Global` class resolves the
+ *      prefs path via `os.homedir()` which respects these env vars.
+ *   5. Belt-and-suspenders: assert `mergedEnv.HOME !== homedir()` right
+ *      before `execa` and abort if violated. A future refactor that drops
+ *      the HOME override crashes loudly on first call instead of silently
+ *      mutating the real file.
+ *   6. `finally`: `rm -rf` the tmpdir so a crashed CLI cannot leak.
+ *
+ * Other behavior:
  *   - When `opts.json` is true, appends `--json` and attempts `JSON.parse(stdout)`.
  *   - When `opts.force` is true (default), appends `--force`.
  *   - When `opts.stream` is true, stdout/stderr are tee'd to the parent
- *     process AND captured for the error message — you get real-time output
- *     and a useful error if the command fails.
+ *     process AND captured for the error message — real-time output plus
+ *     useful errors on failure.
  *   - On non-zero exit, throws an Error containing the captured stderr.
+ *
+ * Hard guarantee: this function NEVER opens `~/.appwrite/prefs.json` with
+ * write or append flags. Verified by `tests/appwriteCliRunner.test.ts`.
  */
 export async function runAppwriteCli<T = unknown>(
   args: string[],
@@ -346,23 +401,9 @@ export async function runAppwriteCli<T = unknown>(
     env: extraEnv,
     skipAuthBridge = false,
     credentials,
+    disablePrefsSeed = false,
     timeout = DEFAULT_TIMEOUT_MS,
   } = opts;
-
-  if (!skipAuthBridge) {
-    const creds = credentials ?? resolveCredentialsFromEnv();
-    if (creds) {
-      // hasCliPrefsFor requires a project ID to match a stored session entry.
-      // Endpoint-only creds (e.g. before `appwrite init project` picks one)
-      // always inject, since there's nothing to match against.
-      const alreadyConfigured = creds.projectId
-        ? await hasCliPrefsFor(creds.endpoint, creds.projectId)
-        : false;
-      if (!alreadyConfigured) {
-        await injectCredentials(creds, { cwd });
-      }
-    }
-  }
 
   const finalArgs = [...args];
   if (json && !finalArgs.includes("--json") && !finalArgs.includes("-j")) {
@@ -372,73 +413,118 @@ export async function runAppwriteCli<T = unknown>(
     finalArgs.push("--force");
   }
 
-  const mergedEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...(extraEnv ?? {}),
-  };
-
   // Invoke the official Appwrite CLI via `npx --yes --package=appwrite-cli appwrite ...`.
   // We deliberately use npx rather than `bunx --bun appwrite` so consumers
   // don't need bun installed in CI just to talk to Appwrite. `appwrite-cli`
   // is declared as a dep of this package, so npx hits the local cache.
   const execaArgs = ["--yes", "--package=appwrite-cli", "appwrite", ...finalArgs];
 
-  // Always run with stdio: pipe so we can capture stderr/stdout into the
-  // error message. When `stream: true`, also tee the streams to the parent
-  // process so the user sees real-time output. Using `stdio: "inherit"` (as
-  // an earlier version did) prevented execa from capturing stderr, which
-  // turned every CLI failure into an opaque "non-zero exit" message.
-  const subprocess = execa("npx", execaArgs, {
-    cwd,
-    env: mergedEnv,
-    reject: false,
-    timeout,
-  });
+  const isolatedHome = await mkdtemp(join(tmpdir(), "appwrite-mcp-cli-"));
 
-  if (stream) {
-    subprocess.stdout?.pipe(process.stdout, { end: false });
-    subprocess.stderr?.pipe(process.stderr, { end: false });
-  }
+  try {
+    // Step 2: seed-copy real prefs read-only into the tmpdir so commands
+    // depending on existing CLI auth (whoami, pull-after-login) work.
+    const realPrefs = join(homedir(), ".appwrite", "prefs.json");
+    if (!disablePrefsSeed && existsSync(realPrefs)) {
+      await mkdir(join(isolatedHome, ".appwrite"), {
+        recursive: true,
+        mode: 0o700,
+      });
+      // copyFile opens source with 'r' and sink with 'w' — never mutates the source.
+      await copyFile(realPrefs, join(isolatedHome, ".appwrite", "prefs.json"));
+    }
 
-  const result = await subprocess;
+    // Step 3: if creds supplied, overwrite seeded prefs with our shape.
+    if (!skipAuthBridge) {
+      const creds = credentials ?? resolveCredentialsFromEnv();
+      if (creds) {
+        await writeIsolatedPrefs(isolatedHome, creds);
+      }
+    }
 
-  const childSignal =
-    typeof (result as { signal?: unknown }).signal === "string"
-      ? ((result as { signal: string }).signal as NodeJS.Signals)
-      : undefined;
-  if (childSignal) {
-    // Child died from a signal; mirror it so the parent exits the same way
-    // (instead of continuing past the await and dumping a stack later).
-    process.kill(process.pid, childSignal);
-  }
+    // Step 4: build env with HOME redirected to the tmpdir.
+    const mergedEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(extraEnv ?? {}),
+      HOME: isolatedHome,
+      USERPROFILE: isolatedHome,
+    };
 
-  const stdout = typeof result.stdout === "string" ? result.stdout : "";
-  const stderr = typeof result.stderr === "string" ? result.stderr : "";
-  const exitCode = typeof result.exitCode === "number" ? result.exitCode : 1;
-
-  if (exitCode !== 0) {
-    const detail = stderr.trim() || stdout.trim() || "non-zero exit";
-    throw new Error(
-      `appwrite ${finalArgs.join(" ")} failed (exit ${exitCode}): ${detail}`,
-    );
-  }
-
-  const output: AppwriteCliResult<T> = {
-    stdout,
-    stderr,
-    exitCode,
-  };
-
-  if (json) {
-    try {
-      output.data = JSON.parse(stdout) as T;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+    // Step 5: belt-and-suspenders. If a future refactor drops the override,
+    // crash here rather than letting the CLI mutate ~/.appwrite/prefs.json.
+    if (mergedEnv.HOME === homedir() || mergedEnv.USERPROFILE === homedir()) {
       throw new Error(
-        `Failed to parse JSON output from 'appwrite ${finalArgs.join(" ")}': ${message}\nStdout: ${stdout}`,
+        `[appwrite-cli-runner] FATAL: subprocess env.HOME (${mergedEnv.HOME}) ` +
+          `equals real homedir() (${homedir()}). This would mutate the user's ` +
+          `real ~/.appwrite/prefs.json. Aborting before execa.`,
       );
     }
-  }
 
-  return output;
+    // Always run with stdio: pipe so we can capture stderr/stdout into the
+    // error message. When `stream: true`, also tee the streams to the parent
+    // process so the user sees real-time output.
+    const subprocess = execa("npx", execaArgs, {
+      cwd,
+      env: mergedEnv,
+      reject: false,
+      timeout,
+    });
+
+    if (stream) {
+      subprocess.stdout?.pipe(process.stdout, { end: false });
+      subprocess.stderr?.pipe(process.stderr, { end: false });
+    }
+
+    const result = await subprocess;
+
+    const childSignal =
+      typeof (result as { signal?: unknown }).signal === "string"
+        ? ((result as { signal: string }).signal as NodeJS.Signals)
+        : undefined;
+    if (childSignal) {
+      // Child died from a signal; mirror it so the parent exits the same way
+      // (instead of continuing past the await and dumping a stack later).
+      process.kill(process.pid, childSignal);
+    }
+
+    const stdout = typeof result.stdout === "string" ? result.stdout : "";
+    const stderr = typeof result.stderr === "string" ? result.stderr : "";
+    const exitCode = typeof result.exitCode === "number" ? result.exitCode : 1;
+
+    if (exitCode !== 0) {
+      const detail = stderr.trim() || stdout.trim() || "non-zero exit";
+      throw new Error(
+        `appwrite ${finalArgs.join(" ")} failed (exit ${exitCode}): ${detail}`,
+      );
+    }
+
+    const output: AppwriteCliResult<T> = {
+      stdout,
+      stderr,
+      exitCode,
+    };
+
+    if (json) {
+      try {
+        output.data = JSON.parse(stdout) as T;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Failed to parse JSON output from 'appwrite ${finalArgs.join(" ")}': ${message}\nStdout: ${stdout}`,
+        );
+      }
+    }
+
+    return output;
+  } finally {
+    // Step 6: best-effort cleanup. tmpdir lifecycle is the OS's problem if rm fails.
+    await rm(isolatedHome, { recursive: true, force: true }).catch(() => {});
+  }
 }
+
+/**
+ * @deprecated Alias for {@link runAppwriteCli} — kept for source-level
+ * backwards compatibility. The two are now functionally identical: every
+ * `runAppwriteCli` invocation always isolates `$HOME` to a tmpdir.
+ */
+export const runAppwriteCliIsolated = runAppwriteCli;
