@@ -75,9 +75,12 @@ export class AppwriteMCPServer {
     this.flags = flags;
     this.instanceId = flags.instanceId || randomUUID();
 
-    // Wire optional log file. Stderr output is always on; this only adds
-    // append-to-file when --logFile was passed at startup.
-    if (flags.logFile) {
+    // Configure error logger. File logging is ON BY DEFAULT (writes to
+    // ~/.appwrite-utils-mcp/errors.log). --logFile overrides the path;
+    // --noLogFile disables file output entirely (stderr only).
+    if (flags.noLogFile) {
+      configureErrorLogger({ logFilePath: '' }); // empty string = disable
+    } else {
       configureErrorLogger({ logFilePath: flags.logFile });
     }
 
@@ -313,15 +316,36 @@ Server instance ID: ${this.instanceId}
           ],
         };
       } catch (error) {
-        // Centralized error logging — stderr (always) + log file (if configured),
-        // with secret-redacted args. See utils/errorLogger.ts for redaction rules.
+        // Centralized error logging — stderr (always) + log file (default
+        // ~/.appwrite-utils-mcp/errors.log unless --noLogFile), with
+        // secret-redacted args. See utils/errorLogger.ts for redaction rules.
         const durationMs = Date.now() - started;
+
+        // Endpoint snapshot — capture which Appwrite instance the tool was
+        // trying to hit so the user can tell "fetch failed" apart from
+        // "fetch failed against the wrong server." Non-secrets only.
+        const argsRecord = (typeof args === 'object' && args !== null
+          ? (args as Record<string, unknown>)
+          : {});
+        const endpointHint =
+          typeof argsRecord.endpoint === 'string'
+            ? (argsRecord.endpoint as string)
+            : this.flags.endpoint;
+        const projectIdHint =
+          typeof argsRecord.projectId === 'string'
+            ? (argsRecord.projectId as string)
+            : this.flags.projectId;
+
         logToolError({
           toolName: name,
           args,
           error,
           instanceId: this.instanceId,
           durationMs,
+          context: {
+            ...(endpointHint ? { endpoint: endpointHint } : {}),
+            ...(projectIdHint ? { projectId: projectIdHint } : {}),
+          },
         });
 
         // Record failed operation (uses the plain message — state manager is
@@ -329,11 +353,16 @@ Server instance ID: ${this.instanceId}
         const formatted = formatErrorForAgent(error);
         this.stateManager.recordOperation(name, args, false, formatted.message);
 
-        // Build the agent-visible message. Surface Appwrite code/type so the
-        // agent can react (404 missing collection vs 401 missing scope, etc.).
+        // Build the agent-visible message. Surface Appwrite code/type AND
+        // the underlying cause chain (so `fetch failed` becomes actionable:
+        // ENOTFOUND? wrong endpoint? DNS issue? — agent can branch on it).
+        const cause = formatted.cause;
         const suffix =
           (formatted.code !== undefined ? ` [code=${formatted.code}]` : '') +
-          (formatted.type ? ` [type=${formatted.type}]` : '');
+          (formatted.type ? ` [type=${formatted.type}]` : '') +
+          (cause?.code !== undefined ? ` [cause=${cause.code}]` : '') +
+          (cause?.hostname ? ` [host=${cause.hostname}]` : '') +
+          (endpointHint ? ` [endpoint=${endpointHint}]` : '');
 
         return {
           content: [

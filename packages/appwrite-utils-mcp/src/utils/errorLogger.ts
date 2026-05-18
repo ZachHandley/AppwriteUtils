@@ -16,7 +16,30 @@
  * @packageDocumentation
  */
 
-import { appendFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+/**
+ * Snapshot of which Appwrite endpoint/project the tool was trying to reach
+ * when the error occurred. Critical for triage — without it, `fetch failed`
+ * tells you nothing about whether the MCP is configured for the right
+ * server. Filled by the server's tool-call catch block.
+ */
+export interface ToolErrorEndpointContext {
+  endpoint?: string;
+  projectId?: string;
+  authMethod?: string;
+}
 
 /**
  * Context for a single tool error event.
@@ -32,6 +55,24 @@ export interface ToolErrorContext {
   instanceId?: string;
   /** Optional elapsed time in milliseconds since the handler started. */
   durationMs?: number;
+  /** Optional endpoint/project snapshot at the time of the error. */
+  context?: ToolErrorEndpointContext;
+}
+
+/**
+ * Details extracted from one link in an Error.cause chain. Lets the agent
+ * tell ENOTFOUND apart from ECONNREFUSED apart from a TLS handshake fail.
+ */
+export interface FormattedCauseDetails {
+  name: string;
+  message: string;
+  /** String for network errors (`ENOTFOUND`), number for HTTP statuses. */
+  code?: string | number;
+  errno?: number;
+  syscall?: string;
+  hostname?: string;
+  address?: string;
+  port?: number | string;
 }
 
 /**
@@ -47,29 +88,137 @@ export interface FormattedAgentError {
   type?: string;
   /** Capped (4KB) Appwrite response payload if it was provided. */
   appwriteResponse?: unknown;
+  /** Innermost cause details (network error code, hostname, etc.). */
+  cause?: FormattedCauseDetails;
 }
 
 interface ErrorLoggerOptions {
-  /** Optional absolute path to append JSON lines to. */
+  /**
+   * Path to append JSON lines to. If `undefined` and the logger hasn't been
+   * configured yet, defaults to `~/.appwrite-utils-mcp/errors.log` on first
+   * use. Pass an empty string `""` to disable file logging (stderr only).
+   */
   logFilePath?: string;
   /** Whether to include stack traces in log output. Default: true. */
   includeStack?: boolean;
+  /**
+   * If the existing log file is larger than this many bytes at configure
+   * time, truncate it to roughly `targetSize` bytes (last N bytes kept).
+   * Default: 5MB max, 2MB kept.
+   */
+  maxFileSize?: number;
+  /** Target size after truncation. Default: 2MB. */
+  targetSize?: number;
 }
 
+const DEFAULT_LOG_PATH = join(homedir(), '.appwrite-utils-mcp', 'errors.log');
+const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024;
+const DEFAULT_TARGET_SIZE = 2 * 1024 * 1024;
+
 let logFilePath: string | undefined;
+let logFileResolved = false;
 let includeStack = true;
 
-/** Set the global error-logger configuration. Call once at server startup. */
-export function configureErrorLogger(opts: ErrorLoggerOptions): void {
-  if (opts.logFilePath !== undefined) {
+/**
+ * Resolve and (if needed) prepare the log file path. Called lazily on first
+ * write so a process that never errors doesn't create the file.
+ *
+ * Side effects on first call:
+ *   - Creates parent directory with mode 0700 if missing.
+ *   - If existing file exceeds maxFileSize, truncates from the start
+ *     (keeping last ~targetSize bytes of complete lines).
+ */
+function resolveLogFilePath(): string | undefined {
+  if (logFileResolved) return logFilePath;
+  logFileResolved = true;
+
+  // Empty string explicitly disables file logging.
+  if (logFilePath === '') {
+    logFilePath = undefined;
+    return undefined;
+  }
+
+  if (logFilePath === undefined) {
+    logFilePath = DEFAULT_LOG_PATH;
+  }
+
+  try {
+    mkdirSync(dirname(logFilePath), { recursive: true, mode: 0o700 });
+  } catch {
+    // Best-effort. If dir creation fails, the appendFileSync below will
+    // also fail and emit a one-shot stderr warning.
+  }
+
+  // Startup truncation: if the file is too big, keep the tail.
+  try {
+    if (existsSync(logFilePath)) {
+      const stats = statSync(logFilePath);
+      if (stats.size > DEFAULT_MAX_FILE_SIZE) {
+        truncateLogFileFromEnd(logFilePath, DEFAULT_TARGET_SIZE);
+      }
+    }
+  } catch {
+    // Best-effort.
+  }
+
+  return logFilePath;
+}
+
+/**
+ * Truncate a log file to roughly `targetSize` bytes, keeping the tail and
+ * aligning to a complete line boundary so the first line of the rewritten
+ * file isn't a half-record.
+ */
+function truncateLogFileFromEnd(path: string, targetSize: number): void {
+  const stats = statSync(path);
+  const startOffset = Math.max(0, stats.size - targetSize);
+  const bufSize = stats.size - startOffset;
+  const buf = Buffer.alloc(bufSize);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, buf, 0, bufSize, startOffset);
+  } finally {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('node:fs').closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+  }
+  // Skip leading bytes up to (but not including) the first '\n' so we don't
+  // start the new file mid-line.
+  let firstNl = buf.indexOf(0x0a);
+  if (firstNl < 0) firstNl = -1; // no newline → keep everything (single huge line)
+  const aligned = buf.subarray(firstNl + 1);
+  writeFileSync(path, aligned, { mode: 0o600 });
+  // truncateSync is a no-op here (writeFileSync replaced contents) but kept
+  // as an explicit intent marker.
+  void truncateSync;
+}
+
+/**
+ * Set the global error-logger configuration. Call at most once at server
+ * startup. Subsequent calls are no-ops on the resolved path (don't try to
+ * swap file destinations mid-run — wasted resolves are silently dropped).
+ */
+export function configureErrorLogger(opts: ErrorLoggerOptions = {}): void {
+  if (opts.logFilePath !== undefined && !logFileResolved) {
     logFilePath = opts.logFilePath;
   }
   if (opts.includeStack !== undefined) {
     includeStack = opts.includeStack;
   }
+  // Eagerly resolve so the startup banner can show the path.
+  resolveLogFilePath();
+}
+
+/** Get the resolved log path. Returns undefined if file logging is disabled. */
+export function getResolvedLogPath(): string | undefined {
+  return resolveLogFilePath();
 }
 
 const APPWRITE_RESPONSE_CAP = 4096;
+const MAX_CAUSE_DEPTH = 3;
 
 /**
  * Keys whose values are stripped to `[REDACTED]` regardless of nesting depth.
@@ -125,11 +274,53 @@ export function redactArgs(value: unknown, seen: WeakSet<object> = new WeakSet()
 }
 
 /**
+ * Extract one Error link's network/HTTP details. Used both for the top-level
+ * error and (recursively, via `extractErrorDetails`) for each `.cause` in
+ * the chain. Network errors (Node undici `fetch failed` etc.) populate the
+ * `errno`/`syscall`/`hostname`/`address`/`port` fields; AppwriteException
+ * populates the numeric `code`+`type`.
+ */
+function extractSingleLink(e: Error): FormattedCauseDetails {
+  const anyE = e as Error & {
+    code?: unknown;
+    errno?: unknown;
+    syscall?: unknown;
+    hostname?: unknown;
+    address?: unknown;
+    port?: unknown;
+    type?: unknown;
+  };
+  const out: FormattedCauseDetails = {
+    name: anyE.name || 'Error',
+    message: anyE.message || String(anyE),
+  };
+  if (typeof anyE.code === 'string' || typeof anyE.code === 'number') {
+    out.code = anyE.code;
+  }
+  if (typeof anyE.errno === 'number') out.errno = anyE.errno;
+  if (typeof anyE.syscall === 'string') out.syscall = anyE.syscall;
+  if (typeof anyE.hostname === 'string') out.hostname = anyE.hostname;
+  if (typeof anyE.address === 'string') out.address = anyE.address;
+  if (typeof anyE.port === 'string' || typeof anyE.port === 'number') {
+    out.port = anyE.port;
+  }
+  return out;
+}
+
+/**
  * Build a structured error object suitable for both logging and tool-result
- * serialization. AppwriteException instances are unwrapped to surface their
- * `code` (HTTP status), `type` (Appwrite slug), and `response` body — that's
- * the difference between "401 from Appwrite" and "401 because the API key
- * lacks `databases.read` scope" in the agent-visible output.
+ * serialization.
+ *
+ * Two enrichment passes:
+ *  - AppwriteException unwrap: surfaces `.code` (HTTP status), `.type`
+ *    (Appwrite slug), and `.response` body — that's the difference between
+ *    "401 from Appwrite" and "401 because the API key lacks `databases.read`
+ *    scope" in the agent-visible output.
+ *  - `Error.cause` chain walk (up to 3 deep): Node's `fetch failed` chains
+ *    the actual network error in `.cause` — without walking it, we lose
+ *    every actionable detail (ENOTFOUND? ECONNREFUSED? which hostname?).
+ *    The innermost cause we find is what surfaces in `cause` and in the
+ *    agent-visible `[cause=...] [host=...]` suffix.
  */
 function extractErrorDetails(error: unknown): {
   name: string;
@@ -138,48 +329,72 @@ function extractErrorDetails(error: unknown): {
   code?: number;
   type?: string;
   appwriteResponse?: unknown;
+  cause?: FormattedCauseDetails;
 } {
-  if (error instanceof Error) {
-    const e = error as Error & {
-      code?: unknown;
-      type?: unknown;
-      response?: unknown;
+  if (!(error instanceof Error)) {
+    return {
+      name: typeof error === 'object' && error !== null ? error.constructor.name : typeof error,
+      message: String(error),
     };
-    const out: ReturnType<typeof extractErrorDetails> = {
-      name: e.name || 'Error',
-      message: e.message || String(e),
-    };
-    if (includeStack && typeof e.stack === 'string') {
-      out.stack = e.stack;
-    }
-    if (typeof e.code === 'number') {
-      out.code = e.code;
-    }
-    if (typeof e.type === 'string') {
-      out.type = e.type;
-    }
-    if (e.response !== undefined && e.response !== null) {
-      const responseStr =
-        typeof e.response === 'string'
-          ? e.response
-          : (() => {
-              try {
-                return JSON.stringify(e.response);
-              } catch {
-                return String(e.response);
-              }
-            })();
-      out.appwriteResponse =
-        responseStr.length > APPWRITE_RESPONSE_CAP
-          ? responseStr.slice(0, APPWRITE_RESPONSE_CAP) + '…[truncated]'
-          : responseStr;
-    }
-    return out;
   }
-  return {
-    name: typeof error === 'object' && error !== null ? error.constructor.name : typeof error,
-    message: String(error),
+
+  const e = error as Error & {
+    code?: unknown;
+    type?: unknown;
+    response?: unknown;
+    cause?: unknown;
   };
+  const out: ReturnType<typeof extractErrorDetails> = {
+    name: e.name || 'Error',
+    message: e.message || String(e),
+  };
+  if (includeStack && typeof e.stack === 'string') {
+    out.stack = e.stack;
+  }
+  // AppwriteException puts an HTTP status in .code (number) — preserve only
+  // the numeric form here so the existing FormattedAgentError.code stays typed.
+  if (typeof e.code === 'number') {
+    out.code = e.code;
+  }
+  if (typeof e.type === 'string') {
+    out.type = e.type;
+  }
+  if (e.response !== undefined && e.response !== null) {
+    const responseStr =
+      typeof e.response === 'string'
+        ? e.response
+        : (() => {
+            try {
+              return JSON.stringify(e.response);
+            } catch {
+              return String(e.response);
+            }
+          })();
+    out.appwriteResponse =
+      responseStr.length > APPWRITE_RESPONSE_CAP
+        ? responseStr.slice(0, APPWRITE_RESPONSE_CAP) + '…[truncated]'
+        : responseStr;
+  }
+
+  // Walk .cause chain up to MAX_CAUSE_DEPTH levels. Pick the deepest link
+  // that has actionable network details (code/hostname/port) — those carry
+  // the real diagnostic info from undici.
+  let cursor: unknown = e.cause;
+  let bestCause: FormattedCauseDetails | undefined;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && cursor instanceof Error; depth++) {
+    const link = extractSingleLink(cursor);
+    // Prefer the link with network details; otherwise keep the most recent.
+    if (link.code !== undefined || link.hostname || link.syscall) {
+      bestCause = link;
+    } else if (!bestCause) {
+      bestCause = link;
+    }
+    cursor = (cursor as Error & { cause?: unknown }).cause;
+  }
+  if (bestCause) {
+    out.cause = bestCause;
+  }
+  return out;
 }
 
 /**
@@ -195,6 +410,9 @@ export function logToolError(ctx: ToolErrorContext): void {
     tool: ctx.toolName,
     ...(ctx.instanceId ? { instanceId: ctx.instanceId } : {}),
     ...(typeof ctx.durationMs === 'number' ? { durationMs: ctx.durationMs } : {}),
+    ...(ctx.context && (ctx.context.endpoint || ctx.context.projectId || ctx.context.authMethod)
+      ? { context: ctx.context }
+      : {}),
     error: {
       name: details.name,
       message: details.message,
@@ -205,6 +423,7 @@ export function logToolError(ctx: ToolErrorContext): void {
         : {}),
       ...(details.stack ? { stack: details.stack } : {}),
     },
+    ...(details.cause ? { cause: details.cause } : {}),
     args: redactArgs(ctx.args),
   };
 
@@ -223,13 +442,14 @@ export function logToolError(ctx: ToolErrorContext): void {
   const line = `[appwrite-mcp][error] ${serialized}`;
   process.stderr.write(line + '\n');
 
-  if (logFilePath) {
+  const resolvedPath = resolveLogFilePath();
+  if (resolvedPath) {
     try {
-      appendFileSync(logFilePath, line + '\n', { encoding: 'utf8' });
+      appendFileSync(resolvedPath, line + '\n', { encoding: 'utf8', mode: 0o600 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(
-        `[appwrite-mcp][error] {"ts":"${new Date().toISOString()}","tool":"<logger>","error":{"name":"LogFileWriteError","message":${JSON.stringify(msg)},"logFilePath":${JSON.stringify(logFilePath)}}}\n`
+        `[appwrite-mcp][error] {"ts":"${new Date().toISOString()}","tool":"<logger>","error":{"name":"LogFileWriteError","message":${JSON.stringify(msg)},"logFilePath":${JSON.stringify(resolvedPath)}}}\n`
       );
     }
   }
@@ -237,9 +457,10 @@ export function logToolError(ctx: ToolErrorContext): void {
 
 /**
  * Build the agent-facing error payload — the human-readable message plus the
- * Appwrite code/type/response when available. Callers usually concatenate
- * `formatted.message` with `[code=X] [type=Y]` markers in the returned tool
- * result text so the agent can branch on the error class.
+ * Appwrite code/type/response/cause when available. Callers concatenate
+ * `formatted.message` with `[code=X] [type=Y] [cause=ENOTFOUND] [host=...]`
+ * markers in the returned tool result text so the agent can branch on the
+ * error class without an extra round-trip.
  */
 export function formatErrorForAgent(error: unknown): FormattedAgentError {
   const details = extractErrorDetails(error);
@@ -250,5 +471,6 @@ export function formatErrorForAgent(error: unknown): FormattedAgentError {
     ...(details.appwriteResponse !== undefined
       ? { appwriteResponse: details.appwriteResponse }
       : {}),
+    ...(details.cause ? { cause: details.cause } : {}),
   };
 }

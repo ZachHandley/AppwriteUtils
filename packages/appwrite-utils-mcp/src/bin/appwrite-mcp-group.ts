@@ -18,7 +18,7 @@ console.warn = console.error.bind(console);
 import { basename } from 'node:path';
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags, type ServerFlags } from '../config/FlagParser.js';
-import { logToolError } from '../utils/errorLogger.js';
+import { getResolvedLogPath, logToolError } from '../utils/errorLogger.js';
 
 const BIN_PREFIX = 'appwrite-mcp-';
 
@@ -101,6 +101,11 @@ async function main() {
 
     const server = new AppwriteMCPServer(flags);
     await server.start();
+
+    const logPath = getResolvedLogPath();
+    console.error(
+      `[appwrite-mcp-${group}][info] error log: ${logPath ?? 'disabled (stderr only)'}`
+    );
 
     const shutdown = async (signal: string) => {
       console.error(`\n[appwrite-mcp-${group}] Received ${signal}, shutting down...`);

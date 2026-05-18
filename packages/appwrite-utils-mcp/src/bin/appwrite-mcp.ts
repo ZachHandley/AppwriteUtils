@@ -14,7 +14,7 @@ console.warn = console.error.bind(console);
 
 import { AppwriteMCPServer } from '../server.js';
 import { parseFlags } from '../config/FlagParser.js';
-import { logToolError } from '../utils/errorLogger.js';
+import { getResolvedLogPath, logToolError } from '../utils/errorLogger.js';
 
 /**
  * Main entry point for the Appwrite MCP server
@@ -33,6 +33,12 @@ async function main() {
     // Create and start the server
     const server = new AppwriteMCPServer(flags);
     await server.start();
+
+    // Surface the resolved error log path so the user knows where to grep.
+    const logPath = getResolvedLogPath();
+    console.error(
+      `[appwrite-mcp][info] error log: ${logPath ?? 'disabled (stderr only)'}`
+    );
 
     // Set up graceful shutdown handlers
     const shutdown = async (signal: string) => {

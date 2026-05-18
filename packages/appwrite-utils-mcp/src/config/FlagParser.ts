@@ -40,11 +40,18 @@ export interface ServerFlags {
   lockedScope?: boolean;
 
   /**
-   * Optional absolute path to append tool-error log lines to. When set, every
-   * call to `logToolError` writes one JSON line to this file in addition to
-   * the always-on stderr output. Default: undefined (stderr only).
+   * Optional absolute path to append tool-error log lines to. When set,
+   * overrides the default path (`~/.appwrite-utils-mcp/errors.log`). Stderr
+   * output is always on. Ignored when `noLogFile` is true.
    */
   logFile?: string;
+
+  /**
+   * When true, disables file logging entirely — stderr only. Use this if
+   * you don't want the MCP creating files under HOME (CI environments,
+   * sandboxed processes, etc.).
+   */
+  noLogFile?: boolean;
 }
 
 /**
@@ -133,8 +140,13 @@ export function parseFlags(argv: string[]): ServerFlags {
     .option('logFile', {
       type: 'string',
       description:
-        'Optional absolute path to append tool-error log lines to (JSON-per-line). ' +
-        'Default: stderr only.',
+        'Path to append tool-error log lines to (JSON-per-line). ' +
+        'Defaults to ~/.appwrite-utils-mcp/errors.log when omitted.',
+    })
+    .option('noLogFile', {
+      type: 'boolean',
+      description: 'Disable file logging entirely — stderr only.',
+      default: false,
     })
     .help()
     .alias('help', 'h')
@@ -161,6 +173,7 @@ export function parseFlags(argv: string[]): ServerFlags {
     configDir: parsed.configDir,
     instanceId: parsed.instanceId,
     logFile: parsed.logFile,
+    noLogFile: parsed.noLogFile,
   };
 }
 
