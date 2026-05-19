@@ -13,6 +13,7 @@ import { Functions, ExecutionMethod } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { FunctionManager } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
 const QUERY_HELP_SUFFIX =
   ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -620,9 +621,10 @@ async function handleListExecutions(
   });
 
   const functionManager = new FunctionManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await functionManager.listExecutions(
     validated.functionId,
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 
@@ -959,9 +961,10 @@ async function handleListDeployments(
   });
 
   const functionManager = new FunctionManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await functionManager.listDeployments(
     validated.functionId,
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 
@@ -1100,9 +1103,10 @@ async function handleListFunctionVariables(
   });
 
   const functionManager = new FunctionManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await functionManager.listVariables(
     validated.functionId,
-    normalizeQueries(validated.queries)
+    guarded.queries
   );
 
   return {

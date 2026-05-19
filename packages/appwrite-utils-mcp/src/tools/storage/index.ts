@@ -11,6 +11,7 @@ import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGr
 // lands there, this import can become `from 'appwrite-utils-helpers'`.
 import { StorageManager } from 'appwrite-utils-helpers/dist/storage/storageManager.js';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
 const QUERY_HELP_SUFFIX =
   ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -264,17 +265,22 @@ async function handleListBuckets(
   });
 
   const storageManager = new StorageManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await storageManager.listBuckets(
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 
-  return {
+  const out: any = {
     total: result.total,
     buckets: result.buckets.map((bucket) =>
       projectBucketSlim(bucket as unknown as Models_Bucket)
     ),
   };
+  if (guarded.clamped) {
+    out._pagination = { appliedLimit: guarded.effectiveLimit, clamped: true };
+  }
+  return out;
 }
 
 async function handleGetBucket(input: unknown, context: ToolContext): Promise<unknown> {
@@ -394,16 +400,21 @@ async function handleListFiles(
   });
 
   const storageManager = new StorageManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await storageManager.listFiles(
     validated.bucketId,
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 
-  return {
+  const out: any = {
     total: result.total,
     files: result.files.map((file) => projectFileSlim(file as unknown as Models_File)),
   };
+  if (guarded.clamped) {
+    out._pagination = { appliedLimit: guarded.effectiveLimit, clamped: true };
+  }
+  return out;
 }
 
 async function handleGetFile(input: unknown, context: ToolContext): Promise<unknown> {

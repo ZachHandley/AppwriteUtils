@@ -16,6 +16,7 @@
 
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import yaml from "js-yaml";
 import {
   ConfigDiscoveryService,
   ConfigLoaderService,
@@ -52,6 +53,64 @@ function isRealApiKey(value: string | undefined | null): value is string {
 }
 
 /**
+ * Minimal `appwrite.*` extractor for when the strict loader rejects the
+ * config (e.g. a Zod validation error on the `functions` array). Reads the
+ * YAML, pulls out only the auth-relevant keys, returns null if there's no
+ * project ID. Never throws — discovery + auth must keep working even when
+ * the wider config is malformed.
+ */
+async function extractAuthFromYamlFallback(
+  configPath: string
+): Promise<ResolvedProjectConfig | null> {
+  try {
+    const raw = await readFile(configPath, "utf-8");
+    const parsed = yaml.load(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const root = parsed as Record<string, unknown>;
+    const appwrite = root["appwrite"];
+    if (!appwrite || typeof appwrite !== "object") return null;
+    const block = appwrite as Record<string, unknown>;
+
+    const projectId =
+      typeof block["project"] === "string"
+        ? (block["project"] as string).trim()
+        : "";
+    if (!projectId) return null;
+
+    const endpointRaw = block["endpoint"];
+    const endpoint =
+      typeof endpointRaw === "string" && endpointRaw.trim()
+        ? endpointRaw.trim()
+        : undefined;
+    const keyRaw = block["key"];
+    const apiKey =
+      typeof keyRaw === "string" && isRealApiKey(keyRaw) ? keyRaw : undefined;
+    const cookieRaw = block["sessionCookie"];
+    const sessionCookie =
+      typeof cookieRaw === "string" && cookieRaw.trim()
+        ? cookieRaw.trim()
+        : undefined;
+    const authRaw = block["authMethod"];
+    let authMethod: "session" | "apikey" | "auto" | undefined;
+    if (authRaw === "session" || authRaw === "apikey" || authRaw === "auto") {
+      authMethod = authRaw;
+    }
+
+    return {
+      source: configPath,
+      format: "yaml",
+      projectId,
+      endpoint,
+      apiKey,
+      sessionCookie,
+      authMethod,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve the project this MCP instance is bound to, by scanning the
  * configured working directory for an Appwrite config file.
  *
@@ -78,33 +137,40 @@ export async function resolveProjectConfig(
 
   // YAML: appwrite-utils format — full creds available inline.
   if (ext === ".yaml" || ext === ".yml") {
+    // Try the strict loader first — it does full schema validation and is the
+    // shared code path with the CLI.
     try {
       const loader = new ConfigLoaderService();
       const config = await loader.loadYaml(configPath);
-      if (!config.appwriteProject) return null;
-
-      // Normalize authMethod — YAML allows "auto" | "session" | "apikey".
-      const rawAuthMethod = (config as { authMethod?: unknown }).authMethod;
-      let authMethod: "session" | "apikey" | "auto" | undefined;
-      if (rawAuthMethod === "session" || rawAuthMethod === "apikey" || rawAuthMethod === "auto") {
-        authMethod = rawAuthMethod;
+      if (config?.appwriteProject) {
+        const rawAuthMethod = (config as { authMethod?: unknown }).authMethod;
+        let authMethod: "session" | "apikey" | "auto" | undefined;
+        if (rawAuthMethod === "session" || rawAuthMethod === "apikey" || rawAuthMethod === "auto") {
+          authMethod = rawAuthMethod;
+        }
+        return {
+          source: configPath,
+          format: "yaml",
+          projectId: config.appwriteProject,
+          endpoint: config.appwriteEndpoint || undefined,
+          // Filter placeholder API keys (SET_IF_NEEDED, "", etc.). Real Appwrite
+          // keys are standard_<hex> or dynamic_<hex>; the probe in AuthResolver
+          // is the second line of defense for real-looking-but-revoked keys.
+          apiKey: isRealApiKey(config.appwriteKey) ? config.appwriteKey : undefined,
+          sessionCookie: config.sessionCookie || undefined,
+          authMethod,
+        };
       }
-
-      return {
-        source: configPath,
-        format: "yaml",
-        projectId: config.appwriteProject,
-        endpoint: config.appwriteEndpoint || undefined,
-        // Filter placeholder API keys (SET_IF_NEEDED, "", etc.). Real Appwrite
-        // keys are standard_<hex> or dynamic_<hex>; the probe in AuthResolver
-        // is the second line of defense for real-looking-but-revoked keys.
-        apiKey: isRealApiKey(config.appwriteKey) ? config.appwriteKey : undefined,
-        sessionCookie: config.sessionCookie || undefined,
-        authMethod,
-      };
     } catch {
-      return null;
+      // Fall through to minimal extraction.
     }
+
+    // Fallback: the strict loader rejected the config (most often: a Zod
+    // validation error elsewhere in the file like an invalid function spec).
+    // For *auth* we only need the `appwrite.*` block. Re-parse the raw YAML
+    // and extract just those fields, ignoring everything else. This keeps the
+    // MCP authenticated even when unrelated parts of the config are stale.
+    return extractAuthFromYamlFallback(configPath);
   }
 
   // JSON: Appwrite CLI format — has projectId only. ConfigLoaderService.loadFromPath

@@ -131,6 +131,20 @@ export const YAML_SNIFF_BASENAMES: readonly string[] = Object.freeze([
   "appwrite.config.yml",
 ]);
 
+/**
+ * Per-function config basenames (`.fnconfig.{yaml,yml,json}`). These describe
+ * a single function's deploy metadata — they live inside a function
+ * directory, not at the project root, and never carry project-level auth.
+ * The CLI's per-function discovery still owns merge semantics; this list
+ * exists so generic discovery can answer "is there function-level config in
+ * this tree?" without re-implementing the patterns.
+ */
+export const FN_CONFIG_BASENAMES: readonly string[] = Object.freeze([
+  ".fnconfig.yaml",
+  ".fnconfig.yml",
+  ".fnconfig.json",
+]);
+
 export const JSON_SNIFF_BASENAMES: readonly string[] = Object.freeze([
   "appwrite.config.json",
   "appwrite.json",
@@ -149,6 +163,7 @@ export class ConfigDiscoveryService {
   private readonly JSON_FILENAMES = JSON_FILENAMES;
   private readonly YAML_SNIFF_BASENAMES = YAML_SNIFF_BASENAMES;
   private readonly JSON_SNIFF_BASENAMES = JSON_SNIFF_BASENAMES;
+  private readonly FN_CONFIG_BASENAMES = FN_CONFIG_BASENAMES;
   private readonly TS_FILENAMES = TS_FILENAMES;
 
   /**
@@ -305,6 +320,43 @@ export class ConfigDiscoveryService {
     }
 
     return null;
+  }
+
+  /**
+   * Find every per-function config (`.fnconfig.yaml|yml|json`) under the repo
+   * tree starting from `startDir`. Unlike `findConfig`, this returns ALL hits
+   * (a repo can have many function dirs) and does NOT walk upward — function
+   * configs are leaves, not roots.
+   *
+   * Returns absolute paths. Respects `shouldIgnoreDirectory` (skips
+   * node_modules, dist, etc.) so we don't traverse vendored copies.
+   */
+  public async findAllFnConfigs(
+    startDir: string,
+    maxDepth: number = 6
+  ): Promise<string[]> {
+    const hits: string[] = [];
+    const visit = async (dir: string, depth: number): Promise<void> => {
+      if (depth > maxDepth) return;
+      if (shouldIgnoreDirectory(path.basename(dir))) return;
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const fname of this.FN_CONFIG_BASENAMES) {
+        const candidate = path.join(dir, fname);
+        if (fs.existsSync(candidate)) hits.push(candidate);
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory() && !shouldIgnoreDirectory(entry.name)) {
+          await visit(path.join(dir, entry.name), depth + 1);
+        }
+      }
+    };
+    await visit(startDir, 0);
+    return hits;
   }
 
   /**

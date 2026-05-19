@@ -10,6 +10,7 @@
 
 import { z } from "zod";
 import type { ToolGroupDefinition, ToolContext } from "../ToolGroup.js";
+import { chunkCache } from "../../state/chunkCache.js";
 
 const ListToolGroupsInputSchema = z.object({});
 
@@ -62,6 +63,56 @@ const SelectAppwriteProjectInputSchema = z.object({
 const ClearAppwriteProjectInputSchema = z.object({});
 
 const QueryHelpInputSchema = z.object({});
+
+const FetchPayloadChunkInputSchema = z.object({
+  kind: z
+    .string()
+    .min(1)
+    .describe(
+      "Namespace of the cached payload (e.g. 'table-rows', 'table-schema'). Returned to you in a previous tool's chunkRef."
+    ),
+  key: z
+    .string()
+    .min(1)
+    .describe("Identifier of the cached payload — copy verbatim from the chunkRef."),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(0)
+    .describe("Char offset to start reading from. Default 0."),
+  length: z
+    .number()
+    .int()
+    .positive()
+    .default(50_000)
+    .describe("Max chars to return in this chunk. Default 50_000."),
+});
+
+async function fetchPayloadChunk(input: unknown, _context: ToolContext): Promise<unknown> {
+  const validated = FetchPayloadChunkInputSchema.parse(input);
+  const slice = chunkCache.slice(
+    validated.kind,
+    validated.key,
+    validated.offset,
+    validated.length
+  );
+  if (!slice) {
+    throw new Error(
+      `No cached payload for kind='${validated.kind}', key='${validated.key}'. Cache entries expire after 5 minutes; re-run the producing tool to refresh.`
+    );
+  }
+  return {
+    kind: validated.kind,
+    key: validated.key,
+    offset: validated.offset,
+    length: slice.payload.length,
+    totalLength: slice.totalLength,
+    eof: slice.eof,
+    nextOffset: slice.eof ? null : validated.offset + slice.payload.length,
+    payload: slice.payload,
+  };
+}
 
 function requireRegistry(context: ToolContext) {
   if (!context.toolRegistry) {
@@ -445,6 +496,14 @@ export const metaToolGroup: ToolGroupDefinition = {
         "Remove the in-memory project override set via select_appwrite_project. Resolution falls back to CWD project config / prefs.json.",
       inputSchema: ClearAppwriteProjectInputSchema,
       handler: clearAppwriteProject,
+      requiresAuth: false,
+    },
+    {
+      name: "fetch_payload_chunk",
+      description:
+        "Pull the next slice of a previously-cached oversized tool response. When a list/get tool returns a chunkRef (e.g. list_rows with >60K rows worth of payload), call this with the kind/key/offset/length from that ref to stream the rest. Cache entries are per-server, in-memory, expire after 5 minutes.",
+      inputSchema: FetchPayloadChunkInputSchema,
+      handler: fetchPayloadChunk,
       requiresAuth: false,
     },
     {

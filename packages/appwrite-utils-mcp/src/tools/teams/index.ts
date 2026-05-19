@@ -8,6 +8,7 @@ import type { Models } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { TeamsManager } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
 const QUERY_HELP_SUFFIX =
   ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -188,7 +189,8 @@ async function handleListTeams(
 }> {
   const validated = listTeamsSchema.parse(input ?? {});
   const teams = await getTeamsManager(context);
-  const result = await teams.listTeams(normalizeQueries(validated.queries), validated.search);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
+  const result = await teams.listTeams(guarded.queries, validated.search);
 
   return {
     total: result.total,
@@ -331,9 +333,10 @@ async function handleListTeamMemberships(
 }> {
   const validated = listTeamMembershipsSchema.parse(input);
   const teams = await getTeamsManager(context);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await teams.listMemberships(
     validated.teamId,
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 

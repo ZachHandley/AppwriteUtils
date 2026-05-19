@@ -15,6 +15,8 @@ import { Query } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import type { DatabaseAdapter } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
+import { truncateAndCache } from '../../utils/chunking.js';
 
 const QUERY_DESCRIPTION_SUFFIX =
   'Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -197,6 +199,15 @@ const listTablesSchema = z.object({
 const getTableSchema = z.object({
   databaseId: databaseIdSchema,
   tableId: tableIdSchema,
+  summary: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe(
+      'Return a slim projection: column/index counts, primary key, basic metadata. ' +
+        'Default true to keep responses small — pass false for full column + index schemas. ' +
+        'Oversized full responses are cached and a chunkRef is returned; call fetch_payload_chunk to stream the rest.'
+    ),
 });
 
 const createTableSchema = z.object({
@@ -371,12 +382,52 @@ const deleteColumnSchema = z.object({
 async function handleListRows(input: unknown, context: ToolContext) {
   const validated = listRowsSchema.parse(input);
   const adapter = await getAdapter(context);
+  // Default to 25 when no limit, cap caller-supplied limits at 100. Row payloads
+  // are user-defined and can be arbitrarily large, so an uncapped Query.limit()
+  // is the most reliable way to blow the MCP result cap.
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), {
+    maxLimit: 100,
+    defaultLimit: 25,
+  });
   const response = await adapter.listRows({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: normalizeQueries(validated.queries),
+    queries: guarded.queries,
   });
-  return slimRowList(response);
+  const slim = slimRowList(response);
+
+  const pagination = guarded.clamped || guarded.injectedDefault
+    ? {
+        appliedLimit: guarded.effectiveLimit,
+        clamped: guarded.clamped,
+        defaulted: guarded.injectedDefault,
+        note: guarded.clamped
+          ? `Limit clamped to 100 to keep the response under the MCP cap. Page with Query.cursorAfter(rowId).`
+          : `Default limit 25 applied. Set Query.limit(N<=100) for larger pages or Query.cursorAfter(rowId) to page.`,
+      }
+    : null;
+
+  // Even at limit=100 a wide row schema can blow the response cap. Stash and
+  // chunk when the serialized payload is too big to inline.
+  const serialized = JSON.stringify(slim, null, 2);
+  const chunked = truncateAndCache(serialized, {
+    kind: 'table-rows',
+    key: `${validated.databaseId}:${validated.tableId}:${guarded.effectiveLimit ?? 'auto'}:${
+      (validated.queries ?? []).join('|') || 'noq'
+    }`,
+  });
+  if (chunked.truncated) {
+    return {
+      _chunked: true,
+      chunkRef: chunked.chunkRef,
+      inlinePayload: chunked.inline,
+      ...(pagination ? { _pagination: pagination } : {}),
+      note:
+        'Row payload exceeded the inline cap. Reduce Query.limit(), narrow with Query.select([...]), ' +
+        'or pull the rest via fetch_payload_chunk.',
+    };
+  }
+  return pagination ? { ...slim, _pagination: pagination } : slim;
 }
 
 async function handleGetRow(input: unknown, context: ToolContext) {
@@ -495,20 +546,20 @@ async function handleListTables(input: unknown, context: ToolContext) {
   const adapter = await getAdapter(context);
 
   // Build the queries array: user-supplied entries + optional Query.search.
-  // Inject a default Query.limit(25) when the caller didn't set one — full
-  // table schemas are large enough that the default response can overflow
-  // the tool result cap.
+  // Then default to limit(25) and clamp callers > 100 — full table schemas can
+  // be large enough to overflow the tool result cap on their own.
   const rawQueries: string[] = [...(validated.queries ?? [])];
   if (validated.search) {
     rawQueries.push(Query.search('name', validated.search));
   }
-  if (!hasLimitQuery(rawQueries)) {
-    rawQueries.push(Query.limit(25));
-  }
+  const guarded = clampQueryLimit(normalizeQueries(rawQueries), {
+    maxLimit: 100,
+    defaultLimit: 25,
+  });
 
   const response = await adapter.listTables({
     databaseId: validated.databaseId,
-    queries: normalizeQueries(rawQueries),
+    queries: guarded.queries,
   });
   const slim = slimTableList(response);
 
@@ -522,6 +573,19 @@ async function handleListTables(input: unknown, context: ToolContext) {
     }))
   );
 
+  const pagination = guarded.clamped || guarded.injectedDefault
+    ? {
+        _pagination: {
+          appliedLimit: guarded.effectiveLimit,
+          clamped: guarded.clamped,
+          defaulted: guarded.injectedDefault,
+          note: guarded.clamped
+            ? 'Limit clamped to 100 to keep the response under the MCP cap. Page with Query.cursorAfter(tableId).'
+            : 'Default limit 25 applied. Set Query.limit(N<=100) or Query.cursorAfter(tableId) to page.',
+        },
+      }
+    : {};
+
   if (validated.summary) {
     return {
       total: slim.total,
@@ -529,30 +593,11 @@ async function handleListTables(input: unknown, context: ToolContext) {
       note:
         'Returned slim summary. Pass summary:false on this tool for the full schema ' +
         '(may overflow tool result cap on large projects — use Query.limit() when opting out).',
+      ...pagination,
     };
   }
 
-  return slim;
-}
-
-/**
- * Detect whether the caller already supplied a Query.limit(...) entry, in any
- * of the three accepted forms — JSON wire (`{"method":"limit",...}`), SDK
- * (`Query.limit(...)`), or bare (`limit(...)`).
- */
-function hasLimitQuery(entries: string[]): boolean {
-  return entries.some((entry) => {
-    const trimmed = entry.trim();
-    if (trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed) as { method?: unknown };
-        return parsed?.method === 'limit';
-      } catch {
-        return false;
-      }
-    }
-    return /^(?:Query\.)?limit\s*\(/.test(trimmed);
-  });
+  return { ...slim, ...pagination };
 }
 
 /**
@@ -586,7 +631,28 @@ async function handleGetTable(input: unknown, context: ToolContext) {
     databaseId: validated.databaseId,
     tableId: validated.tableId,
   });
-  return { table: (response as any)?.data ?? response };
+  const table: any = (response as any)?.data ?? response;
+
+  if (validated.summary) {
+    return { table: projectTableSummary(table) };
+  }
+
+  // Full mode: serialize and chunk if the schema is oversized (e.g. hundreds
+  // of columns on a wide table).
+  const serialized = JSON.stringify({ table }, null, 2);
+  const result = truncateAndCache(serialized, {
+    kind: 'table-schema',
+    key: `${validated.databaseId}:${validated.tableId}`,
+  });
+  if (!result.truncated) return { table };
+  return {
+    _chunked: true,
+    chunkRef: result.chunkRef,
+    inlinePayload: result.inline,
+    note:
+      'Full table schema exceeded the inline cap. The complete JSON is cached; ' +
+      'pull more via fetch_payload_chunk. Prefer get_table with summary:true to avoid this.',
+  };
 }
 
 async function handleCreateTable(input: unknown, context: ToolContext) {
@@ -634,12 +700,17 @@ async function handleDeleteTable(input: unknown, context: ToolContext) {
 async function handleListIndexes(input: unknown, context: ToolContext) {
   const validated = listIndexesSchema.parse(input);
   const adapter = await getAdapter(context);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), {
+    maxLimit: 100,
+  });
   const response = await adapter.listIndexes({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: normalizeQueries(validated.queries),
+    queries: guarded.queries,
   });
-  return slimIndexList(response);
+  return guarded.clamped
+    ? { ...slimIndexList(response), _pagination: { appliedLimit: guarded.effectiveLimit, clamped: true } }
+    : slimIndexList(response);
 }
 
 async function handleCreateIndex(input: unknown, context: ToolContext) {
@@ -674,12 +745,17 @@ async function handleDeleteIndex(input: unknown, context: ToolContext) {
 async function handleListColumns(input: unknown, context: ToolContext) {
   const validated = listColumnsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), {
+    maxLimit: 100,
+  });
   const response = await adapter.listColumns({
     databaseId: validated.databaseId,
     tableId: validated.tableId,
-    queries: normalizeQueries(validated.queries),
+    queries: guarded.queries,
   });
-  return slimColumnList(response);
+  return guarded.clamped
+    ? { ...slimColumnList(response), _pagination: { appliedLimit: guarded.effectiveLimit, clamped: true } }
+    : slimColumnList(response);
 }
 
 async function handleGetColumn(input: unknown, context: ToolContext) {

@@ -8,6 +8,7 @@ import type { Models } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { UsersManager } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
 const QUERY_HELP_SUFFIX =
   ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -177,14 +178,19 @@ async function buildManager(context: ToolContext): Promise<UsersManager> {
 async function handleListUsers(
   input: unknown,
   context: ToolContext
-): Promise<{ total: number; users: SlimUserRow[] }> {
+) {
   const validated = listUsersSchema.parse(input);
   const manager = await buildManager(context);
-  const result = await manager.listUsers(normalizeQueries(validated.queries), validated.search);
-  return {
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
+  const result = await manager.listUsers(guarded.queries, validated.search);
+  const out: { total: number; users: SlimUserRow[]; _pagination?: unknown } = {
     total: result.total,
     users: result.users.map(toSlimUserRow),
   };
+  if (guarded.clamped) {
+    out._pagination = { appliedLimit: guarded.effectiveLimit, clamped: true };
+  }
+  return out;
 }
 
 async function handleGetUser(
@@ -333,9 +339,10 @@ async function handleListUserMemberships(
 }> {
   const validated = listUserMembershipsSchema.parse(input);
   const manager = await buildManager(context);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await manager.listMemberships(
     validated.userId,
-    normalizeQueries(validated.queries)
+    guarded.queries
   );
   return {
     total: result.total,
@@ -372,8 +379,9 @@ async function handleListIdentities(
 }> {
   const validated = listIdentitiesSchema.parse(input);
   const manager = await buildManager(context);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await manager.listIdentities(
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
   return {

@@ -19,6 +19,7 @@ import { StateManager } from './state/StateManager.js';
 import { ToolRegistry } from './tools/ToolRegistry.js';
 import type { ToolContext } from './tools/ToolGroup.js';
 import { configureErrorLogger, formatErrorForAgent, logToolError } from './utils/errorLogger.js';
+import { chunkCache } from './state/chunkCache.js';
 import { randomUUID } from 'crypto';
 
 // Import tool groups
@@ -72,8 +73,17 @@ export class AppwriteMCPServer {
    * @param flags - Server configuration flags from CLI parsing
    */
   constructor(flags: ServerFlags) {
-    this.flags = flags;
+    // Snapshot CWD now, before any tool can call process.chdir(). Makes config
+    // discovery deterministic across the server's lifetime — see the
+    // two-instances-same-dir bug where a lazy process.cwd() read in
+    // AuthResolver.getProjectConfig() picked up a different dir on the second
+    // server's first tool call than the first server's startup CWD.
+    const startupCwd = process.cwd();
+    this.flags = { ...flags, configDir: flags.configDir ?? startupCwd };
     this.instanceId = flags.instanceId || randomUUID();
+    console.error(
+      `[appwrite-mcp] startup cwd=${startupCwd} configDir=${flags.configDir ?? '(cwd snapshot)'}`
+    );
 
     // Configure error logger. File logging is ON BY DEFAULT (writes to
     // ~/.appwrite-utils-mcp/errors.log). --logFile overrides the path;
@@ -89,7 +99,7 @@ export class AppwriteMCPServer {
       endpoint: flags.endpoint,
       projectId: flags.projectId,
       apiKey: flags.apiKey,
-      configDir: flags.configDir,
+      configDir: this.flags.configDir,
     });
 
     this.clientRegistry = new ClientRegistry();
@@ -228,8 +238,8 @@ Server instance ID: ${this.instanceId}
    *  - `undefined`/`null` results would serialize to the JS value `undefined`,
    *    which violates MCP's requirement that `text` be a string.
    */
-  private serializeToolResult(result: unknown): string {
-    if (typeof result === 'string') return this.guardLargeText(result);
+  private serializeToolResult(result: unknown, toolName?: string): string {
+    if (typeof result === 'string') return this.guardLargeText(result, toolName);
     if (result === undefined || result === null) return '';
     try {
       const serialized = JSON.stringify(
@@ -238,7 +248,7 @@ Server instance ID: ${this.instanceId}
         2
       );
       const out = typeof serialized === 'string' ? serialized : String(result);
-      return this.guardLargeText(out);
+      return this.guardLargeText(out, toolName);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return `[serialization failed: ${msg}]`;
@@ -249,18 +259,28 @@ Server instance ID: ${this.instanceId}
    * Hard ceiling on the serialized result. Many Claude Code / MCP host
    * implementations cap a single tool result around 100K chars; oversized
    * results either get rejected outright or are spilled to disk for the
-   * agent to re-fetch. Truncate at 85K (leaving headroom for the footer)
-   * and tell the agent exactly which queries to use to constrain the call.
+   * agent to re-fetch.
+   *
+   * When the cap is hit we (a) truncate at 85K for inline visibility, AND
+   * (b) stash the FULL payload in the chunk cache so the agent can pull the
+   * rest via `fetch_payload_chunk`. This catches tools that didn't opt into
+   * chunking themselves — a defensive last line of defense.
    */
-  private guardLargeText(text: string): string {
+  private guardLargeText(text: string, toolName?: string): string {
     const HARD_LIMIT = 90_000;
     const TRUNCATE_TO = 85_000;
     if (text.length <= HARD_LIMIT) return text;
+
+    const kind = 'tool-response';
+    const key = `${toolName ?? 'unknown'}:${randomUUID()}`;
+    chunkCache.put(kind, key, text);
     return (
       text.slice(0, TRUNCATE_TO) +
       `\n\n[TRUNCATED — result was ${text.length.toLocaleString()} chars (cap ${HARD_LIMIT.toLocaleString()}). ` +
-      "Re-run with Query.limit(N), Query.select([...]) to project fewer fields, " +
-      "or summary:true on tools that support it. Call query_help for query syntax.]"
+      `Full payload cached: kind='${kind}', key='${key}'. ` +
+      `Continue with fetch_payload_chunk(kind='${kind}', key='${key}', offset=${TRUNCATE_TO}, length=50000), ` +
+      "or re-run with Query.limit(N) / Query.select([...]) / summary:true. " +
+      "Call query_help for query syntax.]"
     );
   }
 
@@ -311,7 +331,7 @@ Server instance ID: ${this.instanceId}
           content: [
             {
               type: 'text' as const,
-              text: this.serializeToolResult(result),
+              text: this.serializeToolResult(result, name),
             },
           ],
         };
@@ -369,7 +389,8 @@ Server instance ID: ${this.instanceId}
             {
               type: 'text' as const,
               text: this.guardLargeText(
-                `Error executing tool '${name}': ${formatted.message}${suffix}`
+                `Error executing tool '${name}': ${formatted.message}${suffix}`,
+                name
               ),
             },
           ],

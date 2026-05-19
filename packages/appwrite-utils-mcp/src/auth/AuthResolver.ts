@@ -147,6 +147,12 @@ export class AuthResolver {
     | { loaded: false } = { loaded: false };
 
   /**
+   * One-shot guard so the "no config found in workingDir" stderr line only
+   * fires once per resolver lifetime instead of on every tool call.
+   */
+  private loggedMissingConfig = false;
+
+  /**
    * Creates a new AuthResolver with server-level defaults
    *
    * @param serverDefaults - Default authentication configuration from FlagParser
@@ -184,9 +190,18 @@ export class AuthResolver {
    */
   public async getProjectConfig(): Promise<ResolvedProjectConfig | null> {
     if (this.projectConfigCache.loaded) return this.projectConfigCache.config;
+    // serverDefaults.configDir is always set by AppwriteMCPServer (snapshots
+    // process.cwd() at construction). The `?? process.cwd()` here is a
+    // defensive fallback only — direct AuthResolver instantiation in tests.
     const workingDir = this.serverDefaults.configDir ?? process.cwd();
     const config = await resolveProjectConfig(workingDir);
     this.projectConfigCache = { config, loaded: true };
+    if (!config && !this.loggedMissingConfig) {
+      this.loggedMissingConfig = true;
+      console.error(
+        `[appwrite-mcp] no appwrite config found from workingDir=${workingDir} — set --configDir, --endpoint+--projectId, or run from inside a project tree`
+      );
+    }
     return config;
   }
 

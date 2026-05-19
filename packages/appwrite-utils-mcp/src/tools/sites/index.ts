@@ -8,6 +8,7 @@ import { Sites } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
 import { SiteManager } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
+import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
 const QUERY_HELP_SUFFIX =
   ' Accepts SDK syntax like Query.limit(10) or limit(10), or JSON wire form. Call query_help for the full reference.';
@@ -119,7 +120,7 @@ const createSiteVariableSchema = z.object({
 async function handleListSites(
   input: unknown,
   context: ToolContext
-): Promise<{ sites: Array<{ id: string; name: string; framework: string; status: string }> }> {
+) {
   const validated = listSitesSchema.parse(input) ?? {};
 
   // Resolve authentication credentials
@@ -135,12 +136,13 @@ async function handleListSites(
   });
 
   const siteManager = new SiteManager(client);
+  const guarded = clampQueryLimit(normalizeQueries(validated.queries), { maxLimit: 100 });
   const result = await siteManager.listSites(
-    normalizeQueries(validated.queries),
+    guarded.queries,
     validated.search
   );
 
-  return {
+  const out: any = {
     sites: result.sites.map((site: any) => ({
       id: site.$id,
       name: site.name,
@@ -148,6 +150,10 @@ async function handleListSites(
       status: site.latestDeploymentStatus || 'unknown',
     })),
   };
+  if (guarded.clamped) {
+    out._pagination = { appliedLimit: guarded.effectiveLimit, clamped: true };
+  }
+  return out;
 }
 
 /**
