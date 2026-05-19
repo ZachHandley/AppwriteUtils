@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { MessageFormatter } from './messageFormatter.js';
 import type { AppwriteConfig, Attribute } from 'appwrite-utils';
-import { getVersionAwareDirectory } from 'appwrite-utils';
+import { getVersionAwareDirectory } from 'appwrite-utils/node';
 
 function getBasePydanticTemplate(isTablesMode: boolean): string {
   const entityIdField = isTablesMode ? 'table_id' : 'collection_id';

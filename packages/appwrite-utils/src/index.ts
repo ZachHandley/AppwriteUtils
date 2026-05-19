@@ -60,9 +60,6 @@ export {
   type ConfigTables,
   type ConfigDatabase,
   type ConfigDatabases,
-  getVersionAwareDirectory,
-  resolveDirectoryForApiMode,
-  getDualDirectoryPaths,
 } from "./schemas/appwriteConfig.js";
 export {
   type CollectionCreate,

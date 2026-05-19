@@ -4,7 +4,7 @@ import type {
   Attribute,
   RelationshipAttribute,
 } from "appwrite-utils";
-import { getVersionAwareDirectory, resolveDirectoryForApiMode, getDualDirectoryPaths } from "appwrite-utils";
+import { getVersionAwareDirectory, resolveDirectoryForApiMode, getDualDirectoryPaths } from "appwrite-utils/node";
 import { z } from "zod";
 import fs from "fs";
 import path from "path";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import micromatch from "micromatch";
+import wcmatch from "wildcard-match";
 
 /**
  * Valid Appwrite event patterns
@@ -139,12 +139,9 @@ const VALID_EVENT_PATTERNS = [
   "messages.*.update",
 ];
 
-/**
- * Validates an Appwrite event string using glob pattern matching
- */
-const validateEventPattern = (event: string): boolean => {
-  return micromatch.isMatch(event, VALID_EVENT_PATTERNS);
-};
+const isValidEvent = wcmatch(VALID_EVENT_PATTERNS, ".");
+
+const validateEventPattern = (event: string): boolean => isValidEvent(event);
 
 export const EventTypeSchema = z.string().refine(
   validateEventPattern,
