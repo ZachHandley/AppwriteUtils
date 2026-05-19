@@ -263,6 +263,19 @@ async function getAuthStatus(
     resolveError = err instanceof Error ? err.message : String(err);
   }
 
+  // Probe trace surfaces WHY each prefs entry was rejected when resolution
+  // fails. Look up by the same probeId precedence buildCandidates uses
+  // (override → cwd config → server-default projectId). Only attached when
+  // resolution actually failed — successful resolves don't need the trace.
+  let probeTrace: ReturnType<typeof context.authResolver.getProbeTrace> = null;
+  if (resolveError) {
+    const probeId =
+      overrideRaw?.projectId ?? cwdProjectRaw?.projectId ?? serverDefaults.projectId;
+    if (probeId) {
+      probeTrace = context.authResolver.getProbeTrace(probeId);
+    }
+  }
+
   return {
     authenticated,
     authMethod,
@@ -278,6 +291,7 @@ async function getAuthStatus(
     },
     cwdProject,
     sessionOverride,
+    ...(probeTrace ? { probeTrace } : {}),
   };
 }
 

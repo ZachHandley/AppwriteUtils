@@ -29,6 +29,24 @@ interface Candidate {
 type ProbeVerdict = "valid" | "valid-but-narrow-scope" | "invalid-auth" | "unreachable";
 
 /**
+ * One row of the probe trace surfaced by {@link AuthResolver.getProbeTrace}.
+ * Captures which prefs entry was tried against which endpoint with which
+ * credential shape, plus what Appwrite (or the network layer) responded.
+ *
+ * `prefsKey` is the entry key from `~/.appwrite/prefs.json` — non-sensitive
+ * (account/session id). `cookie` / `apiKey` bytes never enter the trace —
+ * only the discriminator `credKind`.
+ */
+export interface ProbeAttempt {
+  prefsKey: string;
+  endpoint: string;
+  credKind: "cookie" | "apikey";
+  verdict: ProbeVerdict;
+  errorCode?: string | number;
+  errorMessage?: string;
+}
+
+/**
  * Authentication credentials with source information
  */
 export interface AuthCredentials {
@@ -160,6 +178,15 @@ export class AuthResolver {
   private projectAuthCache: Map<string, Promise<Candidate | null>> = new Map();
 
   /**
+   * Per-projectId trace of every probe attempt made by `findAuthForProjectId`.
+   * Populated as a side effect of the same probe loop that fills
+   * `projectAuthCache`. Exposed via `getProbeTrace` so diagnostic tools (e.g.
+   * `get_auth_status`) can surface WHY each prefs entry was rejected — the
+   * bucketed verdict alone hides the actionable signal.
+   */
+  private probeTraceCache: Map<string, ProbeAttempt[]> = new Map();
+
+  /**
    * Creates a new AuthResolver with server-level defaults
    *
    * @param serverDefaults - Default authentication configuration from FlagParser
@@ -205,9 +232,22 @@ export class AuthResolver {
   public invalidateProjectCache(projectId?: string): void {
     if (projectId === undefined) {
       this.projectAuthCache.clear();
+      this.probeTraceCache.clear();
       return;
     }
     this.projectAuthCache.delete(projectId);
+    this.probeTraceCache.delete(projectId);
+  }
+
+  /**
+   * Probe trace for the most recent `findAuthForProjectId(projectId)` call
+   * (or null if it was never invoked for this id). Each entry describes one
+   * (prefs-entry, endpoint, cred-shape) attempt and the resulting verdict —
+   * the data needed to diagnose "no candidate credentials available" failures
+   * without re-running with debug logging.
+   */
+  public getProbeTrace(projectId: string): ProbeAttempt[] | null {
+    return this.probeTraceCache.get(projectId) ?? null;
   }
 
   /**
@@ -220,13 +260,24 @@ export class AuthResolver {
    * normalize against. Returned candidate's endpoint is the one that probed
    * green, which is what the tool's underlying SDK call will use.
    */
-  public findAuthForProjectId(projectId: string): Promise<Candidate | null> {
+  public findAuthForProjectId(
+    projectId: string,
+    preferredEndpoint?: string
+  ): Promise<Candidate | null> {
     const existing = this.projectAuthCache.get(projectId);
     if (existing) return existing;
 
     const promise = (async (): Promise<Candidate | null> => {
+      const trace: ProbeAttempt[] = [];
+      const writeTrace = () => this.probeTraceCache.set(projectId, trace);
+
       const prefs = await this.sessionService.loadSessionPrefs();
-      if (!prefs) return null;
+      if (!prefs) {
+        writeTrace();
+        return null;
+      }
+
+      const normalize = (u: string) => u.replace(/\/+$/, "").toLowerCase();
 
       for (const [pid, raw] of Object.entries(prefs)) {
         if (pid === "current") continue;
@@ -239,6 +290,7 @@ export class AuthResolver {
         };
 
         if (typeof entry.endpoint !== "string" || !entry.endpoint) continue;
+        const entryEndpoint = entry.endpoint;
 
         const apiKey =
           typeof entry.key === "string" && entry.key ? entry.key : undefined;
@@ -249,20 +301,42 @@ export class AuthResolver {
 
         if (!apiKey && !sessionCookie) continue;
 
-        // Probe with cookie first (preferred when both are present, matches
-        // ClientFactory's "auto" policy), then key as a separate attempt.
+        // Endpoints to probe per entry: the entry's own endpoint plus, when
+        // it differs, the caller-supplied preferredEndpoint (YAML / override /
+        // server-default). The second pass covers the CNAME case where the
+        // cookie was minted for one hostname but the target project lives at
+        // an aliased hostname — same backend, different URL.
+        const endpointsToTry: string[] = [entryEndpoint];
+        if (
+          preferredEndpoint &&
+          normalize(preferredEndpoint) !== normalize(entryEndpoint)
+        ) {
+          endpointsToTry.push(preferredEndpoint);
+        }
+
         const tryProbe = async (
-          cred: { apiKey?: string; sessionCookie?: string }
+          endpoint: string,
+          cred: { apiKey?: string; sessionCookie?: string },
+          credKind: "cookie" | "apikey"
         ): Promise<Candidate | null> => {
-          const verdict = await this.sessionService.probeCredentials({
-            endpoint: entry.endpoint as string,
-            projectId,
-            apiKey: cred.apiKey,
-            sessionCookie: cred.sessionCookie,
+          const { verdict, errorCode, errorMessage } =
+            await this.sessionService.probeCredentialsDetailed({
+              endpoint,
+              projectId,
+              apiKey: cred.apiKey,
+              sessionCookie: cred.sessionCookie,
+            });
+          trace.push({
+            prefsKey: pid,
+            endpoint,
+            credKind,
+            verdict,
+            ...(errorCode !== undefined ? { errorCode } : {}),
+            ...(errorMessage !== undefined ? { errorMessage } : {}),
           });
           if (verdict === "valid" || verdict === "valid-but-narrow-scope") {
             return {
-              endpoint: entry.endpoint as string,
+              endpoint,
               projectId,
               apiKey: cred.apiKey,
               sessionCookie: cred.sessionCookie,
@@ -272,16 +346,25 @@ export class AuthResolver {
           return null;
         };
 
-        if (sessionCookie) {
-          const hit = await tryProbe({ sessionCookie });
-          if (hit) return hit;
-        }
-        if (apiKey) {
-          const hit = await tryProbe({ apiKey });
-          if (hit) return hit;
+        for (const endpoint of endpointsToTry) {
+          if (sessionCookie) {
+            const hit = await tryProbe(endpoint, { sessionCookie }, "cookie");
+            if (hit) {
+              writeTrace();
+              return hit;
+            }
+          }
+          if (apiKey) {
+            const hit = await tryProbe(endpoint, { apiKey }, "apikey");
+            if (hit) {
+              writeTrace();
+              return hit;
+            }
+          }
         }
       }
 
+      writeTrace();
       return null;
     })();
 
@@ -458,9 +541,14 @@ export class AuthResolver {
     // get their own resolution path through subsequent tiers.
     const probeId =
       this.sessionOverride?.projectId ?? project?.projectId ?? baseProjectId;
+    // Preferred endpoint for the CNAME pass: caller-declared target trumps
+    // each prefs entry's own endpoint. Lets a cookie minted at cloud reach a
+    // project that lives behind a custom domain alias of that cloud backend.
+    const preferredEndpoint =
+      this.sessionOverride?.endpoint ?? project?.endpoint ?? baseEndpoint;
     if (probeId) {
       try {
-        const probed = await this.findAuthForProjectId(probeId);
+        const probed = await this.findAuthForProjectId(probeId, preferredEndpoint);
         if (probed) {
           pushIfComplete({
             endpoint: probed.endpoint,
@@ -658,7 +746,8 @@ export class AuthResolver {
         "Authentication resolution failed: no candidate credentials available. " +
           "Provide endpoint+projectId+(apiKey|sessionCookie) via tool params, server flags, " +
           "a project config (appwrite.json / .appwrite/config.yaml) in the working dir, " +
-          "or run `appwrite login`."
+          "or run `appwrite login`. " +
+          "Call `get_auth_status` to see which prefs entries were probed and why each was rejected."
       );
     }
 
