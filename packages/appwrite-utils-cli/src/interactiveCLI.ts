@@ -511,8 +511,18 @@ export class InteractiveCLI {
       localCollectionIds.has(getCollectionId(collection))
     );
 
+    // Map of collection identity → collection object so we can return full
+    // collections after inquirer hands us back string ids. Inquirer 9.3.8's
+    // CheckboxPrompt does `string + answerArray`, which forces Array.toString()
+    // → primitive coercion on each element. SDK-returned Models.Collection
+    // values trip Symbol.toPrimitive in that path, crashing the prompt — so
+    // we must keep choice `value`s as plain strings.
+    const collectionsById = new Map<string, Models.Collection>(
+      allCollections.map((c) => [getCollectionId(c), c])
+    );
+
     // Enhanced choice display with type indicators
-    const choices: { name: string; value: Models.Collection | string }[] = allCollections
+    const choices: { name: string; value: string }[] = allCollections
       .sort((a, b) => {
         // Sort by type first (collections before tables), then by name
         const aIsTable = (a as any)._isFromTablesDir || false;
@@ -562,7 +572,7 @@ export class InteractiveCLI {
 
         return {
           name: `${typeIndicator} ${collection.name} ${locationIndicator}${dbIndicator}`,
-          value: collection,
+          value: getCollectionId(collection),
         };
       });
 
@@ -608,9 +618,20 @@ export class InteractiveCLI {
       if (selectedCollections.includes("__SELECT_ALL_LOCAL__")) {
         return localCollections;
       }
+      // Hydrate string ids back into the full collection objects callers expect.
+      return (selectedCollections as string[])
+        .map((id) => collectionsById.get(id))
+        .filter((c): c is Models.Collection => !!c);
     }
 
-    return selectedCollections;
+    // Single-select returns one string id — hydrate to the Models.Collection
+    // shape callers downstream depend on.
+    if (typeof selectedCollections === "string") {
+      const hit = collectionsById.get(selectedCollections);
+      return hit ? [hit] : [];
+    }
+
+    return selectedCollections as unknown as Models.Collection[];
   }
 
   /**
@@ -864,6 +885,21 @@ export class InteractiveCLI {
       ),
     ];
 
+    // Map of function $id → full AppwriteFunction. We feed inquirer string ids
+    // instead of the full objects because inquirer 9.3.8's CheckboxPrompt
+    // concatenates the current answer array onto a string for spinner display,
+    // which forces Array.toString() → primitive coercion on each selected
+    // value. node-appwrite's Models.Function instances trip
+    // `Cannot convert object to primitive value` in that path; plain strings
+    // don't.
+    // Loose value type — allFunctions is a mix of local (AppwriteFunction) and
+    // remote (Models.Function) shapes that don't unify cleanly under TS. We
+    // only ever hand the looked-up object back to callers who already accept
+    // both shapes.
+    const functionsById = new Map<string, AppwriteFunction>(
+      allFunctions.map((f) => [f.$id, f as unknown as AppwriteFunction])
+    );
+
     const { selectedFunctions } = await inquirer.prompt([
       {
         type: multiple ? "checkbox" : "list",
@@ -875,13 +911,20 @@ export class InteractiveCLI {
               ? " (Local)"
               : " (Remote)"
           }`,
-          value: f,
+          value: f.$id,
         })),
         loop: true,
       },
     ]);
 
-    return multiple ? selectedFunctions : [selectedFunctions];
+    const hydrate = (id: string) => functionsById.get(id);
+    if (multiple) {
+      return (selectedFunctions as string[])
+        .map(hydrate)
+        .filter((f): f is AppwriteFunction => !!f);
+    }
+    const single = hydrate(selectedFunctions as string);
+    return single ? [single] : [];
   }
 
   private getLocalFunctions(): AppwriteFunction[] {
@@ -922,9 +965,15 @@ export class InteractiveCLI {
     message: string,
     multiSelect = true
   ): Promise<Models.Bucket[]> {
+    // String ids only — same inquirer 9.3.8 primitive-coercion issue as
+    // selectFunctions / selectCollectionsAndTables. See those for context.
+    const bucketsById = new Map<string, Models.Bucket>(
+      buckets.map((b) => [b.$id, b])
+    );
+
     const choices = buckets.map((bucket) => ({
       name: bucket.name,
-      value: bucket,
+      value: bucket.$id,
     }));
 
     const { selectedBuckets } = await inquirer.prompt([
@@ -938,7 +987,13 @@ export class InteractiveCLI {
       },
     ]);
 
-    return selectedBuckets;
+    if (multiSelect) {
+      return (selectedBuckets as string[])
+        .map((id) => bucketsById.get(id))
+        .filter((b): b is Models.Bucket => !!b);
+    }
+    const single = bucketsById.get(selectedBuckets as string);
+    return single ? [single] : [];
   }
 
 

@@ -103,6 +103,8 @@ export const YAML_FILENAMES: readonly string[] = Object.freeze([
   "appwrite/appwriteConfig.yml",
   "appwrite.yaml",
   "appwrite.yml",
+  "appwrite.config.yaml",
+  "appwrite.config.yml",
 ]);
 
 /**
@@ -125,6 +127,8 @@ export const YAML_SNIFF_BASENAMES: readonly string[] = Object.freeze([
   "appwriteConfig.yml",
   "appwrite.yaml",
   "appwrite.yml",
+  "appwrite.config.yaml",
+  "appwrite.config.yml",
 ]);
 
 export const JSON_SNIFF_BASENAMES: readonly string[] = Object.freeze([

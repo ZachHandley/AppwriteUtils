@@ -9,6 +9,7 @@ import { Databases, Storage, type Models } from "node-appwrite";
 import { getClient } from "appwrite-utils-helpers";
 import { fetchAllDatabases } from "./databases/methods.js";
 import { setupDirsFiles } from "./utils/setupFiles.js";
+import { logCliError } from "./utils/errorLogger.js";
 import { fetchAllCollections } from "./collections/methods.js";
 import type { Specification } from "appwrite-utils";
 import chalk from "chalk";
@@ -711,6 +712,30 @@ function __awuExit(code: number): void {
 }
 process.on("SIGINT", () => __awuExit(130));
 process.on("SIGTERM", () => __awuExit(143));
+
+// Global error capture. Without these handlers, an inquirer-internal crash
+// (or any other top-level throw inside an async path) just dumps a raw stack
+// trace and dies — making bug reports impossible to triage because the
+// failing object's shape is never preserved anywhere. The MCP package has
+// the same pattern at packages/appwrite-utils-mcp/src/bin/appwrite-mcp.ts:62.
+process.on("uncaughtException", (error) => {
+  logCliError({
+    command: "<uncaughtException>",
+    args: process.argv.slice(2),
+    error,
+    context: { cwd: process.cwd() },
+  });
+  __awuExit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  logCliError({
+    command: "<unhandledRejection>",
+    args: process.argv.slice(2),
+    error: reason,
+    context: { cwd: process.cwd() },
+  });
+  __awuExit(1);
+});
 
 async function main() {
   const startTime = Date.now();
