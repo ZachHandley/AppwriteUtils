@@ -934,31 +934,7 @@ export class SessionAuthService {
     apiKey?: string;
     sessionCookie?: string;
   }): Promise<"valid" | "valid-but-narrow-scope" | "invalid-auth" | "unreachable"> {
-    const { verdict } = await this.probeCredentialsDetailed(input);
-    return verdict;
-  }
-
-  /**
-   * Same probe as {@link probeCredentials} but exposes the raw Appwrite
-   * error code + message that drove the verdict classification. Callers that
-   * surface a diagnostic (e.g. MCP's `get_auth_status` probe trace) need to
-   * tell `project_not_found` apart from `general_argument_invalid` apart from
-   * an undici `ENOTFOUND` — the bucketed verdict alone hides the actionable
-   * signal.
-   */
-  public async probeCredentialsDetailed(input: {
-    endpoint: string;
-    projectId: string;
-    apiKey?: string;
-    sessionCookie?: string;
-  }): Promise<{
-    verdict: "valid" | "valid-but-narrow-scope" | "invalid-auth" | "unreachable";
-    errorCode?: string | number;
-    errorMessage?: string;
-  }> {
-    if (!input.apiKey && !input.sessionCookie) {
-      return { verdict: "invalid-auth", errorMessage: "no credential provided" };
-    }
+    if (!input.apiKey && !input.sessionCookie) return "invalid-auth";
 
     try {
       const { Databases, TablesDB, Query } = await import("node-appwrite");
@@ -984,18 +960,10 @@ export class SessionAuthService {
         await databases.list({ queries: [Query.limit(1)] });
       }
 
-      return { verdict: "valid" };
+      return "valid";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const rawCode = (error as { code?: unknown }).code;
-      const errorCode =
-        typeof rawCode === "string" || typeof rawCode === "number" ? rawCode : undefined;
-      // Appwrite responses also carry a `type` slug (`project_not_found`,
-      // `general_argument_invalid`, etc.) that's more actionable than the
-      // numeric code. Surface it in the message field as a structured prefix.
-      const rawType = (error as { type?: unknown }).type;
-      const typeSlug = typeof rawType === "string" ? rawType : undefined;
-      const errorMessage = typeSlug ? `${typeSlug}: ${message}` : message;
+      const code = (error as { code?: unknown }).code;
 
       // Appwrite returns 401 with message like:
       //   "User (role: guests) missing scopes (["tables.read"])"
@@ -1006,21 +974,20 @@ export class SessionAuthService {
       const looksLikeScopeError = /missing\s+scopes?/i.test(message);
 
       if (looksLikeGuestRole) {
-        return { verdict: "invalid-auth", errorCode, errorMessage };
+        return "invalid-auth";
       }
       if (looksLikeScopeError) {
         // Recognized cred, just narrow scope — keep it.
-        return { verdict: "valid-but-narrow-scope", errorCode, errorMessage };
+        return "valid-but-narrow-scope";
       }
 
       // Other 401/403 → treat as invalid auth.
-      if (errorCode === 401 || errorCode === 403 || errorCode === "401" || errorCode === "403") {
-        return { verdict: "invalid-auth", errorCode, errorMessage };
+      if (code === 401 || code === 403 || code === "401" || code === "403") {
+        return "invalid-auth";
       }
 
-      // Network / DNS / timeout / 5xx / 404 → unreachable. Don't drop the cred —
-      // the failure may be unrelated to the cookie's validity.
-      return { verdict: "unreachable", errorCode, errorMessage };
+      // Network / DNS / timeout / 5xx → unreachable. Don't drop the cred.
+      return "unreachable";
     }
   }
 
