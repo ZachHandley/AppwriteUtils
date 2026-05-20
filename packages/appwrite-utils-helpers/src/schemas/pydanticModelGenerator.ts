@@ -24,7 +24,7 @@ import json
 from datetime import datetime
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BaseAppwriteModel(BaseModel):
@@ -57,13 +57,11 @@ ${entityClassVarComment}
     ${entityIdField}: str = Field(..., alias="${entityIdAlias}", description="${entityIdDesc}")
     sequence: str = Field(..., alias="$sequence", description="Document sequence number")
 
-    class Config:
-        """Pydantic configuration for Appwrite compatibility"""
-
-        from_attributes = True
-        populate_by_name = True  # Allow both field name and alias
-        extra = "allow"  # Allow additional fields from Appwrite
-        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        extra="allow",
+    )
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod
@@ -123,13 +121,11 @@ class CreateBase(BaseModel):
         None, alias="$sequence", description="Auto-generated sequence number"
     )
 
-    class Config:
-        """Pydantic configuration for creation payloads"""
-
-        from_attributes = True
-        populate_by_name = True
-        extra = "allow"
-        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        extra="allow",
+    )
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod
@@ -176,12 +172,10 @@ class UpdateBase(BaseModel):
     Makes all fields optional for PATCH operations.
     """
 
-    class Config:
-        """Pydantic configuration for update payloads"""
-
-        from_attributes = True
-        extra = "allow"
-        json_encoders = {datetime: lambda v: v.isoformat() if v else None}
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="allow",
+    )
 
     def get_update_data(self, exclude_unset: bool = True) -> dict[str, Any]:
         """
@@ -510,8 +504,10 @@ export class PydanticModelGenerator {
     // __init__.py to ease imports
     const initPath = path.join(pyDir, '__init__.py');
     try {
-      const exports = (this.config.collections || []).map(c => `from .${this.toSnake(c.name)} import ${this.toPascal(c.name)}`).join('\n');
-      fs.writeFileSync(initPath, `${exports}\n`, { encoding: 'utf-8' });
+      const exportLines = (this.config.collections || [])
+        .map(c => `from .${this.toSnake(c.name)} import ${this.toPascal(c.name)} as ${this.toPascal(c.name)}`)
+        .sort();
+      fs.writeFileSync(initPath, `${exportLines.join('\n')}\n`, { encoding: 'utf-8' });
     } catch {}
   }
 
@@ -526,33 +522,43 @@ export class PydanticModelGenerator {
     const imports = new Set<string>();
     imports.add("from .base import BaseAppwriteModel");
     const typeImports = new Set<string>();
-    typeImports.add('from pydantic import Field');
     const typingImports = new Set<string>();
+    let usesDatetime = false;
 
     const fields: string[] = [];
     for (const attr of attributes) {
       if (!attr || !attr.key) continue;
       const ann = this.mapAttributeToPythonType(attr, typingImports);
+      if (ann.includes('datetime')) {
+        usesDatetime = true;
+      }
       const required = !!(attr as any).required;
       const isArray = !!(attr as any).array;
       const defaultInitializer = this.defaultInitializer(attr, required, isArray);
       fields.push(`    ${attr.key}: ${ann}${defaultInitializer}`);
     }
 
-    const header = this.composeHeader(imports, typeImports, typingImports);
+    const header = this.composeHeader(imports, typeImports, typingImports, usesDatetime);
     return `${header}\n\nclass ${pascal}(BaseAppwriteModel):\n${fields.join('\n')}\n`;
   }
 
-  private composeHeader(imports: Set<string>, typeImports: Set<string>, typingImports: Set<string>): string {
-    const lines: string[] = ["from __future__ import annotations"];
-    lines.push(...Array.from(typeImports));
+  private composeHeader(
+    imports: Set<string>,
+    typeImports: Set<string>,
+    typingImports: Set<string>,
+    usesDatetime: boolean,
+  ): string {
+    const future: string[] = ['from __future__ import annotations'];
+    const stdlib: string[] = [];
+    if (usesDatetime) stdlib.push('from datetime import datetime');
     if (typingImports.size > 0) {
-      lines.push(`from typing import ${Array.from(typingImports).sort().join(', ')}`);
+      stdlib.push(`from typing import ${Array.from(typingImports).sort().join(', ')}`);
     }
-    // datetime import if referenced; include by default as safe
-    lines.push('from datetime import datetime');
-    lines.push(...Array.from(imports));
-    return lines.join('\n');
+    const thirdParty: string[] = Array.from(typeImports).sort();
+    const local: string[] = Array.from(imports).sort();
+
+    const groups: string[][] = [future, stdlib, thirdParty, local].filter(g => g.length > 0);
+    return groups.map(g => g.join('\n')).join('\n');
   }
 
   private defaultInitializer(attr: Attribute, required: boolean, isArray: boolean): string {
