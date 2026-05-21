@@ -98,6 +98,8 @@ export interface SetupOptions {
   wipeUsers?: boolean;
   transferUsers?: boolean;
   generateSchemas?: boolean;
+  schemaFormat?: string;
+  schemaOutDir?: string;
   importData?: boolean;
   checkDuplicates?: boolean;
   shouldWriteFile?: boolean;
@@ -711,7 +713,7 @@ export class UtilsController {
     }
   }
 
-  async generateSchemas() {
+  async generateSchemas(options: { schemaFormat?: string; schemaOutDir?: string } = {}) {
     // Schema generation doesn't need Appwrite connection, just config
     if (!this.config) {
       MessageFormatter.progress("Loading config from ConfigManager...", { prefix: "Config" });
@@ -740,7 +742,11 @@ export class UtilsController {
       return;
     }
 
-    await generateSchemas(this.config, this.appwriteFolderPath);
+    await generateSchemas(this.config, this.appwriteFolderPath, {
+      format: options.schemaFormat,
+      outputDir: options.schemaOutDir,
+      verbose: true,
+    });
   }
 
   async importData(options: SetupOptions = {}) {

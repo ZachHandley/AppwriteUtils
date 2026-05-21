@@ -182,10 +182,11 @@ export const fetchAndCacheCollectionByName = async (
 
 export const generateSchemas = async (
   config: AppwriteConfig,
-  appwriteFolderPath: string
+  appwriteFolderPath: string,
+  options?: { format?: string; outputDir?: string; verbose?: boolean }
 ): Promise<void> => {
   const schemaGenerator = new SchemaGenerator(config, appwriteFolderPath);
-  await schemaGenerator.generateSchemas();
+  await schemaGenerator.generateSchemas(options ?? {});
 };
 
 export const createOrUpdateCollections = async (

@@ -83,7 +83,7 @@ interface CliOptions {
   selectBuckets?: boolean;
   // New schema/constant CLI flags
   generateSchemas?: boolean;
-  schemaFormat?: 'zod' | 'json' | 'pydantic' | 'both' | 'all';
+  schemaFormat?: string;
   schemaOutDir?: string;
   constantsInclude?: string;
   // Direct file import
@@ -420,7 +420,7 @@ const argv = yargs(hideBin(process.argv))
   .option("generate", {
     type: "boolean",
     description:
-      "Generate TypeScript schemas and types from your Appwrite database schemas",
+      "Generate schemas/types from your Appwrite config. Combine with --schemaFormat (ts|json|py|ts,py|all) and --schemaOutDir to control output",
   })
   .option("import", {
     type: "boolean",
@@ -616,8 +616,8 @@ const argv = yargs(hideBin(process.argv))
   })
   .option("schemaFormat", {
     type: "string",
-    choices: ["zod", "json", "pydantic", "both", "all"],
-    description: "Schema format: zod, json, pydantic, both (zod+json), or all",
+    description:
+      "Schema format(s), comma-separated. Tokens: ts|zod, json, py|pydantic. Shortcuts: both (=ts,json), all (=ts,json,py). Default when omitted: ts,json",
   })
   .option("schemaOutDir", {
     type: "string",
@@ -1112,6 +1112,8 @@ async function main() {
         parsedArgv.wipe === "all" || parsedArgv.wipe === "storage",
       wipeUsers: parsedArgv.wipe === "all" || parsedArgv.wipe === "users",
       generateSchemas: parsedArgv.generate,
+      schemaFormat: parsedArgv.schemaFormat,
+      schemaOutDir: parsedArgv.schemaOutDir,
       importData: parsedArgv.import,
       shouldWriteFile: parsedArgv.writeData,
       wipeCollections: parsedArgv.wipeCollections,
@@ -1619,7 +1621,10 @@ async function main() {
     }
 
     if (options.generateSchemas) {
-      await controller.generateSchemas();
+      await controller.generateSchemas({
+        schemaFormat: options.schemaFormat,
+        schemaOutDir: options.schemaOutDir,
+      });
       operationStats.generatedSchemas = 1;
     }
 

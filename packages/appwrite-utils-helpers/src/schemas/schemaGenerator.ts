@@ -347,12 +347,54 @@ export default appwriteConfig;
     this.relationshipMap = extractTwoWayRelationships(this.config);
   }
 
+  private static parseFormats(format: string | undefined): Set<"zod" | "json" | "pydantic"> {
+    const result = new Set<"zod" | "json" | "pydantic">();
+    const raw = (format ?? "").trim();
+    if (!raw) {
+      result.add("zod");
+      result.add("json");
+      return result;
+    }
+    for (const part of raw.split(",")) {
+      const tok = part.trim().toLowerCase();
+      if (!tok) continue;
+      switch (tok) {
+        case "ts":
+        case "zod":
+          result.add("zod");
+          break;
+        case "json":
+          result.add("json");
+          break;
+        case "py":
+        case "pydantic":
+          result.add("pydantic");
+          break;
+        case "both":
+          result.add("zod");
+          result.add("json");
+          break;
+        case "all":
+          result.add("zod");
+          result.add("json");
+          result.add("pydantic");
+          break;
+        default:
+          throw new Error(
+            `Unknown schemaFormat token: ${tok}. Expected: ts, zod, json, py, pydantic, both, all`
+          );
+      }
+    }
+    return result;
+  }
+
   public async generateSchemas(options: {
-    format?: "zod" | "json" | "pydantic" | "both" | "all";
+    format?: string;
     verbose?: boolean;
     outputDir?: string;
   } = {}): Promise<void> {
-    const { format = "both", verbose = false, outputDir } = options;
+    const { format, verbose = false, outputDir } = options;
+    const formats = SchemaGenerator.parseFormats(format);
 
     if (!this.config.collections) {
       return;
@@ -373,7 +415,7 @@ export default appwriteConfig;
     }
 
     // Generate Zod schemas (TypeScript)
-    if (format === "zod" || format === "both" || format === "all") {
+    if (formats.has("zod")) {
       this.config.collections.forEach((collection) => {
         const schemaString = this.createSchemaStringV4(
           collection.name,
@@ -389,24 +431,25 @@ export default appwriteConfig;
     }
 
     // Generate JSON schemas (all at once)
-    if (format === "json" || format === "both" || format === "all") {
+    if (formats.has("json")) {
       const jsonSchemaGenerator = new JsonSchemaGenerator(this.config, this.appwriteFolderPath);
       jsonSchemaGenerator.generateJsonSchemas({
-        outputFormat: format === "json" ? "json" : "both",
+        outputFormat: formats.has("zod") ? "both" : "json",
         outputDirectory: configuredDir,
         verbose: verbose
       });
     }
 
     // Generate Python Pydantic models
-    if (format === "pydantic" || format === "all") {
+    if (formats.has("pydantic")) {
       const mod = await import("./pydanticModelGenerator.js");
       const pgen = new mod.PydanticModelGenerator(this.config, this.appwriteFolderPath);
       pgen.generatePydanticModels({ baseOutputDirectory: schemasPath, verbose });
     }
 
     if (verbose) {
-      MessageFormatter.success(`Schema generation completed (format: ${format})`, { prefix: "Schema" });
+      const summary = Array.from(formats).join(",");
+      MessageFormatter.success(`Schema generation completed (format: ${summary})`, { prefix: "Schema" });
     }
   }
 
