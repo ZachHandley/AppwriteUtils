@@ -405,6 +405,10 @@ export default appwriteConfig;
     let schemasPath: string;
     if (path.isAbsolute(configuredDir)) {
       schemasPath = configuredDir;
+    } else if (outputDir) {
+      // Caller passed an explicit relative override → resolve from the invocation CWD,
+      // not the config folder. Matches the natural shell expectation for `--schemaOutDir`.
+      schemasPath = path.resolve(process.cwd(), configuredDir);
     } else if (configuredDir === "schemas") {
       schemasPath = resolveSchemaDir(this.appwriteFolderPath);
     } else {
@@ -430,12 +434,14 @@ export default appwriteConfig;
       });
     }
 
-    // Generate JSON schemas (all at once)
+    // Generate JSON schemas (all at once). Pass the already-resolved absolute schemasPath
+    // so JsonSchemaGenerator lands files in the same dir as zod/pydantic instead of
+    // re-resolving relative paths against appwriteFolderPath.
     if (formats.has("json")) {
       const jsonSchemaGenerator = new JsonSchemaGenerator(this.config, this.appwriteFolderPath);
       jsonSchemaGenerator.generateJsonSchemas({
         outputFormat: formats.has("zod") ? "both" : "json",
-        outputDirectory: configuredDir,
+        outputDirectory: schemasPath,
         verbose: verbose
       });
     }

@@ -733,13 +733,12 @@ export class UtilsController {
         MessageFormatter.info("Config loaded successfully from ConfigManager", { prefix: "Config" });
       } catch (error) {
         MessageFormatter.error("Failed to load config", error instanceof Error ? error : undefined, { prefix: "Config" });
-        return;
+        throw error instanceof Error ? error : new Error(String(error));
       }
     }
 
     if (!this.appwriteFolderPath) {
-      MessageFormatter.error("Failed to get appwriteFolderPath", undefined, { prefix: "Controller" });
-      return;
+      throw new Error("Failed to get appwriteFolderPath");
     }
 
     await generateSchemas(this.config, this.appwriteFolderPath, {

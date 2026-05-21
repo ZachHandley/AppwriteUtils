@@ -82,7 +82,6 @@ interface CliOptions {
   autoSync?: boolean;
   selectBuckets?: boolean;
   // New schema/constant CLI flags
-  generateSchemas?: boolean;
   schemaFormat?: string;
   schemaOutDir?: string;
   constantsInclude?: string;
@@ -384,7 +383,7 @@ const argv = yargs(hideBin(process.argv))
     description: "Prefer loading from appwrite.config.json instead of config.yaml",
   })
   .option("it", {
-    alias: ["interactive", "i"],
+    alias: ["interactive"],
     type: "boolean",
     description: "Launch interactive CLI mode with guided prompts",
   })
@@ -610,10 +609,6 @@ const argv = yargs(hideBin(process.argv))
     description:
       "Comma-separated categories to include: databases,collections,buckets,functions",
   })
-  .option("generateSchemas", {
-    type: "boolean",
-    description: "Generate schemas/models without interactive prompts",
-  })
   .option("schemaFormat", {
     type: "string",
     description:
@@ -750,6 +745,15 @@ async function main() {
     MessageFormatter.info("Debug logging enabled (helpers logs → console at debug level)", { prefix: "CLI" });
   }
 
+  if ((argv.schemaFormat || argv.schemaOutDir) && !argv.generate) {
+    MessageFormatter.error(
+      "--schemaFormat / --schemaOutDir require --generate",
+      undefined,
+      { prefix: "CLI" }
+    );
+    process.exit(1);
+  }
+
   if (argv.it) {
     const cli = new InteractiveCLI(process.cwd(), {
       useSession: argv.useSession,
@@ -785,7 +789,7 @@ async function main() {
       if (error instanceof AuthenticationError) {
         // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
         // Defer auth handling to those flows; otherwise surface the error and exit.
-        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective) {
+        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective && !argv.generate) {
           MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
           process.exit(1);
         }
@@ -870,8 +874,10 @@ async function main() {
       return;
     }
 
-    // After init, check if we have a valid config (from file OR CLI overrides)
-    if (!controller.config) {
+    // After init, check if we have a valid config (from file OR CLI overrides).
+    // --generate is allowed through with no controller.config; controller.generateSchemas()
+    // lazy-loads via ConfigManager so local schema generation works without Appwrite creds.
+    if (!controller.config && !argv.generate) {
       MessageFormatter.error("No Appwrite configuration available", undefined, { prefix: "CLI" });
       MessageFormatter.info("Provide credentials via CLI flags (--endpoint, --projectId, --apiKey or --session)", { prefix: "CLI" });
       MessageFormatter.info("Or create a config file using --setup", { prefix: "CLI" });
@@ -1157,6 +1163,8 @@ async function main() {
         buildSpec as Specification,
         runtimeSpec as Specification
       );
+      operationStats.updatedFunctionSpec = 1;
+      return;
     }
 
     // Add default databases if not specified (only if we need them for operations)
