@@ -206,6 +206,58 @@ export const listFunctionDeployments = async (
   return deployments;
 };
 
+export interface WaitForDeploymentOptions {
+  intervalMs?: number;
+  timeoutMs?: number;
+}
+
+export const waitForDeploymentReady = async (
+  client: Client,
+  functionId: string,
+  deploymentId: string,
+  options: WaitForDeploymentOptions = {}
+): Promise<Models.Deployment> => {
+  const intervalMs = options.intervalMs ?? 3000;
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
+  const functions = new Functions(client);
+  const startedAt = Date.now();
+
+  while (true) {
+    const deployment = await functions.getDeployment(functionId, deploymentId);
+    const status = deployment.status;
+
+    if (status === "ready") {
+      return deployment;
+    }
+
+    if (status === "failed" || status === "canceled") {
+      const log = (deployment.buildLogs ?? "").slice(-2000);
+      throw new Error(
+        `Deployment ${deploymentId} ended with status "${status}".${
+          log ? `\nBuild log (tail):\n${log}` : ""
+        }`
+      );
+    }
+
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(
+        `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for deployment ${deploymentId} to become ready (last status: "${status}").`
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+};
+
+export const activateDeployment = async (
+  client: Client,
+  functionId: string,
+  deploymentId: string
+): Promise<Models.Function> => {
+  const functions = new Functions(client);
+  return await functions.updateFunctionDeployment(functionId, deploymentId);
+};
+
 export const updateFunction = async (
   client: Client,
   functionConfig: AppwriteFunction

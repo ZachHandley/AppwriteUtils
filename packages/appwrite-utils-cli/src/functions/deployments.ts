@@ -9,10 +9,12 @@ import chalk from "chalk";
 import cliProgress from "cli-progress";
 import { execSync } from "child_process";
 import {
+  activateDeployment,
   createFunction,
   getFunction,
   updateFunction,
   updateFunctionSpecifications,
+  waitForDeploymentReady,
 } from "./methods.js";
 import ignore from "ignore";
 import { MessageFormatter } from "appwrite-utils-helpers";
@@ -138,6 +140,25 @@ export const deployFunction = async (
     }
 
     await fs.promises.unlink(tarPath);
+
+    if (activate) {
+      MessageFormatter.processing(
+        `Waiting for deployment ${functionResponse.$id} to finish building...`,
+        { prefix: "Deployment" }
+      );
+      const readyDeployment = await waitForDeploymentReady(
+        client,
+        functionId,
+        functionResponse.$id
+      );
+      await activateDeployment(client, functionId, readyDeployment.$id);
+      MessageFormatter.success(
+        `Activated deployment ${readyDeployment.$id}`,
+        { prefix: "Deployment" }
+      );
+      return readyDeployment;
+    }
+
     return functionResponse;
   } catch (error) {
     progressBar.stop();

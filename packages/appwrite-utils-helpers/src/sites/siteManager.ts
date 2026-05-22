@@ -24,7 +24,16 @@ export interface SiteDeploymentOptions {
   outputDirectory?: string;
   ignored?: string[];
   verbose?: boolean;
+  /**
+   * @deprecated The site config is now always pushed when the site exists;
+   * this flag is retained for back-compat and is a no-op.
+   */
   forceRedeploy?: boolean;
+  /**
+   * Polling knobs for the post-upload wait-until-ready loop that runs when
+   * `activate !== false`. Defaults: `intervalMs=3000`, `timeoutMs=600000`.
+   */
+  pollOptions?: { intervalMs?: number; timeoutMs?: number };
 }
 
 export class SiteManager {
@@ -242,7 +251,7 @@ export class SiteManager {
       outputDirectory = siteConfig.outputDirectory,
       ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
-      forceRedeploy = false,
+      pollOptions,
     } = options;
 
     return await siteLimit(async () => {
@@ -267,10 +276,12 @@ export class SiteManager {
         }
       }
 
-      // Create site if it doesn't exist
+      // Create site if it doesn't exist, otherwise always push the local
+      // config (specs, build/install commands, env-affecting fields) before
+      // uploading new code — mirrors the CLI's deployLocalSite behavior.
       if (!siteExists) {
         await this.createSite(siteConfig, { verbose });
-      } else if (forceRedeploy) {
+      } else {
         await this.updateSite(siteConfig, { verbose });
       }
 
@@ -287,6 +298,7 @@ export class SiteManager {
         outputDirectory,
         ignored,
         verbose,
+        pollOptions,
       });
 
       if (verbose) {
@@ -373,6 +385,53 @@ export class SiteManager {
     );
   }
 
+  public async waitForDeploymentReady(
+    siteId: string,
+    deploymentId: string,
+    options: { intervalMs?: number; timeoutMs?: number } = {}
+  ): Promise<Models.Deployment> {
+    const intervalMs = options.intervalMs ?? 3000;
+    const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
+    const startedAt = Date.now();
+
+    while (true) {
+      const deployment = await tryAwaitWithRetry(async () =>
+        await this.sites.getDeployment({ siteId, deploymentId })
+      );
+      const status = deployment.status;
+
+      if (status === "ready") {
+        return deployment;
+      }
+
+      if (status === "failed" || status === "canceled") {
+        const log = (deployment.buildLogs ?? "").slice(-2000);
+        throw new Error(
+          `Site deployment ${deploymentId} ended with status "${status}".${
+            log ? `\nBuild log (tail):\n${log}` : ""
+          }`
+        );
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(
+          `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for site deployment ${deploymentId} to become ready (last status: "${status}").`
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  public async activateDeployment(
+    siteId: string,
+    deploymentId: string
+  ): Promise<Models.Site> {
+    return await tryAwaitWithRetry(async () =>
+      await this.sites.updateSiteDeployment({ siteId, deploymentId })
+    );
+  }
+
   public async listSites(
     queries?: string[],
     search?: string
@@ -405,6 +464,7 @@ export class SiteManager {
       outputDirectory,
       ignored = [],
       verbose = false,
+      pollOptions,
     } = options;
 
     const { InputFile } = await import("node-appwrite/file");
@@ -464,7 +524,29 @@ export class SiteManager {
         });
       });
 
-      return deployment;
+      if (!activate) {
+        return deployment;
+      }
+
+      if (verbose) {
+        MessageFormatter.processing(
+          `Waiting for site deployment ${deployment.$id} to finish building...`,
+          { prefix: "Sites" }
+        );
+      }
+      const readyDeployment = await this.waitForDeploymentReady(
+        siteId,
+        deployment.$id,
+        pollOptions
+      );
+      await this.activateDeployment(siteId, readyDeployment.$id);
+      if (verbose) {
+        MessageFormatter.success(
+          `Activated site deployment ${readyDeployment.$id}`,
+          { prefix: "Sites" }
+        );
+      }
+      return readyDeployment;
     } finally {
       // Clean up tarball
       try {

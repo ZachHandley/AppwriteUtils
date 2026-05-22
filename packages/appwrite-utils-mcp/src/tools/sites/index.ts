@@ -6,7 +6,8 @@
 import { z } from 'zod';
 import { Sites } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
-import { SiteManager } from 'appwrite-utils-helpers';
+import { ConfigManager, MessageFormatter, SiteManager } from 'appwrite-utils-helpers';
+import type { AppwriteSite } from 'appwrite-utils';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
 import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
@@ -74,6 +75,18 @@ const deploySiteSchema = z.object({
   installCommand: z.string().optional().describe('Install command override'),
   buildCommand: z.string().optional().describe('Build command override'),
   outputDirectory: z.string().optional().describe('Output directory override'),
+  activationTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max ms to wait for the new deployment to reach status=ready before activating. Default 600000 (10 min).'),
+  activationIntervalMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Poll interval (ms) while waiting for the build. Default 3000.'),
 });
 
 /**
@@ -307,33 +320,67 @@ async function handleDeploySite(
 
   const siteManager = new SiteManager(client);
 
-  // Get site details first to build config for deployment
+  // Get site details first so we have a remote fallback for the config
   const site: any = await siteManager.getSite(validated.siteId);
 
-  const siteConfig = {
-    $id: site.$id,
-    name: site.name,
-    framework: site.framework,
-    buildRuntime: site.buildRuntime,
-    enabled: site.enabled,
-    logging: site.logging,
-    timeout: site.timeout,
-    installCommand: validated.installCommand || site.installCommand,
-    buildCommand: validated.buildCommand || site.buildCommand,
-    outputDirectory: validated.outputDirectory || site.outputDirectory,
-    adapter: site.adapter,
-    fallbackFile: site.fallbackFile,
-    installationId: site.installationId,
-    providerRepositoryId: site.providerRepositoryId,
-    providerBranch: site.providerBranch,
-    providerSilentMode: site.providerSilentMode,
-    providerRootDirectory: site.providerRootDirectory,
-    buildSpecification: site.buildSpecification,
-    runtimeSpecification: site.runtimeSpecification,
-  };
+  // Prefer the local YAML entry for this site so spec/build-command/env-
+  // affecting fields get pushed on deploy. Fall back to a remote-derived
+  // config if no YAML entry matches this $id.
+  let localConfig: AppwriteSite | undefined;
+  try {
+    const configManager = ConfigManager.getInstance();
+    if (!configManager.hasConfig()) {
+      await configManager.loadConfig({ validate: false, reportValidation: false });
+    }
+    const config = configManager.getConfig();
+    localConfig = (config.sites ?? []).find((s) => s?.$id === validated.siteId);
+  } catch (error) {
+    MessageFormatter.warning(
+      `Could not load local AppwriteConfig: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Falling back to remote-derived site config; spec/build-command changes from local YAML will NOT be applied.`,
+      { prefix: 'Sites' }
+    );
+  }
+
+  if (!localConfig) {
+    MessageFormatter.warning(
+      `No local YAML entry found for site $id '${validated.siteId}'. ` +
+        `Falling back to remote-derived config; spec/build-command changes from local YAML will NOT be applied.`,
+      { prefix: 'Sites' }
+    );
+  }
+
+  const siteConfig: AppwriteSite = localConfig
+    ? {
+        ...localConfig,
+        installCommand: validated.installCommand || localConfig.installCommand,
+        buildCommand: validated.buildCommand || localConfig.buildCommand,
+        outputDirectory: validated.outputDirectory || localConfig.outputDirectory,
+      }
+    : ({
+        $id: site.$id,
+        name: site.name,
+        framework: site.framework,
+        buildRuntime: site.buildRuntime,
+        enabled: site.enabled,
+        logging: site.logging,
+        timeout: site.timeout,
+        installCommand: validated.installCommand || site.installCommand,
+        buildCommand: validated.buildCommand || site.buildCommand,
+        outputDirectory: validated.outputDirectory || site.outputDirectory,
+        adapter: site.adapter,
+        fallbackFile: site.fallbackFile,
+        installationId: site.installationId,
+        providerRepositoryId: site.providerRepositoryId,
+        providerBranch: site.providerBranch,
+        providerSilentMode: site.providerSilentMode,
+        providerRootDirectory: site.providerRootDirectory,
+        buildSpecification: site.buildSpecification,
+        runtimeSpecification: site.runtimeSpecification,
+      } as unknown as AppwriteSite);
 
   const deployment: any = await siteManager.deploySite(
-    siteConfig as any,
+    siteConfig,
     validated.path,
     {
       activate: validated.activate,
@@ -341,6 +388,10 @@ async function handleDeploySite(
       buildCommand: validated.buildCommand,
       outputDirectory: validated.outputDirectory,
       verbose: false,
+      pollOptions:
+        validated.activationTimeoutMs !== undefined || validated.activationIntervalMs !== undefined
+          ? { timeoutMs: validated.activationTimeoutMs, intervalMs: validated.activationIntervalMs }
+          : undefined,
     }
   );
 

@@ -11,7 +11,8 @@
 import { z } from 'zod';
 import { Functions, ExecutionMethod } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
-import { FunctionManager } from 'appwrite-utils-helpers';
+import { ConfigManager, FunctionManager, MessageFormatter } from 'appwrite-utils-helpers';
+import type { AppwriteFunction } from 'appwrite-utils';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
 import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 
@@ -126,6 +127,18 @@ const deployFunctionSchema = z.object({
   activate: z.boolean().optional().default(true).describe('Whether to activate the deployment'),
   entrypoint: z.string().optional().describe('Function entrypoint file (e.g., main.js)'),
   commands: z.string().optional().describe('Build commands (e.g., npm install)'),
+  activationTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max ms to wait for the new deployment to reach status=ready before activating. Default 600000 (10 min).'),
+  activationIntervalMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Poll interval (ms) while waiting for the build. Default 3000.'),
 });
 
 /**
@@ -479,38 +492,75 @@ async function handleDeployFunction(
     functionPath = foundPath;
   }
 
+  // Prefer the local YAML entry for this function so spec/scope/schedule/
+  // env-affecting fields get pushed on deploy (matching the CLI's
+  // deployLocalFunction behavior). Fall back to a remote-derived config
+  // if no YAML entry matches this $id.
+  let localConfig: AppwriteFunction | undefined;
+  try {
+    const configManager = ConfigManager.getInstance();
+    if (!configManager.hasConfig()) {
+      await configManager.loadConfig({ validate: false, reportValidation: false });
+    }
+    const config = configManager.getConfig();
+    localConfig = (config.functions ?? []).find((f) => f?.$id === validated.functionId);
+  } catch (error) {
+    MessageFormatter.warning(
+      `Could not load local AppwriteConfig: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Falling back to remote-derived function config; spec/scope/schedule changes from local YAML will NOT be applied.`,
+      { prefix: 'Functions' }
+    );
+  }
+
+  if (!localConfig) {
+    MessageFormatter.warning(
+      `No local YAML entry found for function $id '${validated.functionId}'. ` +
+        `Falling back to remote-derived config; spec/scope/schedule changes from local YAML will NOT be applied.`,
+      { prefix: 'Functions' }
+    );
+  }
+
+  const functionConfig: AppwriteFunction = localConfig
+    ? {
+        ...localConfig,
+        entrypoint: validated.entrypoint || localConfig.entrypoint,
+        commands: validated.commands || localConfig.commands,
+      }
+    : ({
+        $id: fn.$id,
+        name: fn.name,
+        runtime: fn.runtime,
+        execute: fn.execute,
+        events: fn.events,
+        schedule: fn.schedule,
+        timeout: fn.timeout,
+        enabled: fn.enabled,
+        logging: fn.logging,
+        entrypoint: validated.entrypoint || fn.entrypoint,
+        commands: validated.commands || fn.commands,
+        scopes: fn.scopes,
+        installationId: fn.installationId,
+        providerRepositoryId: fn.providerRepositoryId,
+        providerBranch: fn.providerBranch,
+        providerSilentMode: fn.providerSilentMode,
+        providerRootDirectory: fn.providerRootDirectory,
+      } as unknown as AppwriteFunction);
+
   // Build deployment options
   const deploymentOptions = {
     activate: validated.activate,
     entrypoint: validated.entrypoint,
     commands: validated.commands,
     verbose: false,
-  };
-
-  // Create minimal function config for deployment
-  const functionConfig = {
-    $id: fn.$id,
-    name: fn.name,
-    runtime: fn.runtime,
-    execute: fn.execute,
-    events: fn.events,
-    schedule: fn.schedule,
-    timeout: fn.timeout,
-    enabled: fn.enabled,
-    logging: fn.logging,
-    entrypoint: validated.entrypoint || fn.entrypoint,
-    commands: validated.commands || fn.commands,
-    scopes: fn.scopes,
-    installationId: fn.installationId,
-    providerRepositoryId: fn.providerRepositoryId,
-    providerBranch: fn.providerBranch,
-    providerSilentMode: fn.providerSilentMode,
-    providerRootDirectory: fn.providerRootDirectory,
+    pollOptions:
+      validated.activationTimeoutMs !== undefined || validated.activationIntervalMs !== undefined
+        ? { timeoutMs: validated.activationTimeoutMs, intervalMs: validated.activationIntervalMs }
+        : undefined,
   };
 
   // Deploy the function
   const deployment: any = await functionManager.deployFunction(
-    functionConfig as any,
+    functionConfig,
     functionPath,
     deploymentOptions
   );

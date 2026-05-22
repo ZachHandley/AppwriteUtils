@@ -4,6 +4,7 @@ import {
   type Framework,
   type BuildRuntime,
   type Adapter,
+  type Models,
 } from "node-appwrite";
 import { type AppwriteSite } from "appwrite-utils";
 
@@ -95,6 +96,58 @@ export const listSiteDeployments = async (
   const sites = new Sites(client);
   const deployments = await sites.listDeployments({ siteId, queries });
   return deployments;
+};
+
+export interface WaitForSiteDeploymentOptions {
+  intervalMs?: number;
+  timeoutMs?: number;
+}
+
+export const waitForSiteDeploymentReady = async (
+  client: Client,
+  siteId: string,
+  deploymentId: string,
+  options: WaitForSiteDeploymentOptions = {}
+): Promise<Models.Deployment> => {
+  const intervalMs = options.intervalMs ?? 3000;
+  const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
+  const sites = new Sites(client);
+  const startedAt = Date.now();
+
+  while (true) {
+    const deployment = await sites.getDeployment({ siteId, deploymentId });
+    const status = deployment.status;
+
+    if (status === "ready") {
+      return deployment;
+    }
+
+    if (status === "failed" || status === "canceled") {
+      const log = (deployment.buildLogs ?? "").slice(-2000);
+      throw new Error(
+        `Site deployment ${deploymentId} ended with status "${status}".${
+          log ? `\nBuild log (tail):\n${log}` : ""
+        }`
+      );
+    }
+
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(
+        `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for site deployment ${deploymentId} to become ready (last status: "${status}").`
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+};
+
+export const activateSiteDeployment = async (
+  client: Client,
+  siteId: string,
+  deploymentId: string
+): Promise<Models.Site> => {
+  const sites = new Sites(client);
+  return await sites.updateSiteDeployment({ siteId, deploymentId });
 };
 
 export const listFrameworks = async (client: Client) => {

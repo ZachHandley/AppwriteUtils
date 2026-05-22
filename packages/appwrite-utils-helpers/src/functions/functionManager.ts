@@ -50,7 +50,16 @@ export interface FunctionDeploymentOptions {
   commands?: string;
   ignored?: string[];
   verbose?: boolean;
+  /**
+   * @deprecated The function config is now always pushed when the function
+   * exists; this flag is retained for back-compat and is a no-op.
+   */
   forceRedeploy?: boolean;
+  /**
+   * Polling knobs for the post-upload wait-until-ready loop that runs when
+   * `activate !== false`. Defaults: `intervalMs=3000`, `timeoutMs=600000`.
+   */
+  pollOptions?: { intervalMs?: number; timeoutMs?: number };
 }
 
 export class FunctionManager {
@@ -256,7 +265,7 @@ export class FunctionManager {
       commands = functionConfig.commands || "npm install",
       ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
-      forceRedeploy = false
+      pollOptions
     } = options;
 
     return await functionLimit(async () => {
@@ -282,10 +291,12 @@ export class FunctionManager {
         }
       }
 
-      // Create function if it doesn't exist
+      // Create function if it doesn't exist, otherwise always push the
+      // local config (specs, scopes, schedule, env-affecting fields) before
+      // uploading new code — mirrors the CLI's deployLocalFunction behavior.
       if (!functionExists) {
         await this.createFunction(functionConfig, { verbose });
-      } else if (forceRedeploy) {
+      } else {
         await this.updateFunction(functionConfig, { verbose });
       }
 
@@ -298,7 +309,7 @@ export class FunctionManager {
       const deployment = await this.createDeployment(
         functionConfig.$id,
         functionPath,
-        { activate, entrypoint, commands, ignored, verbose }
+        { activate, entrypoint, commands, ignored, verbose, pollOptions }
       );
 
       if (verbose) {
@@ -422,7 +433,7 @@ export class FunctionManager {
     codePath: string,
     options: FunctionDeploymentOptions & { verbose?: boolean } = {}
   ): Promise<Models.Deployment> {
-    const { activate = true, entrypoint = "main.js", commands = "npm install", ignored = [], verbose = false } = options;
+    const { activate = true, entrypoint = "main.js", commands = "npm install", ignored = [], verbose = false, pollOptions } = options;
 
     const { InputFile } = await import("node-appwrite/file");
     const { create: createTarball } = await import("tar");
@@ -479,7 +490,29 @@ export class FunctionManager {
         );
       });
 
-      return deployment;
+      if (!activate) {
+        return deployment;
+      }
+
+      if (verbose) {
+        MessageFormatter.processing(
+          `Waiting for deployment ${deployment.$id} to finish building...`,
+          { prefix: "Functions" }
+        );
+      }
+      const readyDeployment = await this.waitForDeploymentReady(
+        functionId,
+        deployment.$id,
+        pollOptions
+      );
+      await this.activateDeployment(functionId, readyDeployment.$id);
+      if (verbose) {
+        MessageFormatter.success(
+          `Activated deployment ${readyDeployment.$id}`,
+          { prefix: "Functions" }
+        );
+      }
+      return readyDeployment;
     } finally {
       // Clean up tarball
       try {
@@ -493,6 +526,53 @@ export class FunctionManager {
   public async getFunction(functionId: string): Promise<Models.Function> {
     return await queryLimit(() =>
       tryAwaitWithRetry(async () => await this.functions.get(functionId))
+    );
+  }
+
+  public async waitForDeploymentReady(
+    functionId: string,
+    deploymentId: string,
+    options: { intervalMs?: number; timeoutMs?: number } = {}
+  ): Promise<Models.Deployment> {
+    const intervalMs = options.intervalMs ?? 3000;
+    const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
+    const startedAt = Date.now();
+
+    while (true) {
+      const deployment = await tryAwaitWithRetry(async () =>
+        await this.functions.getDeployment(functionId, deploymentId)
+      );
+      const status = deployment.status;
+
+      if (status === "ready") {
+        return deployment;
+      }
+
+      if (status === "failed" || status === "canceled") {
+        const log = (deployment.buildLogs ?? "").slice(-2000);
+        throw new Error(
+          `Deployment ${deploymentId} ended with status "${status}".${
+            log ? `\nBuild log (tail):\n${log}` : ""
+          }`
+        );
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        throw new Error(
+          `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for deployment ${deploymentId} to become ready (last status: "${status}").`
+        );
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  public async activateDeployment(
+    functionId: string,
+    deploymentId: string
+  ): Promise<Models.Function> {
+    return await tryAwaitWithRetry(async () =>
+      await this.functions.updateFunctionDeployment(functionId, deploymentId)
     );
   }
 
