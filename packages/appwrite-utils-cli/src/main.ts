@@ -37,7 +37,7 @@ interface CliOptions {
   appwriteConfig?: boolean;
   it?: boolean;
   dbIds?: string;
-  collectionIds?: string;
+  tableIds?: string;
   bucketIds?: string;
   wipe?: "all" | "storage" | "docs" | "users";
   wipeCollections?: boolean;
@@ -70,6 +70,27 @@ interface CliOptions {
   functionId?: string;
   buildSpecification?: string;
   runtimeSpecification?: string;
+  // --deployFunctions and its per-field overrides
+  deployFunctions?: boolean;
+  functionIds?: string;
+  buildConcurrency?: number;
+  functionPath?: string;
+  functionName?: string;
+  functionRuntime?: string;
+  functionEntrypoint?: string;
+  functionCommands?: string;
+  functionSchedule?: string;
+  functionTimeout?: number;
+  functionScopes?: string;
+  functionEvents?: string;
+  functionExecute?: string;
+  functionEnabled?: boolean;
+  functionLogging?: boolean;
+  functionBuildSpec?: string;
+  functionRuntimeSpec?: string;
+  functionPredeployCommands?: string;
+  functionDeployDir?: string;
+  functionIgnore?: string;
   migrateConfig?: boolean;
   generateConstants?: boolean;
   constantsLanguages?: string;
@@ -392,11 +413,11 @@ const argv = yargs(hideBin(process.argv))
     description:
       "Comma-separated list of database IDs to target (e.g., 'db1,db2,db3')",
   })
-  .option("collectionIds", {
-    alias: ["collIds", "tableIds", "tables"],
+  .option("tableIds", {
+    alias: ["tableId", "collIds", "collectionIds", "collectionId", "tables"],
     type: "string",
     description:
-      "Comma-separated list of collection/table IDs to target (e.g., 'users,posts')",
+      "Comma-separated list of table IDs to target (e.g., 'users,posts'). Alias: --collectionIds (deprecated).",
   })
   .option("bucketIds", {
     type: "string",
@@ -410,7 +431,7 @@ const argv = yargs(hideBin(process.argv))
   .option("wipeCollections", {
     type: "boolean",
     description:
-      "⚠️  DESTRUCTIVE: Wipe specific collections/tables (requires --collectionIds or --tableIds)",
+      "⚠️  DESTRUCTIVE: Wipe specific tables (requires --tableIds; --collectionIds remains a deprecated alias)",
   })
   .option("transferUsers", {
     type: "boolean",
@@ -466,7 +487,7 @@ const argv = yargs(hideBin(process.argv))
   .option("push", {
     type: "boolean",
     description:
-      "Deploy your local configuration (collections, attributes, indexes) to Appwrite",
+      "Deploy your local configuration (tables, columns, indexes) to Appwrite",
   })
   .option("sync", {
     type: "boolean",
@@ -579,6 +600,131 @@ const argv = yargs(hideBin(process.argv))
       "s-8vcpu-4gb",
       "s-8vcpu-8gb",
     ],
+  })
+  .option("deployFunctions", {
+    alias: ["deploy-functions", "deployFns", "deploy"],
+    type: "boolean",
+    description:
+      "Deploy one or more functions from local source via pipelined upload + parallel build. Discovers .fnconfig.yaml files and config.yaml functions[]. Use --functionIds to scope; omit to deploy all.",
+  })
+  .option("functionIds", {
+    alias: ["function-ids", "funcIds"],
+    type: "string",
+    description:
+      "Comma-separated function $ids or names to deploy with --deployFunctions. Omit to deploy every discovered function.",
+  })
+  .option("buildConcurrency", {
+    alias: ["build-concurrency"],
+    type: "number",
+    default: 5,
+    description:
+      "Max concurrent build/activate tasks during --deployFunctions. Uploads always serialize. Default 5.",
+  })
+  .option("functionPath", {
+    alias: ["function-path", "fnPath"],
+    type: "string",
+    description:
+      "Override source directory for the resolved function. With --functionId and no .fnconfig.yaml entry, the function is fetched from the server and deployed from this path; if the server doesn't have that $id, the deploy errors with 'Function not found'.",
+  })
+  .option("functionName", {
+    alias: ["function-name"],
+    type: "string",
+    description: "Override AppwriteFunction.name for a single-function --deployFunctions.",
+  })
+  .option("functionRuntime", {
+    alias: ["function-runtime"],
+    type: "string",
+    description: "Override AppwriteFunction.runtime (e.g., node-22) for a single-function --deployFunctions.",
+  })
+  .option("functionEntrypoint", {
+    alias: ["function-entrypoint"],
+    type: "string",
+    description: "Override AppwriteFunction.entrypoint for a single-function --deployFunctions.",
+  })
+  .option("functionCommands", {
+    alias: ["function-commands"],
+    type: "string",
+    description: "Override AppwriteFunction.commands (build commands) for a single-function --deployFunctions.",
+  })
+  .option("functionSchedule", {
+    alias: ["function-schedule"],
+    type: "string",
+    description: "Override AppwriteFunction.schedule (cron) for a single-function --deployFunctions.",
+  })
+  .option("functionTimeout", {
+    alias: ["function-timeout"],
+    type: "number",
+    description: "Override AppwriteFunction.timeout (seconds) for a single-function --deployFunctions.",
+  })
+  .option("functionScopes", {
+    alias: ["function-scopes"],
+    type: "string",
+    description: "Override AppwriteFunction.scopes (comma-separated) for a single-function --deployFunctions.",
+  })
+  .option("functionEvents", {
+    alias: ["function-events"],
+    type: "string",
+    description: "Override AppwriteFunction.events (comma-separated) for a single-function --deployFunctions.",
+  })
+  .option("functionExecute", {
+    alias: ["function-execute"],
+    type: "string",
+    description: "Override AppwriteFunction.execute roles (comma-separated) for a single-function --deployFunctions.",
+  })
+  .option("functionEnabled", {
+    alias: ["function-enabled"],
+    type: "boolean",
+    description: "Override AppwriteFunction.enabled for a single-function --deployFunctions.",
+  })
+  .option("functionLogging", {
+    alias: ["function-logging"],
+    type: "boolean",
+    description: "Override AppwriteFunction.logging for a single-function --deployFunctions.",
+  })
+  .option("functionBuildSpec", {
+    alias: ["function-build-spec", "functionBuildSpecification"],
+    type: "string",
+    choices: [
+      "s-0.5vcpu-512mb",
+      "s-1vcpu-1gb",
+      "s-2vcpu-2gb",
+      "s-2vcpu-4gb",
+      "s-4vcpu-4gb",
+      "s-4vcpu-8gb",
+      "s-8vcpu-4gb",
+      "s-8vcpu-8gb",
+    ],
+    description: "Override AppwriteFunction.buildSpecification for a single-function --deployFunctions.",
+  })
+  .option("functionRuntimeSpec", {
+    alias: ["function-runtime-spec", "functionRuntimeSpecification"],
+    type: "string",
+    choices: [
+      "s-0.5vcpu-512mb",
+      "s-1vcpu-1gb",
+      "s-2vcpu-2gb",
+      "s-2vcpu-4gb",
+      "s-4vcpu-4gb",
+      "s-4vcpu-8gb",
+      "s-8vcpu-4gb",
+      "s-8vcpu-8gb",
+    ],
+    description: "Override AppwriteFunction.runtimeSpecification for a single-function --deployFunctions.",
+  })
+  .option("functionPredeployCommands", {
+    alias: ["function-predeploy-commands"],
+    type: "string",
+    description: "Override AppwriteFunction.predeployCommands (comma-separated shell commands) for a single-function --deployFunctions.",
+  })
+  .option("functionDeployDir", {
+    alias: ["function-deploy-dir"],
+    type: "string",
+    description: "Override AppwriteFunction.deployDir for a single-function --deployFunctions.",
+  })
+  .option("functionIgnore", {
+    alias: ["function-ignore"],
+    type: "string",
+    description: "Override AppwriteFunction.ignore (comma-separated glob patterns) for a single-function --deployFunctions.",
   })
   .option("migrateConfig", {
     alias: ["migrate"],
@@ -789,7 +935,7 @@ async function main() {
       if (error instanceof AuthenticationError) {
         // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
         // Defer auth handling to those flows; otherwise surface the error and exit.
-        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective && !argv.generate) {
+        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective && !argv.generate && !argv.deployFunctions) {
           MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
           process.exit(1);
         }
@@ -848,6 +994,52 @@ async function main() {
           ? { endpoint: argv.endpoint, projectId: argv.projectId, apiKey: argv.apiKey }
           : undefined,
       });
+      return;
+    }
+
+    // --deployFunctions: pipelined upload + parallel build for one or more functions.
+    // Discovers .fnconfig.yaml, falls back to central config.yaml functions[], and
+    // can work off bare argv credentials (no config file required).
+    if (argv.deployFunctions) {
+      const { runDeployFunctionsFlow } = await import(
+        "./cli/commands/deployFunctionsFlow.js"
+      );
+      const failed = await runDeployFunctionsFlow({
+        cwd: process.cwd(),
+        configPath: argv.config,
+        controller,
+        functionIds: argv.functionIds,
+        singleFunctionId: argv.functionId,
+        buildConcurrency: argv.buildConcurrency,
+        argvCredentials: {
+          endpoint: argv.endpoint,
+          projectId: argv.projectId,
+          apiKey: argv.apiKey,
+          sessionCookie: argv.sessionCookie,
+        },
+        overrides: {
+          path: argv.functionPath,
+          name: argv.functionName,
+          runtime: argv.functionRuntime,
+          entrypoint: argv.functionEntrypoint,
+          commands: argv.functionCommands,
+          schedule: argv.functionSchedule,
+          timeout: argv.functionTimeout,
+          scopes: argv.functionScopes,
+          events: argv.functionEvents,
+          execute: argv.functionExecute,
+          enabled: argv.functionEnabled,
+          logging: argv.functionLogging,
+          buildSpecification: argv.functionBuildSpec,
+          runtimeSpecification: argv.functionRuntimeSpec,
+          predeployCommands: argv.functionPredeployCommands,
+          deployDir: argv.functionDeployDir,
+          ignore: argv.functionIgnore,
+        },
+      });
+      if (failed > 0) {
+        process.exitCode = 1;
+      }
       return;
     }
 
@@ -1111,7 +1303,7 @@ async function main() {
       databases: parsedArgv.dbIds
         ? await controller.getDatabasesByIds(parsedArgv.dbIds.split(","))
         : undefined,
-      collections: parsedArgv.collectionIds?.split(","),
+      collections: parsedArgv.tableIds?.split(","),
       doBackup: parsedArgv.backup,
       wipeDatabase: parsedArgv.wipe === "all" || parsedArgv.wipe === "docs",
       wipeDocumentStorage:
@@ -1509,9 +1701,9 @@ async function main() {
 
         // Determine selected table IDs
         let selectedTableIds: string[] = [];
-        if (parsedArgv.collectionIds) {
+        if (parsedArgv.tableIds) {
           // Non-interactive: respect provided table IDs as-is (apply to each selected DB)
-          selectedTableIds = parsedArgv.collectionIds.split(/[\,\s]+/).filter(Boolean);
+          selectedTableIds = parsedArgv.tableIds.split(/[\,\s]+/).filter(Boolean);
         } else {
           const inquirer = (await import("inquirer")).default;
           const choices: Array<{ name: string; value: string }> = [];
@@ -1581,7 +1773,7 @@ async function main() {
           tableNames: [],
           isNew: false,
         });
-        if (!parsedArgv.collectionIds) {
+        if (!parsedArgv.tableIds) {
           lastSelectedTableIds = selectedTableIds;
         }
       }
@@ -1596,8 +1788,8 @@ async function main() {
         collections: databaseSelections.reduce((sum, s) => sum + s.tableIds.length, 0),
         details: databaseSelections.map(s => `${s.databaseId}: ${s.tableIds.length} items`),
       };
-      // Skip confirmation if both dbIds and collectionIds are provided (non-interactive)
-      if (!(parsedArgv.dbIds && parsedArgv.collectionIds)) {
+      // Skip confirmation if both dbIds and tableIds are provided (non-interactive)
+      if (!(parsedArgv.dbIds && parsedArgv.tableIds)) {
         const confirmed = await ConfirmationDialogs.showOperationSummary('Push', pushSummary, { confirmationRequired: true });
         if (!confirmed) {
           MessageFormatter.info("Push operation cancelled", { prefix: "Push" });
