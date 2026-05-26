@@ -68,6 +68,7 @@ import {
 } from "./functions/methods.js";
 import chalk from "chalk";
 import { deployLocalFunction } from "./functions/deployments.js";
+import { deployFunctionsBatch, type BatchDeployItem } from "./functions/batchDeploy.js";
 import fs from "node:fs";
 import {
   configureLogging,
@@ -567,12 +568,27 @@ export class UtilsController {
       Query.limit(1000),
     ]);
 
-    for (const localFunction of localFunctions) {
-      MessageFormatter.progress(`Syncing function ${localFunction.name}...`, { prefix: "Functions" });
-      await this.deployFunction(localFunction.name);
+    if (!localFunctions.length) {
+      MessageFormatter.warning("No functions defined in local config.", { prefix: "Functions" });
+      return;
     }
 
-    MessageFormatter.success("All functions synchronized successfully!", { prefix: "Functions" });
+    const items: BatchDeployItem[] = localFunctions.map((localFunction) => ({
+      functionName: localFunction.name,
+      functionConfig: localFunction,
+      configDirPath: this.appwriteFolderPath,
+    }));
+
+    const results = await deployFunctionsBatch(this.appwriteServer, items);
+    const failed = results.filter((r) => r.status === "failed");
+    if (failed.length) {
+      MessageFormatter.warning(
+        `${failed.length} of ${results.length} functions failed to sync. See summary above.`,
+        { prefix: "Functions" }
+      );
+    } else {
+      MessageFormatter.success("All functions synchronized successfully!", { prefix: "Functions" });
+    }
   }
 
   async wipeDatabase(database: Models.Database, wipeBucket: boolean = false) {

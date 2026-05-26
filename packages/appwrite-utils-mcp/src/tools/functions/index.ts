@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import { Functions, ExecutionMethod } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
-import { ConfigManager, FunctionManager, MessageFormatter } from 'appwrite-utils-helpers';
+import { ConfigManager, FunctionManager, MessageFormatter, type BatchDeployResult } from 'appwrite-utils-helpers';
 import type { AppwriteFunction } from 'appwrite-utils';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
 import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
@@ -139,6 +139,40 @@ const deployFunctionSchema = z.object({
     .positive()
     .optional()
     .describe('Poll interval (ms) while waiting for the build. Default 3000.'),
+});
+
+/**
+ * Schema for deploy_functions - Pipelined batch deploy of multiple functions
+ */
+const deployFunctionsSchema = z.object({
+  functionIds: z
+    .array(z.string().min(1))
+    .optional()
+    .describe('Function $ids to deploy. Omit (or set deployAll=true) to deploy every function declared in the loaded YAML config.'),
+  deployAll: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('When true (or when functionIds is omitted), deploy every function declared in the loaded YAML config.'),
+  buildConcurrency: z
+    .number()
+    .int()
+    .positive()
+    .max(20)
+    .optional()
+    .describe('Max concurrent wait-for-build+activate tasks. Uploads always serialize. Default 5.'),
+  activationTimeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max ms to wait for any single deployment to reach status=ready. Default 600000 (10 min).'),
+  activationIntervalMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Poll interval (ms) while waiting for builds. Default 3000.'),
 });
 
 /**
@@ -572,6 +606,134 @@ async function handleDeployFunction(
     functionName: fn.name,
     status: deployment.status,
     buildLogs: deployment.buildStdout || deployment.buildStderr || '',
+  };
+}
+
+/**
+ * Pipelined batch deploy: uploads each requested function sequentially,
+ * but kicks off wait-for-build+activate concurrently (bounded by
+ * buildConcurrency, default 5). One failed build does not abort the
+ * batch — all results are returned in the response.
+ */
+async function handleDeployFunctions(
+  input: unknown,
+  context: ToolContext
+): Promise<{
+  success: boolean;
+  totalRequested: number;
+  totalReady: number;
+  totalFailed: number;
+  results: Array<{
+    functionId: string;
+    functionName: string;
+    status: 'ready' | 'failed';
+    deploymentId?: string;
+    durationMs: number;
+    error?: string;
+  }>;
+}> {
+  const validated = deployFunctionsSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+
+  // Load local YAML config so we can deploy with the local spec/scope/
+  // schedule fields (matches deploy_function semantics). Required for
+  // batch — if there is no local config, we have nothing to deploy.
+  const configManager = ConfigManager.getInstance();
+  if (!configManager.hasConfig()) {
+    await configManager.loadConfig({ validate: false, reportValidation: false });
+  }
+  const config = configManager.getConfig();
+  const allLocal: AppwriteFunction[] = (config.functions ?? []).filter(
+    (f): f is AppwriteFunction => !!f && typeof f.$id === 'string'
+  );
+
+  if (allLocal.length === 0) {
+    throw new Error(
+      'No functions found in local YAML config. deploy_functions requires the loaded AppwriteConfig to contain a functions[] list.'
+    );
+  }
+
+  const requestedIds = validated.functionIds && validated.functionIds.length > 0
+    ? validated.functionIds
+    : undefined;
+
+  const selected: AppwriteFunction[] = requestedIds
+    ? requestedIds.map((id) => {
+        const match = allLocal.find((f) => f.$id === id);
+        if (!match) {
+          throw new Error(
+            `Function $id "${id}" not found in local YAML config. Available: ${allLocal.map((f) => f.$id).join(', ') || '<none>'}`
+          );
+        }
+        return match;
+      })
+    : allLocal;
+
+  // Resolve a code directory for each function.
+  const items: Array<{ functionConfig: AppwriteFunction; functionPath: string }> = [];
+  const earlyFailures: BatchDeployResult[] = [];
+  for (const fnCfg of selected) {
+    try {
+      const foundPath = await functionManager.findFunctionDirectory(fnCfg.name, {
+        searchPaths: [context.configDir ?? process.cwd()],
+        verbose: false,
+      });
+      if (!foundPath) {
+        throw new Error(
+          `Could not find function directory for "${fnCfg.name}" (id ${fnCfg.$id}). Place the source under <configDir>/functions/<name>/ or pre-set dirPath in the YAML.`
+        );
+      }
+      items.push({ functionConfig: fnCfg, functionPath: foundPath });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      earlyFailures.push({
+        functionName: fnCfg.name,
+        functionId: fnCfg.$id,
+        status: 'failed',
+        error: err,
+        durationMs: 0,
+      });
+    }
+  }
+
+  const pollOptions =
+    validated.activationTimeoutMs !== undefined || validated.activationIntervalMs !== undefined
+      ? { timeoutMs: validated.activationTimeoutMs, intervalMs: validated.activationIntervalMs }
+      : undefined;
+
+  const batchResults = await functionManager.deployFunctionsBatch(items, {
+    buildConcurrency: validated.buildConcurrency,
+    verbose: false,
+    pollOptions,
+  });
+
+  const combined: BatchDeployResult[] = [...earlyFailures, ...batchResults];
+  const ready = combined.filter((r) => r.status === 'ready').length;
+  const failed = combined.length - ready;
+
+  return {
+    success: failed === 0,
+    totalRequested: selected.length,
+    totalReady: ready,
+    totalFailed: failed,
+    results: combined.map((r) => ({
+      functionId: r.functionId,
+      functionName: r.functionName,
+      status: r.status,
+      deploymentId: r.deploymentId,
+      durationMs: r.durationMs,
+      error: r.error?.message,
+    })),
   };
 }
 
@@ -1317,6 +1479,15 @@ const deployFunctionTool: ToolDefinition = {
   requiresAuth: true,
 };
 
+const deployFunctionsTool: ToolDefinition = {
+  name: 'deploy_functions',
+  description:
+    'Deploy multiple functions in a pipelined batch: uploads serialize one-at-a-time, but build-wait+activate runs concurrently across functions (default 5 in parallel). Pass functionIds to pick specific functions, or deployAll=true (or omit functionIds) to deploy every function in the loaded YAML config. Returns a per-function result array — one failed build does not abort the rest. Spec/scope/schedule/env-affecting fields are pushed from local YAML before each upload.',
+  inputSchema: deployFunctionsSchema,
+  handler: handleDeployFunctions,
+  requiresAuth: true,
+};
+
 const deployFunctionViaCliTool: ToolDefinition = {
   name: 'deploy_function_via_cli',
   description:
@@ -1473,6 +1644,7 @@ export const functionsToolGroup: ToolGroupDefinition = {
     listFunctionsTool,
     getFunctionTool,
     deployFunctionTool,
+    deployFunctionsTool,
     deployFunctionViaCliTool,
     listExecutionsTool,
     getExecutionTool,

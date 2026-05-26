@@ -10,6 +10,7 @@ import { logger } from 'appwrite-utils-helpers';
 import { fetchAllDatabases } from "../../databases/methods.js";
 import { listBuckets } from "../../storage/methods.js";
 import { getFunction, downloadLatestFunctionDeployment } from "../../functions/methods.js";
+import { deployFunctionsBatch, type BatchDeployItem } from "../../functions/batchDeploy.js";
 import { wipeTableRows } from "../../collections/wipeOperations.js";
 import type { InteractiveCLI } from "../../interactiveCLI.js";
 
@@ -216,12 +217,43 @@ export const databaseCommands = {
             true
           );
 
+          const controller = (cli as any).controller!;
+          const allFunctions = controller.config?.functions || [];
+          const items: BatchDeployItem[] = [];
           for (const func of functions) {
-            try {
-              await (cli as any).controller!.deployFunction(func.name);
-              MessageFormatter.success(`Function ${func.name} deployed successfully`, { prefix: "Functions" });
-            } catch (error) {
-              MessageFormatter.error(`Failed to deploy function ${func.name}`, error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
+            const cfg = allFunctions.find(
+              (f: any) => f?.$id === func.$id || f?.name === func.name
+            );
+            if (!cfg) {
+              MessageFormatter.warning(
+                `Function ${func.name} missing from loaded config; skipping.`,
+                { prefix: "Functions" }
+              );
+              continue;
+            }
+            items.push({
+              functionName: cfg.name,
+              functionConfig: cfg,
+              configDirPath: controller.getAppwriteFolderPath?.() ?? controller.appwriteFolderPath,
+            });
+          }
+
+          if (items.length) {
+            const results = await deployFunctionsBatch(
+              controller.appwriteServer,
+              items
+            );
+            const failed = results.filter((r) => r.status === "failed");
+            if (failed.length) {
+              MessageFormatter.warning(
+                `${failed.length} of ${results.length} functions failed to deploy.`,
+                { prefix: "Functions" }
+              );
+            } else {
+              MessageFormatter.success(
+                `All ${results.length} selected functions deployed successfully.`,
+                { prefix: "Functions" }
+              );
             }
           }
         }

@@ -44,6 +44,28 @@ export interface FunctionSearchOptions {
   verbose?: boolean;
 }
 
+export interface BatchDeployItem {
+  functionConfig: AppwriteFunction;
+  functionPath: string;
+  options?: FunctionDeploymentOptions;
+}
+
+export interface BatchDeployOptions {
+  buildConcurrency?: number;
+  verbose?: boolean;
+  /** Default poll options applied to items that don't set their own. */
+  pollOptions?: { intervalMs?: number; timeoutMs?: number };
+}
+
+export interface BatchDeployResult {
+  functionName: string;
+  functionId: string;
+  status: "ready" | "failed";
+  deploymentId?: string;
+  error?: Error;
+  durationMs: number;
+}
+
 export interface FunctionDeploymentOptions {
   activate?: boolean;
   entrypoint?: string;
@@ -259,65 +281,97 @@ export class FunctionManager {
     functionPath: string,
     options: FunctionDeploymentOptions = {}
   ): Promise<Models.Deployment> {
+    return await functionLimit(async () => {
+      const deployment = await this.uploadDeployment(functionConfig, functionPath, options);
+      const { activate = true, verbose = false, pollOptions } = options;
+
+      if (!activate) {
+        if (verbose) {
+          MessageFormatter.success(`Function ${functionConfig.name} uploaded (activate=false)`, { prefix: "Functions" });
+        }
+        return deployment;
+      }
+
+      const ready = await this.finalizeDeployment(functionConfig.$id, deployment.$id, pollOptions);
+
+      if (verbose) {
+        MessageFormatter.success(`Function ${functionConfig.name} deployed successfully`, { prefix: "Functions" });
+      }
+
+      return ready;
+    });
+  }
+
+  /**
+   * Run the upload phase only: validate directory, push function config,
+   * run predeploy commands, and call createDeployment without waiting for
+   * the build or activating. Returns the deployment in its initial state.
+   *
+   * Used by deployFunctionsBatch so multiple uploads can serialize while
+   * many builds wait/activate in parallel.
+   */
+  public async uploadDeployment(
+    functionConfig: AppwriteFunction,
+    functionPath: string,
+    options: FunctionDeploymentOptions = {}
+  ): Promise<Models.Deployment> {
     const {
       activate = true,
       entrypoint = functionConfig.entrypoint || "main.js",
       commands = functionConfig.commands || "npm install",
       ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
-      pollOptions
     } = options;
 
-    return await functionLimit(async () => {
+    if (verbose) {
+      MessageFormatter.processing(`Uploading function: ${functionConfig.name}`, { prefix: "Functions" });
+      MessageFormatter.debug(`Path: ${functionPath}`, undefined, { prefix: "Functions" });
+      MessageFormatter.debug(`Entrypoint: ${entrypoint}`, undefined, { prefix: "Functions" });
+    }
+
+    if (!await this.isValidFunctionDirectory(functionPath)) {
+      throw new Error(`Invalid function directory: ${functionPath}`);
+    }
+
+    let functionExists = false;
+    try {
+      await this.getFunction(functionConfig.$id);
+      functionExists = true;
+    } catch (error) {
       if (verbose) {
-        MessageFormatter.processing(`Deploying function: ${functionConfig.name}`, { prefix: "Functions" });
-        MessageFormatter.debug(`Path: ${functionPath}`, undefined, { prefix: "Functions" });
-        MessageFormatter.debug(`Entrypoint: ${entrypoint}`, undefined, { prefix: "Functions" });
+        MessageFormatter.info(`Function ${functionConfig.$id} does not exist, creating...`, { prefix: "Functions" });
       }
+    }
 
-      // Validate function directory
-      if (!await this.isValidFunctionDirectory(functionPath)) {
-        throw new Error(`Invalid function directory: ${functionPath}`);
-      }
+    if (!functionExists) {
+      await this.createFunction(functionConfig, { verbose });
+    } else {
+      await this.updateFunction(functionConfig, { verbose });
+    }
 
-      // Ensure function exists
-      let functionExists = false;
-      try {
-        await this.getFunction(functionConfig.$id);
-        functionExists = true;
-      } catch (error) {
-        if (verbose) {
-          MessageFormatter.info(`Function ${functionConfig.$id} does not exist, creating...`, { prefix: "Functions" });
-        }
-      }
+    if (functionConfig.predeployCommands?.length) {
+      await this.executePredeployCommands(functionConfig.predeployCommands, functionPath, { verbose });
+    }
 
-      // Create function if it doesn't exist, otherwise always push the
-      // local config (specs, scopes, schedule, env-affecting fields) before
-      // uploading new code — mirrors the CLI's deployLocalFunction behavior.
-      if (!functionExists) {
-        await this.createFunction(functionConfig, { verbose });
-      } else {
-        await this.updateFunction(functionConfig, { verbose });
-      }
+    return await this.createDeployment(
+      functionConfig.$id,
+      functionPath,
+      { activate, entrypoint, commands, ignored, verbose, waitForReady: false }
+    );
+  }
 
-      // Execute pre-deploy commands if specified
-      if (functionConfig.predeployCommands?.length) {
-        await this.executePredeployCommands(functionConfig.predeployCommands, functionPath, { verbose });
-      }
-
-      // Deploy the function
-      const deployment = await this.createDeployment(
-        functionConfig.$id,
-        functionPath,
-        { activate, entrypoint, commands, ignored, verbose, pollOptions }
-      );
-
-      if (verbose) {
-        MessageFormatter.success(`Function ${functionConfig.name} deployed successfully`, { prefix: "Functions" });
-      }
-
-      return deployment;
-    });
+  /**
+   * Finalize phase of a deployment: wait until built, then explicitly
+   * activate. Safe to run concurrently for many deployments.
+   */
+  public async finalizeDeployment(
+    functionId: string,
+    deploymentId: string,
+    pollOptions?: { intervalMs?: number; timeoutMs?: number }
+  ): Promise<Models.Deployment> {
+    const ready = await this.waitForDeploymentReady(functionId, deploymentId, pollOptions);
+    await this.activateDeployment(functionId, ready.$id);
+    return ready;
   }
 
   private async createFunction(
@@ -431,9 +485,17 @@ export class FunctionManager {
   private async createDeployment(
     functionId: string,
     codePath: string,
-    options: FunctionDeploymentOptions & { verbose?: boolean } = {}
+    options: FunctionDeploymentOptions & { verbose?: boolean; waitForReady?: boolean } = {}
   ): Promise<Models.Deployment> {
-    const { activate = true, entrypoint = "main.js", commands = "npm install", ignored = [], verbose = false, pollOptions } = options;
+    const {
+      activate = true,
+      entrypoint = "main.js",
+      commands = "npm install",
+      ignored = [],
+      verbose = false,
+      pollOptions,
+      waitForReady = true,
+    } = options;
 
     const { InputFile } = await import("node-appwrite/file");
     const { create: createTarball } = await import("tar");
@@ -490,7 +552,7 @@ export class FunctionManager {
         );
       });
 
-      if (!activate) {
+      if (!activate || !waitForReady) {
         return deployment;
       }
 
@@ -574,6 +636,168 @@ export class FunctionManager {
     return await tryAwaitWithRetry(async () =>
       await this.functions.updateFunctionDeployment(functionId, deploymentId)
     );
+  }
+
+  /**
+   * Pipelined multi-function deploy.
+   *   - Uploads sequentially (clean upload UX, no createDeployment rate-limit churn).
+   *   - As each upload completes, its wait+activate task is enqueued on a
+   *     pLimit(buildConcurrency) worker pool and runs in parallel with the
+   *     next upload.
+   *   - At the end, all pending wait+activate tasks are awaited together via
+   *     Promise.allSettled so one bad build does not abort the rest.
+   *
+   * Returns a per-function result array.
+   */
+  public async deployFunctionsBatch(
+    items: BatchDeployItem[],
+    options: BatchDeployOptions = {}
+  ): Promise<BatchDeployResult[]> {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const buildConcurrency = options.buildConcurrency ?? 5;
+    const verbose = options.verbose ?? false;
+    const finalizeLimit = pLimit(buildConcurrency);
+    const overallStart = Date.now();
+
+    if (verbose) {
+      MessageFormatter.info(
+        `Deploying ${items.length} function${items.length === 1 ? "" : "s"} (build concurrency: ${buildConcurrency})...`,
+        { prefix: "Functions" }
+      );
+    }
+
+    type Pending = {
+      functionName: string;
+      functionId: string;
+      startedAt: number;
+      promise: Promise<BatchDeployResult>;
+    };
+
+    const pending: Pending[] = [];
+    const earlyFailures: BatchDeployResult[] = [];
+
+    for (const item of items) {
+      const startedAt = Date.now();
+      let deploymentId: string;
+      try {
+        if (verbose) {
+          MessageFormatter.progress(
+            `[${item.functionConfig.name}] Uploading...`,
+            { prefix: "Functions" }
+          );
+        }
+        const uploaded = await this.uploadDeployment(
+          item.functionConfig,
+          item.functionPath,
+          { ...item.options, verbose }
+        );
+        deploymentId = uploaded.$id;
+        if (verbose) {
+          MessageFormatter.success(
+            `[${item.functionConfig.name}] Upload complete (${deploymentId}); build queued.`,
+            { prefix: "Functions" }
+          );
+        }
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        MessageFormatter.error(
+          `[${item.functionConfig.name}] Upload failed`,
+          err,
+          { prefix: "Functions" }
+        );
+        earlyFailures.push({
+          functionName: item.functionConfig.name,
+          functionId: item.functionConfig.$id,
+          status: "failed",
+          error: err,
+          durationMs: Date.now() - startedAt,
+        });
+        continue;
+      }
+
+      // If the caller passed activate=false, skip wait+activate entirely.
+      const shouldFinalize = item.options?.activate !== false;
+      const functionName = item.functionConfig.name;
+      const functionId = item.functionConfig.$id;
+      const itemStartedAt = startedAt;
+      const pollOptions = item.options?.pollOptions ?? options.pollOptions;
+
+      if (!shouldFinalize) {
+        pending.push({
+          functionName,
+          functionId,
+          startedAt: itemStartedAt,
+          promise: Promise.resolve({
+            functionName,
+            functionId,
+            status: "ready",
+            deploymentId,
+            durationMs: Date.now() - itemStartedAt,
+          }),
+        });
+        continue;
+      }
+
+      const promise = finalizeLimit(async (): Promise<BatchDeployResult> => {
+        try {
+          const ready = await this.finalizeDeployment(functionId, deploymentId, pollOptions);
+          return {
+            functionName,
+            functionId,
+            status: "ready",
+            deploymentId: ready.$id,
+            durationMs: Date.now() - itemStartedAt,
+          };
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          MessageFormatter.error(
+            `[${functionName}] Build/activation failed`,
+            err,
+            { prefix: "Functions" }
+          );
+          return {
+            functionName,
+            functionId,
+            status: "failed",
+            deploymentId,
+            error: err,
+            durationMs: Date.now() - itemStartedAt,
+          };
+        }
+      });
+
+      pending.push({ functionName, functionId, startedAt: itemStartedAt, promise });
+    }
+
+    const settled = await Promise.allSettled(pending.map((p) => p.promise));
+    const finalizeResults: BatchDeployResult[] = settled.map((s, idx) => {
+      const slot = pending[idx];
+      if (s.status === "fulfilled") return s.value;
+      const err = s.reason instanceof Error ? s.reason : new Error(String(s.reason));
+      return {
+        functionName: slot.functionName,
+        functionId: slot.functionId,
+        status: "failed",
+        error: err,
+        durationMs: Date.now() - slot.startedAt,
+      };
+    });
+
+    const results: BatchDeployResult[] = [...earlyFailures, ...finalizeResults];
+
+    if (verbose) {
+      const ready = results.filter((r) => r.status === "ready").length;
+      const failed = results.length - ready;
+      MessageFormatter.info(
+        `Batch deploy summary: ${ready} ready, ${failed} failed in ${((Date.now() - overallStart) / 1000).toFixed(1)}s`,
+        { prefix: "Functions" }
+      );
+    }
+
+    return results;
   }
 
   public async listFunctions(): Promise<Models.FunctionList> {

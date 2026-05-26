@@ -15,36 +15,44 @@ import {
   updateFunction,
   updateFunctionSpecifications,
   waitForDeploymentReady,
+  type WaitForDeploymentOptions,
 } from "./methods.js";
 import ignore from "ignore";
 import { MessageFormatter } from "appwrite-utils-helpers";
 import { resolveFunctionDirectory, validateFunctionDirectory } from 'appwrite-utils-helpers';
 
-export const deployFunction = async (
+const DEFAULT_IGNORED = [
+  "node_modules",
+  ".git",
+  ".vscode",
+  ".DS_Store",
+  "__pycache__",
+  ".venv",
+];
+
+/**
+ * Upload-only phase of a deployment: tars + uploads the function source and
+ * creates the deployment record. Does NOT wait for the build to finish and
+ * does NOT explicitly call activateDeployment — the returned deployment is
+ * typically in "waiting" or "building" state.
+ *
+ * Pair with finalizeFunctionDeployment to wait+activate.
+ */
+export const uploadFunctionDeployment = async (
   client: Client,
   functionId: string,
   codePath: string,
   activate: boolean = true,
   entrypoint: string = "main.js",
   commands: string = "npm install",
-  ignored: string[] = [
-    "node_modules",
-    ".git",
-    ".vscode",
-    ".DS_Store",
-    "__pycache__",
-    ".venv",
-  ]
-) => {
+  ignored: string[] = DEFAULT_IGNORED
+): Promise<Models.Deployment> => {
   const functions = new Functions(client);
   MessageFormatter.processing("Preparing function deployment...", { prefix: "Deployment" });
 
-  // Convert ignored patterns to lowercase for case-insensitive comparison
   const ignoredLower = ignored.map((pattern) => pattern.toLowerCase());
-
   const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
 
-  // Verify codePath exists and is a directory
   if (!fs.existsSync(codePath)) {
     throw new Error(`Function directory not found at ${codePath}`);
   }
@@ -76,7 +84,6 @@ export const deployFunction = async (
           codePath,
           join(codePath, path)
         ).toLowerCase();
-        // Skip if path matches any ignored pattern
         if (
           ignoredLower.some(
             (pattern) =>
@@ -91,7 +98,7 @@ export const deployFunction = async (
         return true;
       },
     },
-    ["."] // This now only includes contents of codePath since we set cwd to codePath
+    ["."]
   );
 
   const fileBuffer = await fs.promises.readFile(tarPath);
@@ -102,7 +109,6 @@ export const deployFunction = async (
 
   try {
     MessageFormatter.processing("Creating deployment...", { prefix: "Deployment" });
-    // Start with 1 as default total since we don't know the chunk size yet
     progressBar.start(1, 0);
 
     const functionResponse = await functions.createDeployment(
@@ -116,13 +122,11 @@ export const deployFunction = async (
         const total = progress.chunksTotal;
 
         if (chunks !== undefined && total !== undefined) {
-          // First chunk, initialize the bar with correct total
           if (chunks === 0) {
             progressBar.start(total || 100, 0);
           } else {
             progressBar.update(chunks);
 
-            // Check if upload is complete
             if (chunks === total) {
               progressBar.update(total);
               progressBar.stop();
@@ -133,51 +137,117 @@ export const deployFunction = async (
       }
     );
 
-    // Ensure progress bar completes even if callback never fired
     if (progressBar.getProgress() === 0) {
       progressBar.update(1);
       progressBar.stop();
     }
 
-    await fs.promises.unlink(tarPath);
-
-    if (activate) {
-      MessageFormatter.processing(
-        `Waiting for deployment ${functionResponse.$id} to finish building...`,
-        { prefix: "Deployment" }
-      );
-      const readyDeployment = await waitForDeploymentReady(
-        client,
-        functionId,
-        functionResponse.$id
-      );
-      await activateDeployment(client, functionId, readyDeployment.$id);
-      MessageFormatter.success(
-        `Activated deployment ${readyDeployment.$id}`,
-        { prefix: "Deployment" }
-      );
-      return readyDeployment;
-    }
-
     return functionResponse;
   } catch (error) {
     progressBar.stop();
-    MessageFormatter.error("Deployment failed", error instanceof Error ? error : undefined, { prefix: "Deployment" });
+    MessageFormatter.error("Upload failed", error instanceof Error ? error : undefined, { prefix: "Deployment" });
     throw error;
+  } finally {
+    try {
+      await fs.promises.unlink(tarPath);
+    } catch {
+      // Ignore cleanup errors
+    }
   }
 };
 
-export const deployLocalFunction = async (
+/**
+ * Finalize phase of a deployment: polls until the build is ready, then
+ * explicitly activates the deployment. Safe to run concurrently for many
+ * deployments because the underlying calls are just polling getDeployment
+ * and a single updateFunctionDeployment per call.
+ */
+export const finalizeFunctionDeployment = async (
+  client: Client,
+  functionId: string,
+  deploymentId: string,
+  pollOptions?: WaitForDeploymentOptions
+): Promise<Models.Deployment> => {
+  MessageFormatter.processing(
+    `Waiting for deployment ${deploymentId} (function ${functionId}) to finish building...`,
+    { prefix: "Deployment" }
+  );
+  const readyDeployment = await waitForDeploymentReady(
+    client,
+    functionId,
+    deploymentId,
+    pollOptions
+  );
+  await activateDeployment(client, functionId, readyDeployment.$id);
+  MessageFormatter.success(
+    `Activated deployment ${readyDeployment.$id} (function ${functionId})`,
+    { prefix: "Deployment" }
+  );
+  return readyDeployment;
+};
+
+/**
+ * Thin wrapper preserving the original single-function deploy semantics:
+ * upload then (if activate) wait+activate inline.
+ */
+export const deployFunction = async (
+  client: Client,
+  functionId: string,
+  codePath: string,
+  activate: boolean = true,
+  entrypoint: string = "main.js",
+  commands: string = "npm install",
+  ignored: string[] = DEFAULT_IGNORED
+) => {
+  const deployment = await uploadFunctionDeployment(
+    client,
+    functionId,
+    codePath,
+    activate,
+    entrypoint,
+    commands,
+    ignored
+  );
+
+  if (!activate) {
+    return deployment;
+  }
+
+  return await finalizeFunctionDeployment(client, functionId, deployment.$id);
+};
+
+/**
+ * Result of prepareFunctionDeployment: the resolved code directory and the
+ * effective config, ready to be passed to uploadFunctionDeployment.
+ */
+export interface PreparedFunctionDeployment {
+  functionId: string;
+  functionName: string;
+  deployPath: string;
+  entrypoint: string;
+  commands: string;
+  ignored: string[];
+}
+
+/**
+ * Runs everything that must happen BEFORE the tarball upload:
+ *  - resolves the on-disk code directory
+ *  - creates the function on Appwrite if missing, otherwise pushes the
+ *    config (specs, scopes, schedule, etc.)
+ *  - runs predeployCommands
+ *
+ * Returns the info needed to call uploadFunctionDeployment.
+ */
+export const prepareFunctionDeployment = async (
   client: Client,
   functionName: string,
   functionConfig: AppwriteFunction,
   functionPath?: string,
   configDirPath?: string
-) => {
+): Promise<PreparedFunctionDeployment> => {
   let functionExists = true;
-  let functionThatExists: Models.Function;
   try {
-    functionThatExists = await getFunction(client, functionConfig.$id);
+    await getFunction(client, functionConfig.$id);
   } catch (error) {
     functionExists = false;
   }
@@ -218,7 +288,6 @@ export const deployLocalFunction = async (
     }
   }
 
-  // Only create function if it doesn't exist
   if (!functionExists) {
     await createFunction(client, functionConfig);
   } else {
@@ -230,13 +299,42 @@ export const deployLocalFunction = async (
     ? join(resolvedPath, functionConfig.deployDir)
     : resolvedPath;
 
+  return {
+    functionId: functionConfig.$id,
+    functionName,
+    deployPath,
+    entrypoint: functionConfig.entrypoint ?? "main.js",
+    commands: functionConfig.commands ?? "npm install",
+    ignored: functionConfig.ignore ?? DEFAULT_IGNORED,
+  };
+};
+
+/**
+ * Thin wrapper preserving the original single-function deploy semantics:
+ * prepare + upload + wait + activate inline.
+ */
+export const deployLocalFunction = async (
+  client: Client,
+  functionName: string,
+  functionConfig: AppwriteFunction,
+  functionPath?: string,
+  configDirPath?: string
+) => {
+  const prepared = await prepareFunctionDeployment(
+    client,
+    functionName,
+    functionConfig,
+    functionPath,
+    configDirPath
+  );
+
   return deployFunction(
     client,
-    functionConfig.$id,
-    deployPath,
+    prepared.functionId,
+    prepared.deployPath,
     true,
-    functionConfig.entrypoint,
-    functionConfig.commands,
-    functionConfig.ignore
+    prepared.entrypoint,
+    prepared.commands,
+    prepared.ignored
   );
 };

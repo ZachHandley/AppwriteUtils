@@ -14,6 +14,7 @@ import {
   listSpecifications,
 } from "../../functions/methods.js";
 import { deployLocalFunction } from "../../functions/deployments.js";
+import { deployFunctionsBatch, type BatchDeployItem } from "../../functions/batchDeploy.js";
 import { discoverFnConfigs, mergeDiscoveredFunctions } from "../../functions/fnConfigDiscovery.js";
 import { addFunctionToYamlConfig, findYamlConfig } from "appwrite-utils-helpers";
 import { RuntimeSchema, type AppwriteFunction, type Runtime, type Specification } from "appwrite-utils";
@@ -159,6 +160,8 @@ export const functionCommands = {
       MessageFormatter.error("No function selected", undefined, { prefix: "Functions" });
       return;
     }
+
+    const batchItems: BatchDeployItem[] = [];
 
     for (const functionConfig of functions) {
       if (!functionConfig) {
@@ -319,21 +322,37 @@ export const functionCommands = {
         return;
       }
 
-      try {
-        await deployLocalFunction(
-          (cli as any).controller.appwriteServer,
-          effectiveConfig.name,
-          {
-            ...effectiveConfig,
-            dirPath: functionPath,
-          },
-          functionPath,
-          yamlBaseDir
-        );
-        MessageFormatter.success("Function deployed successfully!", { prefix: "Functions" });
-      } catch (error) {
-        MessageFormatter.error("Failed to deploy function", error instanceof Error ? error : new Error(String(error)), { prefix: "Functions" });
-      }
+      batchItems.push({
+        functionName: effectiveConfig.name,
+        functionConfig: {
+          ...effectiveConfig,
+          dirPath: functionPath,
+        },
+        functionPath,
+        configDirPath: yamlBaseDir,
+      });
+    }
+
+    if (!batchItems.length) {
+      MessageFormatter.warning("No deployable functions resolved.", { prefix: "Functions" });
+      return;
+    }
+
+    const results = await deployFunctionsBatch(
+      (cli as any).controller.appwriteServer,
+      batchItems
+    );
+    const failed = results.filter((r) => r.status === "failed");
+    if (failed.length) {
+      MessageFormatter.warning(
+        `${failed.length} of ${results.length} functions failed to deploy.`,
+        { prefix: "Functions" }
+      );
+    } else {
+      MessageFormatter.success(
+        `All ${results.length} selected functions deployed successfully.`,
+        { prefix: "Functions" }
+      );
     }
   },
 
