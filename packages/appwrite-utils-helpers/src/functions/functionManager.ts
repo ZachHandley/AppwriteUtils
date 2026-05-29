@@ -1073,6 +1073,90 @@ export class FunctionManager {
   }
 
   /**
+   * Upsert a per-function variable BY KEY: update the existing variable with
+   * that key, or create it if absent. Appwrite enforces unique keys per
+   * function scope, so the key is the natural idempotency anchor (the
+   * variableId is server-generated and not caller-stable).
+   */
+  public async upsertVariable(
+    functionId: string,
+    key: string,
+    value: string,
+    options: { secret?: boolean } = {}
+  ): Promise<Models.Variable> {
+    const existing = await this.listVariables(functionId);
+    const match = existing.variables.find((v) => v.key === key);
+    if (match) {
+      return await this.updateVariable(functionId, match.$id, {
+        key,
+        value,
+        secret: options.secret,
+      });
+    }
+    return await this.createVariable(functionId, key, value, options);
+  }
+
+  /**
+   * Bulk upsert per-function variables by key. Lists once up front, then
+   * routes each entry to update-or-create. Concurrency is bounded by the
+   * shared functionLimit via the underlying create/update calls.
+   */
+  public async upsertVariables(
+    functionId: string,
+    vars: Array<{ key: string; value: string; secret?: boolean }>
+  ): Promise<Models.Variable[]> {
+    const existing = await this.listVariables(functionId);
+    const byKey = new Map(existing.variables.map((v) => [v.key, v]));
+    return await Promise.all(
+      vars.map((entry) => {
+        const match = byKey.get(entry.key);
+        if (match) {
+          return this.updateVariable(functionId, match.$id, {
+            key: entry.key,
+            value: entry.value,
+            secret: entry.secret,
+          });
+        }
+        return this.createVariable(functionId, entry.key, entry.value, {
+          secret: entry.secret,
+        });
+      })
+    );
+  }
+
+  /**
+   * Bulk delete per-function variables. Accepts variable IDs and/or keys;
+   * keys are resolved to IDs via a single list call. Returns the IDs that
+   * were actually deleted (unknown keys are skipped, not errored).
+   */
+  public async deleteVariables(
+    functionId: string,
+    selector: { variableIds?: string[]; keys?: string[] }
+  ): Promise<{ deleted: string[]; skipped: string[] }> {
+    const ids = new Set(selector.variableIds ?? []);
+    const skipped: string[] = [];
+
+    if (selector.keys && selector.keys.length > 0) {
+      const existing = await this.listVariables(functionId);
+      const byKey = new Map(existing.variables.map((v) => [v.key, v.$id]));
+      for (const key of selector.keys) {
+        const id = byKey.get(key);
+        if (id) ids.add(id);
+        else skipped.push(key);
+      }
+    }
+
+    const deleted: string[] = [];
+    await Promise.all(
+      [...ids].map(async (id) => {
+        await this.deleteVariable(functionId, id);
+        deleted.push(id);
+      })
+    );
+    return { deleted, skipped };
+  }
+
+  /**
    * Validate function configuration
    */
   public validateFunctionConfig(functionConfig: AppwriteFunction): { valid: boolean; errors: string[] } {

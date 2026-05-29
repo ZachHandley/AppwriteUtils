@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import { Query } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
-import type { DatabaseAdapter } from 'appwrite-utils-helpers';
+import { ConfigDiscoveryService, ConfigLoaderService, type DatabaseAdapter } from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
 import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 import { truncateAndCache } from '../../utils/chunking.js';
@@ -42,6 +42,120 @@ async function getAdapter(context: ToolContext): Promise<DatabaseAdapter> {
     authMethod: authResult.credentials.authMethod,
   });
   return adapter;
+}
+
+/**
+ * Cache the loaded local config per effective config dir so databaseId
+ * inference doesn't re-read the file on every table tool call.
+ */
+let localConfigCache: { dir: string; config: any | null } | null = null;
+
+async function loadLocalConfig(context: ToolContext): Promise<any | null> {
+  const dir = context.authResolver.getEffectiveConfigDir();
+  if (localConfigCache && localConfigCache.dir === dir) return localConfigCache.config;
+  let config: any | null = null;
+  try {
+    const discovery = new ConfigDiscoveryService();
+    const path = await discovery.findConfig(dir);
+    if (path) {
+      const loader = new ConfigLoaderService();
+      config = await loader.loadFromPath(path);
+    }
+  } catch {
+    config = null;
+  }
+  localConfigCache = { dir, config };
+  return config;
+}
+
+/**
+ * Resolve the target databaseId for a SINGLE-target table tool call.
+ *
+ * Precedence:
+ *  1. Explicit `databaseId` on the call.
+ *  2. The table's own `databaseId` (singular) in the local config, matched by
+ *     `$id` or `name` against the call's `tableId`.
+ *  3. The table's `databaseIds` (plural, multi-environment): if exactly one,
+ *     use it. If several, probe each live to find where the table actually
+ *     exists — use the sole match, error if it exists in multiple (ambiguous)
+ *     or in none.
+ *  4. If the local config defines exactly one database, use it.
+ *  5. Otherwise throw, listing the candidates so the caller can pass one.
+ *
+ * Existence probing only runs in the multi-`databaseIds` branch, so the common
+ * (explicit / single-db / singular-databaseId) paths stay zero-latency.
+ */
+async function resolveDatabaseId(
+  context: ToolContext,
+  validated: { databaseId?: string; tableId?: string },
+  adapter?: DatabaseAdapter
+): Promise<string> {
+  if (validated.databaseId) return validated.databaseId;
+
+  const config = await loadLocalConfig(context);
+
+  if (config && validated.tableId) {
+    const entries = [
+      ...(Array.isArray(config.tables) ? config.tables : []),
+      ...(Array.isArray(config.collections) ? config.collections : []),
+    ];
+    const match = entries.find(
+      (t: any) => t?.$id === validated.tableId || t?.name === validated.tableId
+    );
+
+    // Singular databaseId is unambiguous — use it directly.
+    if (typeof match?.databaseId === 'string' && match.databaseId) {
+      return match.databaseId;
+    }
+
+    // Plural databaseIds: resolve to the database where the table actually lives.
+    const candidates: string[] = Array.isArray(match?.databaseIds)
+      ? match.databaseIds.filter((id: unknown): id is string => typeof id === 'string' && !!id)
+      : [];
+
+    if (candidates.length === 1) return candidates[0];
+
+    if (candidates.length > 1) {
+      const adp = adapter ?? (await getAdapter(context));
+      const existsIn: string[] = [];
+      for (const dbId of candidates) {
+        try {
+          await adp.getTable({ databaseId: dbId, tableId: validated.tableId });
+          existsIn.push(dbId);
+        } catch {
+          /* table not present in this database */
+        }
+      }
+      if (existsIn.length === 1) return existsIn[0];
+      if (existsIn.length > 1) {
+        throw new Error(
+          `Table "${validated.tableId}" exists in multiple of its configured databaseIds (${existsIn.join(', ')}). ` +
+            `Pass databaseId explicitly to disambiguate.`
+        );
+      }
+      throw new Error(
+        `Table "${validated.tableId}" was not found in any of its configured databaseIds (${candidates.join(', ')}). ` +
+          `Create it first (push_local_config_to_appwrite) or pass an explicit databaseId.`
+      );
+    }
+  }
+
+  const databases = Array.isArray(config?.databases) ? config!.databases : [];
+  if (databases.length === 1 && typeof databases[0]?.$id === 'string') {
+    return databases[0].$id;
+  }
+
+  const candidates = databases
+    .map((d: any) => d?.$id)
+    .filter((id: unknown): id is string => typeof id === 'string' && !!id);
+  throw new Error(
+    `databaseId is required and could not be inferred` +
+      (validated.tableId ? ` for table "${validated.tableId}"` : '') +
+      `. ` +
+      (candidates.length > 1
+        ? `The local config defines multiple databases (${candidates.join(', ')}); pass databaseId explicitly, or set a databaseId on the table in your config.`
+        : `No single database could be inferred from the local config; pass databaseId explicitly.`)
+  );
 }
 
 /**
@@ -95,7 +209,13 @@ function slimColumnList(response: any): { total: number; columns: any[] } {
 // INPUT SCHEMAS
 // ──────────────────────────────────────────────────
 
-const databaseIdSchema = z.string().min(1, 'databaseId is required');
+const databaseIdSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Database ID. Optional: when omitted, defaults to the tableId\'s databaseId in the local config, or the sole configured database. Errors if it cannot be inferred.'
+  );
 const tableIdSchema = z.string().min(1, 'tableId is required');
 const rowIdSchema = z.string().min(1, 'rowId is required');
 const keySchema = z.string().min(1, 'key is required');
@@ -382,6 +502,7 @@ const deleteColumnSchema = z.object({
 async function handleListRows(input: unknown, context: ToolContext) {
   const validated = listRowsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   // Default to 25 when no limit, cap caller-supplied limits at 100. Row payloads
   // are user-defined and can be arbitrarily large, so an uncapped Query.limit()
   // is the most reliable way to blow the MCP result cap.
@@ -390,7 +511,7 @@ async function handleListRows(input: unknown, context: ToolContext) {
     defaultLimit: 25,
   });
   const response = await adapter.listRows({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     queries: guarded.queries,
   });
@@ -412,7 +533,7 @@ async function handleListRows(input: unknown, context: ToolContext) {
   const serialized = JSON.stringify(slim, null, 2);
   const chunked = truncateAndCache(serialized, {
     kind: 'table-rows',
-    key: `${validated.databaseId}:${validated.tableId}:${guarded.effectiveLimit ?? 'auto'}:${
+    key: `${databaseId}:${validated.tableId}:${guarded.effectiveLimit ?? 'auto'}:${
       (validated.queries ?? []).join('|') || 'noq'
     }`,
   });
@@ -433,8 +554,9 @@ async function handleListRows(input: unknown, context: ToolContext) {
 async function handleGetRow(input: unknown, context: ToolContext) {
   const validated = getRowSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.getRow({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     id: validated.rowId,
   });
@@ -444,8 +566,9 @@ async function handleGetRow(input: unknown, context: ToolContext) {
 async function handleCreateRow(input: unknown, context: ToolContext) {
   const validated = createRowSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.createRow({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     id: validated.rowId ?? 'unique()',
     data: validated.data,
@@ -457,8 +580,9 @@ async function handleCreateRow(input: unknown, context: ToolContext) {
 async function handleUpdateRow(input: unknown, context: ToolContext) {
   const validated = updateRowSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.updateRow({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     id: validated.rowId,
     data: validated.data,
@@ -470,8 +594,9 @@ async function handleUpdateRow(input: unknown, context: ToolContext) {
 async function handleDeleteRow(input: unknown, context: ToolContext) {
   const validated = deleteRowSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   await adapter.deleteRow({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     id: validated.rowId,
   });
@@ -494,9 +619,10 @@ function ensureBulkSupported(adapter: DatabaseAdapter, op: string): void {
 async function handleBulkCreateRows(input: unknown, context: ToolContext) {
   const validated = bulkCreateRowsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   ensureBulkSupported(adapter, 'bulk_create_rows');
   const response = await adapter.bulkCreateRows!({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     rows: validated.rows,
   });
@@ -506,9 +632,10 @@ async function handleBulkCreateRows(input: unknown, context: ToolContext) {
 async function handleBulkUpsertRows(input: unknown, context: ToolContext) {
   const validated = bulkUpsertRowsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   ensureBulkSupported(adapter, 'bulk_upsert_rows');
   const response = await adapter.bulkUpsertRows!({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     rows: validated.rows,
   });
@@ -518,6 +645,7 @@ async function handleBulkUpsertRows(input: unknown, context: ToolContext) {
 async function handleBulkDeleteRows(input: unknown, context: ToolContext) {
   const validated = bulkDeleteRowsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   ensureBulkSupported(adapter, 'bulk_delete_rows');
   if (typeof adapter.bulkDeleteRows !== 'function') {
     throw new Error(
@@ -525,7 +653,7 @@ async function handleBulkDeleteRows(input: unknown, context: ToolContext) {
     );
   }
   const response = await adapter.bulkDeleteRows({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     rowIds: validated.rowIds ?? [],
     batchSize: validated.batchSize,
@@ -544,6 +672,7 @@ async function handleBulkDeleteRows(input: unknown, context: ToolContext) {
 async function handleListTables(input: unknown, context: ToolContext) {
   const validated = listTablesSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
 
   // Build the queries array: user-supplied entries + optional Query.search.
   // Then default to limit(25) and clamp callers > 100 — full table schemas can
@@ -558,18 +687,18 @@ async function handleListTables(input: unknown, context: ToolContext) {
   });
 
   const response = await adapter.listTables({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     queries: guarded.queries,
   });
   const slim = slimTableList(response);
 
   // Cache the tables in state manager for downstream tools
   context.stateManager.cacheTables(
-    validated.databaseId,
+    databaseId,
     slim.tables.map((table: any) => ({
       $id: table.$id,
       name: table.name,
-      databaseId: validated.databaseId,
+      databaseId: databaseId,
     }))
   );
 
@@ -627,8 +756,9 @@ function projectTableSummary(table: any) {
 async function handleGetTable(input: unknown, context: ToolContext) {
   const validated = getTableSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.getTable({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
   });
   const table: any = (response as any)?.data ?? response;
@@ -642,7 +772,7 @@ async function handleGetTable(input: unknown, context: ToolContext) {
   const serialized = JSON.stringify({ table }, null, 2);
   const result = truncateAndCache(serialized, {
     kind: 'table-schema',
-    key: `${validated.databaseId}:${validated.tableId}`,
+    key: `${databaseId}:${validated.tableId}`,
   });
   if (!result.truncated) return { table };
   return {
@@ -658,8 +788,9 @@ async function handleGetTable(input: unknown, context: ToolContext) {
 async function handleCreateTable(input: unknown, context: ToolContext) {
   const validated = createTableSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.createTable({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     id: validated.tableId,
     name: validated.name,
     permissions: validated.permissions,
@@ -672,8 +803,9 @@ async function handleCreateTable(input: unknown, context: ToolContext) {
 async function handleUpdateTable(input: unknown, context: ToolContext) {
   const validated = updateTableSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.updateTable({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     id: validated.tableId,
     name: validated.name,
     permissions: validated.permissions,
@@ -686,8 +818,9 @@ async function handleUpdateTable(input: unknown, context: ToolContext) {
 async function handleDeleteTable(input: unknown, context: ToolContext) {
   const validated = deleteTableSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   await adapter.deleteTable({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
   });
   return { success: true, tableId: validated.tableId };
@@ -700,11 +833,12 @@ async function handleDeleteTable(input: unknown, context: ToolContext) {
 async function handleListIndexes(input: unknown, context: ToolContext) {
   const validated = listIndexesSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const guarded = clampQueryLimit(normalizeQueries(validated.queries), {
     maxLimit: 100,
   });
   const response = await adapter.listIndexes({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     queries: guarded.queries,
   });
@@ -716,8 +850,9 @@ async function handleListIndexes(input: unknown, context: ToolContext) {
 async function handleCreateIndex(input: unknown, context: ToolContext) {
   const validated = createIndexSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.createIndex({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
     type: validated.type,
@@ -730,8 +865,9 @@ async function handleCreateIndex(input: unknown, context: ToolContext) {
 async function handleDeleteIndex(input: unknown, context: ToolContext) {
   const validated = deleteIndexSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   await adapter.deleteIndex({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
   });
@@ -745,11 +881,12 @@ async function handleDeleteIndex(input: unknown, context: ToolContext) {
 async function handleListColumns(input: unknown, context: ToolContext) {
   const validated = listColumnsSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const guarded = clampQueryLimit(normalizeQueries(validated.queries), {
     maxLimit: 100,
   });
   const response = await adapter.listColumns({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     queries: guarded.queries,
   });
@@ -761,8 +898,9 @@ async function handleListColumns(input: unknown, context: ToolContext) {
 async function handleGetColumn(input: unknown, context: ToolContext) {
   const validated = getColumnSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.getColumn({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
   });
@@ -772,10 +910,11 @@ async function handleGetColumn(input: unknown, context: ToolContext) {
 async function handleCreateColumn(input: unknown, context: ToolContext) {
   const validated = createColumnSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   // The adapter's createAttribute method is polymorphic across TablesDB columns
   // (v18+) and legacy attributes (v17). It dispatches on `type` internally.
   const response = await adapter.createAttribute({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
     type: validated.type,
@@ -800,8 +939,9 @@ async function handleCreateColumn(input: unknown, context: ToolContext) {
 async function handleUpdateColumn(input: unknown, context: ToolContext) {
   const validated = updateColumnSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   const response = await adapter.updateAttribute({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
     type: validated.type,
@@ -825,8 +965,9 @@ async function handleUpdateColumn(input: unknown, context: ToolContext) {
 async function handleDeleteColumn(input: unknown, context: ToolContext) {
   const validated = deleteColumnSchema.parse(input);
   const adapter = await getAdapter(context);
+  const databaseId = await resolveDatabaseId(context, validated as { databaseId?: string; tableId?: string }, adapter);
   await adapter.deleteAttribute({
-    databaseId: validated.databaseId,
+    databaseId: databaseId,
     tableId: validated.tableId,
     key: validated.key,
   });

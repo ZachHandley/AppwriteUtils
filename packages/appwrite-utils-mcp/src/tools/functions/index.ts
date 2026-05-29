@@ -380,6 +380,65 @@ const deleteFunctionVariableSchema = z.object({
   variableId: z.string().min(1, 'Variable ID is required'),
 });
 
+/**
+ * Schema for delete_function - Requires functionId
+ */
+const deleteFunctionSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+});
+
+/**
+ * Schema for upsert_function_variable - upsert a single variable by key
+ */
+const upsertFunctionVariableSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+  key: z
+    .string()
+    .min(1, 'Variable key is required')
+    .max(255, 'Variable key must be 255 chars or fewer'),
+  value: z.string().describe('Variable value. Max length: 8192 chars.'),
+  secret: z
+    .boolean()
+    .optional()
+    .describe('Whether to mark the variable as secret. Once secret, the value is never returned by the API.'),
+});
+
+/**
+ * Schema for upsert_function_variables - bulk upsert by key
+ */
+const upsertFunctionVariablesSchema = z.object({
+  functionId: z.string().min(1, 'Function ID is required'),
+  variables: z
+    .array(
+      z.object({
+        key: z.string().min(1).max(255),
+        value: z.string(),
+        secret: z.boolean().optional(),
+      })
+    )
+    .min(1, 'At least one variable is required')
+    .describe('Variables to upsert (matched by key). Existing keys are updated, new keys are created.'),
+});
+
+/**
+ * Schema for delete_function_variables - bulk delete by id and/or key
+ */
+const deleteFunctionVariablesSchema = z
+  .object({
+    functionId: z.string().min(1, 'Function ID is required'),
+    variableIds: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Variable IDs to delete.'),
+    keys: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Variable keys to delete (resolved to IDs via a single list call). Unknown keys are skipped.'),
+  })
+  .refine((v) => (v.variableIds?.length ?? 0) + (v.keys?.length ?? 0) > 0, {
+    message: 'Provide at least one of variableIds or keys.',
+  });
+
 // ──────────────────────────────────────────────────
 // TOOL HANDLERS
 // ──────────────────────────────────────────────────
@@ -1451,6 +1510,117 @@ async function handleDeleteFunctionVariable(
   return { success: true };
 }
 
+/**
+ * Delete a function and all its deployments/variables. Irreversible.
+ */
+async function handleDeleteFunction(
+  input: unknown,
+  context: ToolContext
+): Promise<{ success: true }> {
+  const validated = deleteFunctionSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  await functionManager.deleteFunction(validated.functionId);
+
+  return { success: true };
+}
+
+/**
+ * Upsert a single function-scoped variable by key (update if present, else
+ * create). Response redacts the value when secret=true.
+ */
+async function handleUpsertFunctionVariable(
+  input: unknown,
+  context: ToolContext
+): Promise<FunctionVariableOut> {
+  const validated = upsertFunctionVariableSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  const variable = await functionManager.upsertVariable(
+    validated.functionId,
+    validated.key,
+    validated.value,
+    { secret: validated.secret }
+  );
+
+  return redactSecretValue(variable);
+}
+
+/**
+ * Bulk upsert function-scoped variables by key. Response redacts secret values.
+ */
+async function handleUpsertFunctionVariables(
+  input: unknown,
+  context: ToolContext
+): Promise<{ total: number; variables: FunctionVariableOut[] }> {
+  const validated = upsertFunctionVariablesSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  const variables = await functionManager.upsertVariables(
+    validated.functionId,
+    validated.variables
+  );
+
+  return {
+    total: variables.length,
+    variables: variables.map(redactSecretValue),
+  };
+}
+
+/**
+ * Bulk delete function-scoped variables by ID and/or key.
+ */
+async function handleDeleteFunctionVariables(
+  input: unknown,
+  context: ToolContext
+): Promise<{ success: true; deleted: string[]; skipped: string[] }> {
+  const validated = deleteFunctionVariablesSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const functionManager = new FunctionManager(client);
+  const result = await functionManager.deleteVariables(validated.functionId, {
+    variableIds: validated.variableIds,
+    keys: validated.keys,
+  });
+
+  return { success: true, deleted: result.deleted, skipped: result.skipped };
+}
+
 // ──────────────────────────────────────────────────
 // TOOL DEFINITIONS
 // ──────────────────────────────────────────────────
@@ -1629,6 +1799,42 @@ const deleteFunctionVariableTool: ToolDefinition = {
   requiresAuth: true,
 };
 
+const deleteFunctionTool: ToolDefinition = {
+  name: 'delete_function',
+  description:
+    'Delete a function and all of its deployments and variables. Irreversible — the function ID stops resolving immediately.',
+  inputSchema: deleteFunctionSchema,
+  handler: handleDeleteFunction,
+  requiresAuth: true,
+};
+
+const upsertFunctionVariableTool: ToolDefinition = {
+  name: 'upsert_function_variable',
+  description:
+    'Upsert a per-function variable BY KEY: updates the existing variable with that key, or creates it if absent. Response redacts the value when secret=true.',
+  inputSchema: upsertFunctionVariableSchema,
+  handler: handleUpsertFunctionVariable,
+  requiresAuth: true,
+};
+
+const upsertFunctionVariablesTool: ToolDefinition = {
+  name: 'upsert_function_variables',
+  description:
+    'Bulk upsert per-function variables by key. Existing keys are updated, new keys are created. Response redacts secret values.',
+  inputSchema: upsertFunctionVariablesSchema,
+  handler: handleUpsertFunctionVariables,
+  requiresAuth: true,
+};
+
+const deleteFunctionVariablesTool: ToolDefinition = {
+  name: 'delete_function_variables',
+  description:
+    'Bulk delete per-function variables by variableIds and/or keys. Keys are resolved to IDs via a single list call; unknown keys are skipped (reported in `skipped`).',
+  inputSchema: deleteFunctionVariablesSchema,
+  handler: handleDeleteFunctionVariables,
+  requiresAuth: true,
+};
+
 // ──────────────────────────────────────────────────
 // TOOL GROUP EXPORT
 // ──────────────────────────────────────────────────
@@ -1656,10 +1862,14 @@ export const functionsToolGroup: ToolGroupDefinition = {
     getDeploymentTool,
     createVcsDeploymentTool,
     deleteDeploymentTool,
+    deleteFunctionTool,
     listFunctionVariablesTool,
     getFunctionVariableTool,
     createFunctionVariableTool,
     updateFunctionVariableTool,
     deleteFunctionVariableTool,
+    upsertFunctionVariableTool,
+    upsertFunctionVariablesTool,
+    deleteFunctionVariablesTool,
   ],
 };

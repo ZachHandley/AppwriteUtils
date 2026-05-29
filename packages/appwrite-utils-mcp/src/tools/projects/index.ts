@@ -115,6 +115,67 @@ const deleteProjectVariableSchema = z.object({
   variableId: z.string().min(1, 'Variable ID is required'),
 });
 
+/**
+ * Schema for upsert_project_variable - upsert a single variable by key
+ */
+const upsertProjectVariableSchema = z.object({
+  projectId: z
+    .string()
+    .optional()
+    .describe('Optional project ID. Falls back to the authenticated context.'),
+  key: z
+    .string()
+    .min(1, 'Variable key is required')
+    .max(255, 'Variable key must be 255 chars or fewer'),
+  value: z.string().describe('Variable value. Max length: 8192 chars.'),
+  secret: z
+    .boolean()
+    .optional()
+    .describe('Whether to mark the variable as secret. Once secret, the value is never returned by the API.'),
+});
+
+/**
+ * Schema for upsert_project_variables - bulk upsert by key
+ */
+const upsertProjectVariablesSchema = z.object({
+  projectId: z
+    .string()
+    .optional()
+    .describe('Optional project ID. Falls back to the authenticated context.'),
+  variables: z
+    .array(
+      z.object({
+        key: z.string().min(1).max(255),
+        value: z.string(),
+        secret: z.boolean().optional(),
+      })
+    )
+    .min(1, 'At least one variable is required')
+    .describe('Variables to upsert (matched by key). Existing keys are updated, new keys are created.'),
+});
+
+/**
+ * Schema for delete_project_variables - bulk delete by id and/or key
+ */
+const deleteProjectVariablesSchema = z
+  .object({
+    projectId: z
+      .string()
+      .optional()
+      .describe('Optional project ID. Falls back to the authenticated context.'),
+    variableIds: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Variable IDs to delete.'),
+    keys: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Variable keys to delete (resolved to IDs via a single list call). Unknown keys are skipped.'),
+  })
+  .refine((v) => (v.variableIds?.length ?? 0) + (v.keys?.length ?? 0) > 0, {
+    message: 'Provide at least one of variableIds or keys.',
+  });
+
 // ──────────────────────────────────────────────────
 // REDACTION HELPER
 // ──────────────────────────────────────────────────
@@ -339,6 +400,89 @@ async function handleDeleteProjectVariable(
   return { success: true };
 }
 
+/**
+ * Upsert a single project variable by key (update if present, else create).
+ */
+async function handleUpsertProjectVariable(
+  input: unknown,
+  context: ToolContext
+): Promise<ProjectVariableOut> {
+  const validated = upsertProjectVariableSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const projectId = resolveProjectId(validated.projectId, authResult.credentials.projectId);
+  const manager = new ProjectsManager(client);
+  const variable = await manager.upsertVariable(projectId, validated.key, validated.value, {
+    secret: validated.secret,
+  });
+
+  return redactSecretValue(variable);
+}
+
+/**
+ * Bulk upsert project variables by key.
+ */
+async function handleUpsertProjectVariables(
+  input: unknown,
+  context: ToolContext
+): Promise<{ total: number; variables: ProjectVariableOut[] }> {
+  const validated = upsertProjectVariablesSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const projectId = resolveProjectId(validated.projectId, authResult.credentials.projectId);
+  const manager = new ProjectsManager(client);
+  const variables = await manager.upsertVariables(projectId, validated.variables);
+
+  return {
+    total: variables.length,
+    variables: variables.map(redactSecretValue),
+  };
+}
+
+/**
+ * Bulk delete project variables by ID and/or key.
+ */
+async function handleDeleteProjectVariables(
+  input: unknown,
+  context: ToolContext
+): Promise<{ success: true; deleted: string[]; skipped: string[] }> {
+  const validated = deleteProjectVariablesSchema.parse(input);
+
+  const authResult = await context.authResolver.resolve();
+  const { client } = await context.clientRegistry.getOrCreate({
+    endpoint: authResult.credentials.endpoint,
+    projectId: authResult.credentials.projectId,
+    apiKey: authResult.credentials.apiKey,
+    sessionCookie: authResult.credentials.sessionCookie,
+    authMethod: authResult.credentials.authMethod,
+  });
+
+  const projectId = resolveProjectId(validated.projectId, authResult.credentials.projectId);
+  const manager = new ProjectsManager(client);
+  const result = await manager.deleteVariables(projectId, {
+    variableIds: validated.variableIds,
+    keys: validated.keys,
+  });
+
+  return { success: true, deleted: result.deleted, skipped: result.skipped };
+}
+
 // ──────────────────────────────────────────────────
 // TOOL DEFINITIONS
 // ──────────────────────────────────────────────────
@@ -384,6 +528,33 @@ const deleteProjectVariableTool: ToolDefinition = {
   description: 'Delete a project-level variable by ID.',
   inputSchema: deleteProjectVariableSchema,
   handler: handleDeleteProjectVariable,
+  requiresAuth: true,
+};
+
+const upsertProjectVariableTool: ToolDefinition = {
+  name: 'upsert_project_variable',
+  description:
+    'Upsert a project-level variable BY KEY: updates the existing variable with that key, or creates it if absent. Response redacts the value when secret=true.',
+  inputSchema: upsertProjectVariableSchema,
+  handler: handleUpsertProjectVariable,
+  requiresAuth: true,
+};
+
+const upsertProjectVariablesTool: ToolDefinition = {
+  name: 'upsert_project_variables',
+  description:
+    'Bulk upsert project-level variables by key. Existing keys are updated, new keys are created. Response redacts secret values.',
+  inputSchema: upsertProjectVariablesSchema,
+  handler: handleUpsertProjectVariables,
+  requiresAuth: true,
+};
+
+const deleteProjectVariablesTool: ToolDefinition = {
+  name: 'delete_project_variables',
+  description:
+    'Bulk delete project-level variables by variableIds and/or keys. Keys are resolved to IDs via a single list call; unknown keys are skipped (reported in `skipped`).',
+  inputSchema: deleteProjectVariablesSchema,
+  handler: handleDeleteProjectVariables,
   requiresAuth: true,
 };
 
@@ -857,6 +1028,9 @@ export const projectsToolGroup: ToolGroupDefinition = {
     createProjectVariableTool,
     updateProjectVariableTool,
     deleteProjectVariableTool,
+    upsertProjectVariableTool,
+    upsertProjectVariablesTool,
+    deleteProjectVariablesTool,
     listWebhooksTool,
     getWebhookTool,
     createWebhookTool,
