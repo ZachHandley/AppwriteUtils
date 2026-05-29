@@ -44,6 +44,30 @@ const GeneratePydanticModelsSchema = z.object({
 });
 
 /**
+ * Schema for regenerate_schema input
+ */
+const RegenerateSchemaSchema = z.object({
+  format: z
+    .string()
+    .optional()
+    .describe(
+      "Output format(s). One or more (comma-separated) of: ts|zod, json, py|pydantic, both (zod+json), all (zod+json+pydantic). Default: zod."
+    ),
+  outputDir: z
+    .string()
+    .optional()
+    .describe(
+      "Output directory. Relative paths resolve from the current working dir. Default: the config's schemaConfig.outputDirectory, else schemas/."
+    ),
+  databaseId: z
+    .string()
+    .optional()
+    .describe(
+      "Limit regeneration to a single database. Default: regenerate for every database/collection in the loaded config."
+    ),
+});
+
+/**
  * Schema for generate_constants input
  */
 const GenerateConstantsSchema = z.object({
@@ -226,6 +250,43 @@ async function handleGenerateConstants(
   };
 }
 
+/**
+ * Regenerate schema files from the loaded config in one call. Convenience
+ * over the per-format generate_* tools: picks the format(s) and output dir,
+ * and (by default) covers every database in the config rather than one.
+ */
+async function handleRegenerateSchema(
+  input: unknown,
+  context: ToolContext
+): Promise<{ success: boolean; message: string; format: string; outputDir: string; scope: string }> {
+  const { format, outputDir, databaseId } = RegenerateSchemaSchema.parse(input);
+
+  const { config, appwriteFolderPath } = await getConfigAndPath(context);
+  const targetConfig = databaseId ? filterConfigByDatabase(config, databaseId) : config;
+
+  const resolvedFormat = format && format.trim() ? format.trim() : 'zod';
+
+  const generator = new SchemaGenerator(targetConfig, appwriteFolderPath);
+  await generator.generateSchemas({
+    format: resolvedFormat,
+    verbose: true,
+    outputDir,
+  });
+
+  const resolvedOutputDir =
+    outputDir ||
+    (config as any).schemaConfig?.outputDirectory ||
+    path.join(appwriteFolderPath, 'schemas');
+
+  return {
+    success: true,
+    message: `Schemas regenerated (format: ${resolvedFormat}) for ${databaseId ? `database '${databaseId}'` : 'all databases'}.`,
+    format: resolvedFormat,
+    outputDir: resolvedOutputDir,
+    scope: databaseId ?? 'all-databases',
+  };
+}
+
 // ──────────────────────────────────────────────────
 // TOOL GROUP DEFINITION
 // ──────────────────────────────────────────────────
@@ -264,6 +325,13 @@ export const schemasToolGroup: ToolGroupDefinition = {
       description: 'Generate ID constants for databases, collections, buckets, and functions in multiple programming languages. Prevents hardcoding IDs in your codebase.',
       inputSchema: GenerateConstantsSchema,
       handler: handleGenerateConstants,
+      requiresAuth: false,
+    },
+    {
+      name: 'regenerate_schema',
+      description: 'Regenerate schema files from the loaded config in one call. Pick format (ts/zod, json, py/pydantic, both, all) and output directory; covers all databases by default (or pass databaseId to scope to one). Idempotent — overwrites existing schema files.',
+      inputSchema: RegenerateSchemaSchema,
+      handler: handleRegenerateSchema,
       requiresAuth: false,
     },
   ],
