@@ -82,18 +82,34 @@ function resolveFunctionSourceDirectory(
   fn: AppwriteFunction,
   yamlBaseDir: string,
   appwriteFolderPath: string | undefined,
-  cwd: string
+  cwd: string,
+  cliFunctionPath?: string
 ): string | null {
   const nameLower = fn.name.toLowerCase().replace(/\s+/g, "-");
 
   const candidates: string[] = [];
 
-  if (fn.dirPath) {
-    const expanded = expandTilde(fn.dirPath);
-    candidates.push(
-      isAbsolute(expanded) ? expanded : resolvePath(yamlBaseDir, expanded)
-    );
-  }
+  // Push every sensible anchoring for a user-supplied source string. Absolute
+  // strings push themselves only; relative strings are tried against cwd,
+  // yamlBaseDir, and the appwrite sidecar folder so a missing anchor doesn't
+  // strand the lookup.
+  const pushAnchored = (s: string) => {
+    const expanded = expandTilde(s);
+    if (isAbsolute(expanded)) {
+      candidates.push(expanded);
+      return;
+    }
+    candidates.push(resolvePath(cwd, expanded));
+    candidates.push(resolvePath(yamlBaseDir, expanded));
+    if (appwriteFolderPath) {
+      candidates.push(resolvePath(appwriteFolderPath, expanded));
+    }
+  };
+
+  // CLI override wins over the config-declared dirPath when both are set.
+  if (cliFunctionPath) pushAnchored(cliFunctionPath);
+  if (fn.dirPath) pushAnchored(fn.dirPath);
+
   if (appwriteFolderPath) {
     candidates.push(join(appwriteFolderPath, "functions", nameLower));
     candidates.push(join(appwriteFolderPath, "functions", fn.name));
@@ -154,7 +170,10 @@ function applyOverrides(
   overrides: DeployFunctionFieldOverrides
 ): AppwriteFunction {
   const next: AppwriteFunction = { ...base };
-  if (overrides.path !== undefined) next.dirPath = expandTilde(overrides.path);
+  // overrides.path is intentionally NOT merged into next.dirPath here.
+  // It's passed separately to resolveFunctionSourceDirectory so a relative
+  // CLI --functionPath is anchored against cwd first (and other anchors as
+  // fallbacks), independent of how a config-declared dirPath resolves.
   if (overrides.name !== undefined) next.name = overrides.name;
   if (overrides.runtime !== undefined) next.runtime = overrides.runtime as any;
   if (overrides.entrypoint !== undefined) next.entrypoint = overrides.entrypoint;
@@ -308,7 +327,8 @@ export async function runDeployFunctionsFlow(
       fn,
       yamlBaseDir,
       appwriteFolderPath,
-      cwd
+      cwd,
+      opts.overrides?.path
     );
     if (!dir) {
       MessageFormatter.warning(

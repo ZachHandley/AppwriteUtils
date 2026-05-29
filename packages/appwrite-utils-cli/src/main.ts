@@ -624,7 +624,7 @@ const argv = yargs(hideBin(process.argv))
     alias: ["function-path", "fnPath"],
     type: "string",
     description:
-      "Override source directory for the resolved function. With --functionId and no .fnconfig.yaml entry, the function is fetched from the server and deployed from this path; if the server doesn't have that $id, the deploy errors with 'Function not found'.",
+      "Source directory for the resolved function. Relative paths are searched against cwd, the loaded config's directory, and the appwrite sidecar folder; first existing match wins. With --functionId and no .fnconfig.yaml entry, the function is fetched from the server and deployed from this path; if the server doesn't have that $id, the deploy errors with 'Function not found'.",
   })
   .option("functionName", {
     alias: ["function-name"],
