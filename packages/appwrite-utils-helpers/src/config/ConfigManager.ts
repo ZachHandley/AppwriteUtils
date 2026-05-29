@@ -306,8 +306,13 @@ export class ConfigManager {
       // Session explicitly provided via options
       session = options.sessionOverride;
       logger.debug("Using session override from options", { prefix: "ConfigManager" });
-    } else if (options.useSession === true) {
-      // When session is explicitly requested, only accept a verified working session
+    } else {
+      // Probe prefs.json for a working session against this endpoint+project.
+      // Same call whether `useSession` was explicitly requested or not — we no
+      // longer write the resolved prefs key back to the YAML as a cache hint,
+      // so the only difference between modes used to be the cache-write path.
+      // Cross-run caching now lives in ~/.appwrite/projects.json (managed by
+      // the MCP's ProjectRegistry), not in user-checked-in config files.
       const workingSessionResult = await this.sessionService.findWorkingSession(
         config.appwriteEndpoint,
         config.appwriteProject
@@ -321,111 +326,6 @@ export class ConfigManager {
           `Found and tested working session from project ${workingSessionResult.prefsKey}`,
           { prefix: "ConfigManager", email: workingSessionResult.session.email }
         );
-
-        // Cache the working session key back to config file
-        config.sessionProjectId = workingSessionResult.prefsKey;
-
-        // Write the updated config back to file to cache the session key
-        const { writeYamlConfig } = await import('./yamlConfig.js');
-        try {
-          await writeYamlConfig(configPath, config);
-          logger.debug(`Cached session key ${workingSessionResult.prefsKey} to config file`, {
-            prefix: "ConfigManager"
-          });
-        } catch (error) {
-          logger.warn("Failed to cache session key to config file", {
-            prefix: "ConfigManager",
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      }
-    } else {
-      // First, try using cached sessionProjectId if available
-      if (config.sessionProjectId) {
-        logger.debug(`Attempting to use cached session key: ${config.sessionProjectId}`, {
-          prefix: "ConfigManager"
-        });
-
-        const prefs = await this.sessionService.loadSessionPrefs();
-        if (prefs && prefs[config.sessionProjectId]) {
-          const cachedSessionData = prefs[config.sessionProjectId];
-
-          // Verify the cached session still works
-          const sessionInfo: SessionAuthInfo = {
-            endpoint: cachedSessionData.endpoint,
-            projectId: config.appwriteProject,
-            cookie: cachedSessionData.cookie,
-            email: cachedSessionData.email,
-            expiresAt: cachedSessionData.expiresAt
-          };
-
-          const isValid = this.sessionService.isValidSession(sessionInfo);
-          const isWorking = isValid
-            ? await this.sessionService.isSessionWorking(
-                config.appwriteEndpoint,
-                config.appwriteProject,
-                cachedSessionData.cookie
-              )
-            : false;
-
-          if (isWorking) {
-            session = sessionInfo;
-            sessionPrefsKey = config.sessionProjectId;
-            logger.info(`Using cached session key: ${config.sessionProjectId}`, {
-              prefix: "ConfigManager",
-              email: cachedSessionData.email
-            });
-          } else {
-            logger.debug("Cached session is no longer valid, will search for new session", {
-              prefix: "ConfigManager"
-            });
-          }
-        } else {
-          logger.debug("Cached session key not found in prefs.json, will search for new session", {
-            prefix: "ConfigManager"
-          });
-        }
-      }
-
-      // If no cached session or it doesn't work, test all available sessions for this endpoint
-      if (!session) {
-        logger.debug("No direct session match, testing available sessions for endpoint", {
-          prefix: "ConfigManager",
-          endpoint: config.appwriteEndpoint,
-          projectId: config.appwriteProject
-        });
-
-        const workingSessionResult = await this.sessionService.findWorkingSession(
-          config.appwriteEndpoint,
-          config.appwriteProject
-        );
-
-        if (workingSessionResult) {
-          session = workingSessionResult.session;
-          sessionPrefsKey = workingSessionResult.prefsKey;
-
-          logger.info(
-            `Found and tested working session from project ${workingSessionResult.prefsKey}`,
-            { prefix: "ConfigManager", email: workingSessionResult.session.email }
-          );
-
-          // Cache the working session key back to config file
-          config.sessionProjectId = workingSessionResult.prefsKey;
-
-          // Write the updated config back to file to cache the session key
-          const { writeYamlConfig } = await import('./yamlConfig.js');
-          try {
-            await writeYamlConfig(configPath, config);
-            logger.debug(`Cached session key ${workingSessionResult.prefsKey} to config file`, {
-              prefix: "ConfigManager"
-            });
-          } catch (error) {
-            logger.warn("Failed to cache session key to config file", {
-              prefix: "ConfigManager",
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
       }
     }
 

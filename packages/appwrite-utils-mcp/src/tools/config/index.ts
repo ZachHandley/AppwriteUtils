@@ -20,9 +20,21 @@ const ValidateConfigInputSchema = z.object({
 });
 
 /**
- * Input schema for get_auth_status tool (no parameters required)
+ * Input schema for get_auth_status tool.
+ *
+ * Default output is a slim "what is the MCP using right now" view. Pass
+ * `includeDiagnostics: true` to reattach the raw resolver state blocks
+ * (serverDefaults, cwdProject, sessionOverride) under a `diagnostics` key.
  */
-const GetAuthStatusInputSchema = z.object({});
+const GetAuthStatusInputSchema = z.object({
+  includeDiagnostics: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "Set to true to reattach the raw resolver state (serverDefaults, cwdProject, sessionOverride, effectiveConfigDir) under a `diagnostics` field. Default false — the slim default view avoids the four overlapping projectId/endpoint views that previously made the output read like two projects were in play."
+    ),
+});
 
 /**
  * Get current MCP server configuration and auth status
@@ -216,38 +228,22 @@ async function validateConfig(
 }
 
 /**
- * Get current authentication status
+ * Get current authentication status.
+ *
+ * The default response is the slim "what is the MCP using right now" view:
+ *  - one projectId, one endpoint, one source
+ *  - projectDir + configSource pulled from the override (or the cwd config)
+ *  - warnings only when the resolver flagged drift between sources
+ *
+ * Pass `includeDiagnostics: true` to reattach the raw resolver state under
+ * a single `diagnostics` field — useful when debugging why a particular
+ * tier won (or when reproducing a config issue).
  */
 async function getAuthStatus(
   input: unknown,
   context: ToolContext
 ): Promise<unknown> {
-  GetAuthStatusInputSchema.parse(input);
-  const serverDefaults = context.authResolver.getServerDefaults();
-
-  // CWD project + override state for visibility.
-  const cwdProjectRaw = await context.authResolver.getProjectConfig();
-  const cwdProject = cwdProjectRaw
-    ? {
-        source: cwdProjectRaw.source,
-        format: cwdProjectRaw.format,
-        projectId: cwdProjectRaw.projectId,
-        endpoint: cwdProjectRaw.endpoint || null,
-        hasInlineApiKey: !!cwdProjectRaw.apiKey,
-        hasInlineCookie: !!cwdProjectRaw.sessionCookie,
-      }
-    : null;
-
-  const overrideRaw = context.authResolver.getOverride();
-  const sessionOverride = overrideRaw
-    ? {
-        projectId: overrideRaw.projectId,
-        endpoint: overrideRaw.endpoint || null,
-        projectDir: overrideRaw.projectDir || null,
-        hasApiKey: !!overrideRaw.apiKey,
-        hasCookie: !!overrideRaw.sessionCookie,
-      }
-    : null;
+  const parsed = GetAuthStatusInputSchema.parse(input);
 
   // Truth: what would the resolver actually pick right now?
   let authenticated = false;
@@ -268,22 +264,74 @@ async function getAuthStatus(
     resolveError = err instanceof Error ? err.message : String(err);
   }
 
-  return {
+  // projectDir + configSource come from either the override (if a project
+  // was selected) or the cwd config (otherwise). Single source of truth in
+  // the slim view — no overlapping projectId/endpoint blocks.
+  const override = context.authResolver.getOverride();
+  const cwdProjectRaw = await context.authResolver.getProjectConfig();
+  const projectDir = override?.projectDir ?? null;
+  const configSource = cwdProjectRaw?.source ?? null;
+
+  // Surface a warning when the override carries a different projectId from
+  // the cwd config — that's the exact "two project IDs" confusion the slim
+  // view is meant to clear up. Only fires when both views actually disagree.
+  const warnings: string[] = [];
+  if (override && cwdProjectRaw && override.projectId !== cwdProjectRaw.projectId) {
+    warnings.push(
+      `Override projectId (${override.projectId}) differs from cwd config projectId (${cwdProjectRaw.projectId}). The override wins; clear it with clear_appwrite_project to fall back to the cwd config.`
+    );
+  }
+
+  const base = {
     authenticated,
     authMethod,
     endpoint,
     projectId,
+    projectDir,
+    configSource,
     source,
+    warnings,
     resolveError,
-    serverDefaults: {
-      hasEndpoint: !!serverDefaults.endpoint,
-      hasProjectId: !!serverDefaults.projectId,
-      hasApiKey: !!serverDefaults.apiKey,
-      configDir: serverDefaults.configDir || null,
+  };
+
+  if (!parsed.includeDiagnostics) {
+    return base;
+  }
+
+  // Diagnostics block — the dropped overlapping views, namespaced so it's
+  // clearly debug-only.
+  const serverDefaults = context.authResolver.getServerDefaults();
+  return {
+    ...base,
+    diagnostics: {
+      serverDefaults: {
+        hasEndpoint: !!serverDefaults.endpoint,
+        hasProjectId: !!serverDefaults.projectId,
+        hasApiKey: !!serverDefaults.apiKey,
+        configDir: serverDefaults.configDir || null,
+      },
+      effectiveConfigDir: context.authResolver.getEffectiveConfigDir(),
+      cwdProject: cwdProjectRaw
+        ? {
+            source: cwdProjectRaw.source,
+            format: cwdProjectRaw.format,
+            projectId: cwdProjectRaw.projectId,
+            endpoint: cwdProjectRaw.endpoint || null,
+            hasInlineApiKey: !!cwdProjectRaw.apiKey,
+            hasInlineCookie: !!cwdProjectRaw.sessionCookie,
+          }
+        : null,
+      sessionOverride: override
+        ? {
+            projectId: override.projectId,
+            endpoint: override.endpoint || null,
+            projectDir: override.projectDir || null,
+            prefsKey: override.prefsKey || null,
+            hasApiKey: !!override.apiKey,
+            hasCookie: !!override.sessionCookie,
+          }
+        : null,
     },
-    effectiveConfigDir: context.authResolver.getEffectiveConfigDir(),
-    cwdProject,
-    sessionOverride,
   };
 }
 

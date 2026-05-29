@@ -30,6 +30,14 @@ import { randomBytes } from "node:crypto";
 export interface ProjectRegistryEntry {
   projectDir: string;
   endpoint?: string;
+  /**
+   * Key into `~/.appwrite/prefs.json` whose cookie last passed a live probe
+   * for this project (via `SessionAuthService.findWorkingSession`). Used as a
+   * cache hint on subsequent selections so the resolver can skip re-probing
+   * every cookie. Stale entries are detected at use time and quietly
+   * superseded — losing freshness here is never fatal.
+   */
+  prefsKey?: string;
   lastSelectedAt: string;
 }
 
@@ -111,6 +119,7 @@ export class ProjectRegistry {
     const next: ProjectRegistryEntry = {
       projectDir: entry.projectDir,
       endpoint: entry.endpoint,
+      prefsKey: entry.prefsKey,
       lastSelectedAt: entry.lastSelectedAt ?? new Date().toISOString(),
     };
     snapshot[projectId] = next;
@@ -180,6 +189,7 @@ function normalize(parsed: unknown): ProjectRegistrySnapshot {
     const entry = raw as {
       projectDir?: unknown;
       endpoint?: unknown;
+      prefsKey?: unknown;
       lastSelectedAt?: unknown;
     };
     if (typeof entry.projectDir !== "string" || !entry.projectDir) continue;
@@ -187,6 +197,8 @@ function normalize(parsed: unknown): ProjectRegistrySnapshot {
       projectDir: entry.projectDir,
       endpoint:
         typeof entry.endpoint === "string" && entry.endpoint ? entry.endpoint : undefined,
+      prefsKey:
+        typeof entry.prefsKey === "string" && entry.prefsKey ? entry.prefsKey : undefined,
       lastSelectedAt:
         typeof entry.lastSelectedAt === "string" && entry.lastSelectedAt
           ? entry.lastSelectedAt

@@ -19,7 +19,6 @@ const YamlConfigSchema = z.object({
       email: z.string().optional(),
       expiresAt: z.string().optional(),
     }).optional(),
-    sessionProjectId: z.string().optional(),
   }),
   logging: z
     .object({
@@ -199,7 +198,6 @@ export const convertYamlToAppwriteConfig = (yamlConfig: YamlConfig): AppwriteCon
     sessionCookie: yamlConfig.appwrite.sessionCookie,
     authMethod: yamlConfig.appwrite.authMethod || "auto",
     sessionMetadata: yamlConfig.appwrite.sessionMetadata,
-    sessionProjectId: yamlConfig.appwrite.sessionProjectId,
     apiMode: "auto", // Default to auto-detect for dual API support
     appwriteClient: null,
     logging: {
@@ -567,7 +565,6 @@ export const writeYamlConfig = async (configPath: string, config: AppwriteConfig
         sessionCookie: config.sessionCookie,
         authMethod: config.authMethod || "auto",
         sessionMetadata: config.sessionMetadata,
-        sessionProjectId: config.sessionProjectId,
       },
       logging: {
         enabled: config.logging?.enabled || false,

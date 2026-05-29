@@ -308,6 +308,7 @@ async function listAppwriteProjects(input: unknown, context: ToolContext): Promi
       projectId: entry.projectId,
       projectDir: entry.projectDir,
       endpoint: entry.endpoint || null,
+      prefsKey: entry.prefsKey || null,
       lastSelectedAt: entry.lastSelectedAt,
     })),
     registryPath: context.projectRegistry?.getFilePath() ?? null,
@@ -341,6 +342,136 @@ async function resolveProjectDirInput(input: string): Promise<string> {
   return abs;
 }
 
+type AuthPinSource = "caller-args" | "yaml-inline" | "prefs-cache" | "prefs-probe" | "none";
+type AuthPinMethod = "apikey" | "session" | "none";
+
+interface ResolvedAuthPin {
+  apiKey?: string;
+  sessionCookie?: string;
+  endpoint?: string;
+  prefsKey?: string;
+  method: AuthPinMethod;
+  source: AuthPinSource;
+}
+
+/**
+ * Resolve which credentials should be pinned onto the AuthResolver override
+ * for this select call. Priority:
+ *
+ *  1. Caller-supplied apiKey / sessionCookie (explicit wins).
+ *  2. YAML-inline apiKey / sessionCookie discovered in the project config
+ *     (real Appwrite keys only — placeholders like SET_IF_NEEDED are filtered
+ *     by ProjectConfigResolver.isRealApiKey before they ever reach us).
+ *  3. Cached prefsKey from ~/.appwrite/projects.json — look up the cookie in
+ *     prefs.json and live-probe it; use only if the probe passes.
+ *  4. findWorkingSession(endpoint, projectId) — probe every prefs.json cookie
+ *     against the target endpoint, return the first that works.
+ *  5. None — selection still succeeds with identity-only override, response
+ *     surfaces a warning so the caller knows auth isn't bound.
+ *
+ * Returns the resolved auth + source tag for diagnostics.
+ */
+async function resolveSelectAuth(
+  context: ToolContext,
+  effectiveEndpoint: string | undefined,
+  projectId: string,
+  callerApiKey: string | undefined,
+  callerSessionCookie: string | undefined,
+  yamlInlineApiKey: string | undefined,
+  yamlInlineSessionCookie: string | undefined,
+  cachedPrefsKey: string | undefined
+): Promise<ResolvedAuthPin> {
+  // Tier 1 — caller-supplied wins.
+  if (callerApiKey) {
+    return {
+      apiKey: callerApiKey,
+      endpoint: effectiveEndpoint,
+      method: "apikey",
+      source: "caller-args",
+    };
+  }
+  if (callerSessionCookie) {
+    return {
+      sessionCookie: callerSessionCookie,
+      endpoint: effectiveEndpoint,
+      method: "session",
+      source: "caller-args",
+    };
+  }
+
+  // Tier 2 — YAML inline.
+  if (yamlInlineApiKey) {
+    return {
+      apiKey: yamlInlineApiKey,
+      endpoint: effectiveEndpoint,
+      method: "apikey",
+      source: "yaml-inline",
+    };
+  }
+  if (yamlInlineSessionCookie) {
+    return {
+      sessionCookie: yamlInlineSessionCookie,
+      endpoint: effectiveEndpoint,
+      method: "session",
+      source: "yaml-inline",
+    };
+  }
+
+  // Tier 3/4 — prefs probe. Both need an endpoint to probe against.
+  if (!effectiveEndpoint) {
+    return { method: "none", source: "none" };
+  }
+
+  const sessionService = context.authResolver.getSessionService();
+
+  // Tier 3 — cached prefsKey from the registry. Validate it still works.
+  if (cachedPrefsKey) {
+    try {
+      const prefs = await sessionService.loadSessionPrefs();
+      const cached = prefs?.[cachedPrefsKey];
+      const cookie = (cached && typeof cached === "object" && "cookie" in cached)
+        ? (cached as { cookie?: unknown }).cookie
+        : undefined;
+      if (typeof cookie === "string" && cookie) {
+        const works = await sessionService.isSessionWorking(
+          effectiveEndpoint,
+          projectId,
+          cookie
+        );
+        if (works) {
+          return {
+            sessionCookie: cookie,
+            endpoint: effectiveEndpoint,
+            prefsKey: cachedPrefsKey,
+            method: "session",
+            source: "prefs-cache",
+          };
+        }
+      }
+    } catch {
+      /* fall through to fresh probe */
+    }
+  }
+
+  // Tier 4 — fresh probe across all prefs entries.
+  try {
+    const hit = await sessionService.findWorkingSession(effectiveEndpoint, projectId);
+    if (hit) {
+      return {
+        sessionCookie: hit.session.cookie,
+        endpoint: hit.session.endpoint,
+        prefsKey: hit.prefsKey,
+        method: "session",
+        source: "prefs-probe",
+      };
+    }
+  } catch {
+    /* probe failure is non-fatal — treat as "none" */
+  }
+
+  return { method: "none", source: "none" };
+}
+
 async function selectAppwriteProject(input: unknown, context: ToolContext): Promise<unknown> {
   const parsed = SelectAppwriteProjectInputSchema.parse(input);
 
@@ -348,6 +479,8 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
   let resolvedProjectDir: string | undefined;
   let discoveredProjectId: string | undefined;
   let discoveredEndpoint: string | undefined;
+  let discoveredInlineApiKey: string | undefined;
+  let discoveredInlineSessionCookie: string | undefined;
   let configSource: string | null = null;
   if (parsed.projectDir) {
     resolvedProjectDir = await resolveProjectDirInput(parsed.projectDir);
@@ -355,6 +488,8 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
     if (discovered) {
       discoveredProjectId = discovered.projectId;
       discoveredEndpoint = discovered.endpoint;
+      discoveredInlineApiKey = discovered.apiKey;
+      discoveredInlineSessionCookie = discovered.sessionCookie;
       configSource = discovered.source;
     } else if (!parsed.projectId) {
       throw new Error(
@@ -365,6 +500,7 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
   }
 
   // 2) If only projectId was given, try to rehydrate the dir from the registry.
+  let cachedPrefsKey: string | undefined;
   if (!resolvedProjectDir && parsed.projectId && context.projectRegistry) {
     const cached = await context.projectRegistry.get(parsed.projectId);
     if (cached) {
@@ -375,11 +511,17 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
         if (info.isDirectory()) {
           resolvedProjectDir = cached.projectDir;
           discoveredEndpoint = discoveredEndpoint ?? cached.endpoint;
+          cachedPrefsKey = cached.prefsKey;
         }
       } catch {
         /* stale entry — fall through with no projectDir */
       }
     }
+  } else if (parsed.projectId && context.projectRegistry) {
+    // Even when projectDir was discovered, opportunistically pick up a
+    // previously-cached prefsKey so the auth tier can short-circuit.
+    const cached = await context.projectRegistry.get(parsed.projectId);
+    if (cached?.prefsKey) cachedPrefsKey = cached.prefsKey;
   }
 
   // Caller-supplied projectId wins over discovered. Otherwise use the
@@ -392,12 +534,41 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
     );
   }
 
+  // Pull a cached prefsKey from the registry when projectId came back via dir
+  // discovery (i.e. we didn't go through the projectId-only rehydrate path
+  // above).
+  if (
+    !cachedPrefsKey &&
+    discoveredProjectId &&
+    !parsed.projectId &&
+    context.projectRegistry
+  ) {
+    const cached = await context.projectRegistry.get(discoveredProjectId);
+    if (cached?.prefsKey) cachedPrefsKey = cached.prefsKey;
+  }
+
+  const effectiveEndpoint = parsed.endpoint ?? discoveredEndpoint;
+
+  // Eager auth probe — see the doc comment on resolveSelectAuth for the
+  // precedence chain.
+  const pin = await resolveSelectAuth(
+    context,
+    effectiveEndpoint,
+    finalProjectId,
+    parsed.apiKey,
+    parsed.sessionCookie,
+    discoveredInlineApiKey,
+    discoveredInlineSessionCookie,
+    cachedPrefsKey
+  );
+
   context.authResolver.setOverride({
     projectId: finalProjectId,
-    endpoint: parsed.endpoint ?? discoveredEndpoint,
-    apiKey: parsed.apiKey,
-    sessionCookie: parsed.sessionCookie,
+    endpoint: pin.endpoint ?? effectiveEndpoint,
+    apiKey: pin.apiKey,
+    sessionCookie: pin.sessionCookie,
     projectDir: resolvedProjectDir,
+    prefsKey: pin.prefsKey,
   });
 
   // Invalidate any cached clients keyed on the previous credentials so the
@@ -405,19 +576,36 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
   context.clientRegistry.invalidate();
 
   // Persist the mapping so a future `select_appwrite_project({projectId})`
-  // (possibly across an MCP restart) can rehydrate the dir automatically.
+  // (possibly across an MCP restart) can rehydrate the dir + prefsKey.
   let registryWritten = false;
   if (resolvedProjectDir && context.projectRegistry) {
     try {
       await context.projectRegistry.set(finalProjectId, {
         projectDir: resolvedProjectDir,
-        endpoint: parsed.endpoint ?? discoveredEndpoint,
+        endpoint: pin.endpoint ?? effectiveEndpoint,
+        prefsKey: pin.prefsKey,
       });
       registryWritten = true;
     } catch (err) {
       console.error(
         `[appwrite-mcp] failed to persist project registry entry: ${err instanceof Error ? err.message : String(err)}`
       );
+    }
+  }
+
+  // Build the warning if no auth was pinned — surfaces the exact diagnostic
+  // the caller would otherwise see four tool calls later.
+  let warning: string | null = null;
+  if (pin.method === "none") {
+    if (!effectiveEndpoint) {
+      warning =
+        `No endpoint resolved for project ${finalProjectId}. The config file at the bound projectDir had no endpoint, and none was passed explicitly. ` +
+        `Re-call select_appwrite_project with an explicit endpoint, or set one in the project's appwriteConfig.yaml.`;
+    } else {
+      warning =
+        `No working credentials found for projectId=${finalProjectId} on endpoint=${effectiveEndpoint}. ` +
+        `Probed ~/.appwrite/prefs.json (no cookie passed live probe) and the discovered config (no inline apiKey/sessionCookie). ` +
+        `Run \`appwrite login\` (or pass apiKey / sessionCookie explicitly) and re-select.`;
     }
   }
 
@@ -430,9 +618,15 @@ async function selectAppwriteProject(input: unknown, context: ToolContext): Prom
     configSource,
     hasApiKey: !!override.apiKey,
     hasSessionCookie: !!override.sessionCookie,
+    authPinned: {
+      method: pin.method,
+      source: pin.source,
+      prefsKey: pin.prefsKey ?? null,
+    },
+    warning,
     registryWritten,
     registryPath: context.projectRegistry?.getFilePath() ?? null,
-    note: "Auth override (endpoint + creds) is in-memory only. The projectId -> projectDir mapping is persisted to ~/.appwrite/projects.json so future selections by projectId can rehydrate the dir. Use clear_appwrite_project to drop the in-memory override.",
+    note: "Auth override (endpoint + creds) is in-memory only. The projectId -> projectDir -> prefsKey mapping is persisted to ~/.appwrite/projects.json. Use clear_appwrite_project to drop the in-memory override.",
   };
 }
 

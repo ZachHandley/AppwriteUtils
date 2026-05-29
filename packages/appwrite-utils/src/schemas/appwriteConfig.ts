@@ -72,15 +72,6 @@ export const AppwriteConfigSchema = z.object({
     expiresAt: z.string().optional().describe("Session expiration timestamp (ISO string)"),
   }).optional().describe("Metadata about the current session"),
 
-  /**
-   * Project ID key in ~/.appwrite/prefs.json for session lookup
-   *
-   * When a user's config project ID doesn't exist in prefs.json but there are
-   * sessions for other projects on the same endpoint, we test those sessions
-   * and cache the working one's project ID key here. On subsequent runs, we use
-   * this saved key to look up the session directly from prefs.json.
-   */
-  sessionProjectId: z.string().optional().describe("Project ID key in prefs.json for session lookup"),
   logging: z
     .object({
       enabled: z.boolean().default(false).describe("Enable file logging"),

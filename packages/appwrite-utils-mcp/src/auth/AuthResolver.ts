@@ -98,6 +98,13 @@ export interface ProjectOverride {
    * trees without restarting from a different working directory.
    */
   projectDir?: string;
+  /**
+   * Cache hint: which key in `~/.appwrite/prefs.json` last passed a live
+   * probe for this project (via `select_appwrite_project`'s eager probe).
+   * Surfaced for diagnostics; the override's `sessionCookie` is the actual
+   * auth payload.
+   */
+  prefsKey?: string;
 }
 
 /**
