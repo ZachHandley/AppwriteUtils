@@ -1,0 +1,49 @@
+name: "Appwrite Utils — Run appwrite-migrate"
+description: "Run appwrite-utils-cli (appwrite-migrate) with arbitrary arguments, installed through bunx with no pnpm build prompt. Escape hatch for sync/import/generate/backup/regen and any other command."
+author: "Zach Handley"
+branding:
+  icon: "terminal"
+  color: "purple"
+
+inputs:
+  args:
+    description: "Raw arguments passed to appwrite-migrate (e.g. '--sync' or '--import'). Supports single/double quotes; no shell evaluation."
+    required: true
+  endpoint:
+    description: "Appwrite endpoint (e.g. https://cloud.appwrite.io/v1)."
+    required: false
+    default: ""
+  project-id:
+    description: "Appwrite project ID."
+    required: false
+    default: ""
+  api-key:
+    description: "Appwrite API key. Pass via secrets; it is forwarded to the CLI through the environment, never on the command line."
+    required: false
+    default: ""
+  working-directory:
+    description: "Directory to run the CLI from."
+    required: false
+    default: "."
+  cli-version:
+    description: "Version of appwrite-utils-cli to run via bunx (npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Run appwrite-migrate
+      shell: bash
+      run: bun "${{ github.action_path }}/../_shared/run.ts"
+      env:
+        AWU_COMMAND: "raw"
+        AWU_ARGS: ${{ inputs.args }}
+        AWU_CLI_VERSION: ${{ inputs.cli-version }}
+        AWU_WORKING_DIR: ${{ inputs.working-directory }}
+        AWU_ENDPOINT: ${{ inputs.endpoint }}
+        AWU_PROJECT_ID: ${{ inputs.project-id }}
+        AWU_API_KEY: ${{ inputs.api-key }}

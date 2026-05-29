@@ -1,0 +1,47 @@
+name: "Appwrite Utils — Push Schema"
+description: "Deploy your local configuration (tables, columns, indexes) to Appwrite via appwrite-utils-cli (appwrite-migrate --push), installed through bunx with no pnpm build prompt."
+author: "Zach Handley"
+branding:
+  icon: "database"
+  color: "purple"
+
+inputs:
+  endpoint:
+    description: "Appwrite endpoint (e.g. https://cloud.appwrite.io/v1)."
+    required: true
+  project-id:
+    description: "Appwrite project ID."
+    required: true
+  api-key:
+    description: "Appwrite API key. Pass via secrets; it is forwarded to the CLI through the environment, never on the command line."
+    required: true
+  config:
+    description: "Path to an Appwrite configuration file (appwriteConfig.ts)."
+    required: false
+    default: ""
+  working-directory:
+    description: "Directory to run the CLI from (where the Appwrite config lives)."
+    required: false
+    default: "."
+  cli-version:
+    description: "Version of appwrite-utils-cli to run via bunx (npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Push schema
+      shell: bash
+      run: bun "${{ github.action_path }}/../_shared/run.ts"
+      env:
+        AWU_COMMAND: "push"
+        AWU_CLI_VERSION: ${{ inputs.cli-version }}
+        AWU_WORKING_DIR: ${{ inputs.working-directory }}
+        AWU_ENDPOINT: ${{ inputs.endpoint }}
+        AWU_PROJECT_ID: ${{ inputs.project-id }}
+        AWU_API_KEY: ${{ inputs.api-key }}
+        AWU_CONFIG: ${{ inputs.config }}

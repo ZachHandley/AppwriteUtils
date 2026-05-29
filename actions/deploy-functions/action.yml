@@ -1,0 +1,118 @@
+name: "Appwrite Utils — Deploy Functions"
+description: "Deploy one or more Appwrite Functions via appwrite-utils-cli (appwrite-migrate --deployFunctions), installed through bunx with no pnpm build prompt."
+author: "Zach Handley"
+branding:
+  icon: "upload-cloud"
+  color: "purple"
+
+inputs:
+  endpoint:
+    description: "Appwrite endpoint (e.g. https://cloud.appwrite.io/v1)."
+    required: true
+  project-id:
+    description: "Appwrite project ID."
+    required: true
+  api-key:
+    description: "Appwrite API key. Pass via secrets; it is forwarded to the CLI through the environment, never on the command line."
+    required: true
+  function-ids:
+    description: "Comma-separated function $ids or names to deploy. Omit to deploy every discovered function."
+    required: false
+    default: ""
+  function-path:
+    description: "Override source directory for the resolved function (single-function deploys)."
+    required: false
+    default: ""
+  build-concurrency:
+    description: "Max concurrent build/activate tasks. Uploads always serialize."
+    required: false
+    default: ""
+  config:
+    description: "Path to an Appwrite configuration file (appwriteConfig.ts)."
+    required: false
+    default: ""
+  working-directory:
+    description: "Directory to run the CLI from (where .fnconfig.yaml / config.yaml / function source live)."
+    required: false
+    default: "."
+  cli-version:
+    description: "Version of appwrite-utils-cli to run via bunx (npm dist-tag or exact version)."
+    required: false
+    default: "latest"
+  # --- Single-function overrides (only valid when exactly one function is targeted) ---
+  function-name:
+    description: "Override the function name."
+    required: false
+    default: ""
+  runtime:
+    description: "Override the function runtime (e.g. node-22)."
+    required: false
+    default: ""
+  entrypoint:
+    description: "Override the function entrypoint."
+    required: false
+    default: ""
+  commands:
+    description: "Override the function build commands."
+    required: false
+    default: ""
+  schedule:
+    description: "Override the function schedule (cron)."
+    required: false
+    default: ""
+  timeout:
+    description: "Override the function timeout (seconds)."
+    required: false
+    default: ""
+  scopes:
+    description: "Override the function scopes (comma-separated)."
+    required: false
+    default: ""
+  events:
+    description: "Override the function events (comma-separated)."
+    required: false
+    default: ""
+  execute:
+    description: "Override the function execute roles (comma-separated)."
+    required: false
+    default: ""
+  enabled:
+    description: "Override whether the function is enabled (true/false)."
+    required: false
+    default: ""
+  logging:
+    description: "Override whether function logging is enabled (true/false)."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Deploy functions
+      shell: bash
+      run: bun "${{ github.action_path }}/../_shared/run.ts"
+      env:
+        AWU_COMMAND: "deploy-functions"
+        AWU_CLI_VERSION: ${{ inputs.cli-version }}
+        AWU_WORKING_DIR: ${{ inputs.working-directory }}
+        AWU_ENDPOINT: ${{ inputs.endpoint }}
+        AWU_PROJECT_ID: ${{ inputs.project-id }}
+        AWU_API_KEY: ${{ inputs.api-key }}
+        AWU_FUNCTION_IDS: ${{ inputs.function-ids }}
+        AWU_FUNCTION_PATH: ${{ inputs.function-path }}
+        AWU_BUILD_CONCURRENCY: ${{ inputs.build-concurrency }}
+        AWU_CONFIG: ${{ inputs.config }}
+        AWU_FN_NAME: ${{ inputs.function-name }}
+        AWU_FN_RUNTIME: ${{ inputs.runtime }}
+        AWU_FN_ENTRYPOINT: ${{ inputs.entrypoint }}
+        AWU_FN_COMMANDS: ${{ inputs.commands }}
+        AWU_FN_SCHEDULE: ${{ inputs.schedule }}
+        AWU_FN_TIMEOUT: ${{ inputs.timeout }}
+        AWU_FN_SCOPES: ${{ inputs.scopes }}
+        AWU_FN_EVENTS: ${{ inputs.events }}
+        AWU_FN_EXECUTE: ${{ inputs.execute }}
+        AWU_FN_ENABLED: ${{ inputs.enabled }}
+        AWU_FN_LOGGING: ${{ inputs.logging }}
