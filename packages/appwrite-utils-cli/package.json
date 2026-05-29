@@ -33,8 +33,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --watchAll=false",
-    "postinstall": "echo 'This package is intended for CLI use only and should not be added as a dependency in other projects.'"
+    "test:ci": "jest --ci --coverage --watchAll=false"
   },
   "dependencies": {
     "@types/inquirer": "^9.0.8",
