@@ -51,7 +51,7 @@ const RegenerateSchemaSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Output format(s). One or more (comma-separated) of: ts|zod, json, py|pydantic, both (zod+json), all (zod+json+pydantic). Default: zod."
+      "Output format(s). One or more (comma-separated) of: ts|zod, json, py|pydantic, go|golang, dart, rust|rs, both (zod+json), all (every format). Default: zod."
     ),
   outputDir: z
     .string()

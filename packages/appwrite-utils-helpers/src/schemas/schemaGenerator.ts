@@ -347,8 +347,10 @@ export default appwriteConfig;
     this.relationshipMap = extractTwoWayRelationships(this.config);
   }
 
-  private static parseFormats(format: string | undefined): Set<"zod" | "json" | "pydantic"> {
-    const result = new Set<"zod" | "json" | "pydantic">();
+  private static parseFormats(
+    format: string | undefined
+  ): Set<"zod" | "json" | "pydantic" | "go" | "dart" | "rust"> {
+    const result = new Set<"zod" | "json" | "pydantic" | "go" | "dart" | "rust">();
     const raw = (format ?? "").trim();
     if (!raw) {
       result.add("zod");
@@ -370,6 +372,17 @@ export default appwriteConfig;
         case "pydantic":
           result.add("pydantic");
           break;
+        case "go":
+        case "golang":
+          result.add("go");
+          break;
+        case "dart":
+          result.add("dart");
+          break;
+        case "rust":
+        case "rs":
+          result.add("rust");
+          break;
         case "both":
           result.add("zod");
           result.add("json");
@@ -378,10 +391,13 @@ export default appwriteConfig;
           result.add("zod");
           result.add("json");
           result.add("pydantic");
+          result.add("go");
+          result.add("dart");
+          result.add("rust");
           break;
         default:
           throw new Error(
-            `Unknown schemaFormat token: ${tok}. Expected: ts, zod, json, py, pydantic, both, all`
+            `Unknown schemaFormat token: ${tok}. Expected: ts, zod, json, py, pydantic, go, dart, rust, both, all`
           );
       }
     }
@@ -451,6 +467,27 @@ export default appwriteConfig;
       const mod = await import("./pydanticModelGenerator.js");
       const pgen = new mod.PydanticModelGenerator(this.config, this.appwriteFolderPath);
       pgen.generatePydanticModels({ baseOutputDirectory: schemasPath, verbose });
+    }
+
+    // Generate Go structs (serde-style json tags)
+    if (formats.has("go")) {
+      const mod = await import("./goModelGenerator.js");
+      const ggen = new mod.GoModelGenerator(this.config, this.appwriteFolderPath);
+      ggen.generate({ baseOutputDirectory: schemasPath, verbose });
+    }
+
+    // Generate Dart classes (with fromJson factories)
+    if (formats.has("dart")) {
+      const mod = await import("./dartModelGenerator.js");
+      const dgen = new mod.DartModelGenerator(this.config, this.appwriteFolderPath);
+      dgen.generate({ baseOutputDirectory: schemasPath, verbose });
+    }
+
+    // Generate Rust structs (serde derive)
+    if (formats.has("rust")) {
+      const mod = await import("./rustModelGenerator.js");
+      const rgen = new mod.RustModelGenerator(this.config, this.appwriteFolderPath);
+      rgen.generate({ baseOutputDirectory: schemasPath, verbose });
     }
 
     if (verbose) {
