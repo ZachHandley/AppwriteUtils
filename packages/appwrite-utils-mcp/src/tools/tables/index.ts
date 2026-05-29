@@ -13,7 +13,13 @@
 import { z } from 'zod';
 import { Query } from 'node-appwrite';
 import type { ToolContext, ToolDefinition, ToolGroupDefinition } from '../ToolGroup.js';
-import { ConfigDiscoveryService, ConfigLoaderService, type DatabaseAdapter } from 'appwrite-utils-helpers';
+import {
+  ConfigDiscoveryService,
+  ConfigLoaderService,
+  createOrUpdateCollectionsViaAdapter,
+  clearProcessingState,
+  type DatabaseAdapter,
+} from 'appwrite-utils-helpers';
 import { normalizeQueries } from '../../utils/queryNormalizer.js';
 import { clampQueryLimit } from '../../utils/clampQueryLimit.js';
 import { truncateAndCache } from '../../utils/chunking.js';
@@ -1155,6 +1161,175 @@ const deleteColumnTool: ToolDefinition = {
 };
 
 // ──────────────────────────────────────────────────
+// PUSH LOCAL CONFIG → APPWRITE
+// ──────────────────────────────────────────────────
+
+const pushLocalConfigSchema = z.object({
+  databaseId: z
+    .string()
+    .optional()
+    .describe(
+      'Target a single database for the push. Default: each table is pushed to its own databaseId / databaseIds from the local config.'
+    ),
+  tableId: z
+    .string()
+    .optional()
+    .describe('Limit the push to a single table/collection (matched by $id or name).'),
+  createMissing: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'When true, create tables that do not yet exist in a target database. When false (default), only UPDATE tables that already exist there — never create.'
+    ),
+});
+
+/**
+ * Push the local config (collections/tables + columns + indexes) up to the
+ * Appwrite instance via the shared sync engine (createOrUpdateCollectionsViaAdapter).
+ *
+ * Multi-database semantics:
+ *  - A table with a singular `databaseId` pushes to that database.
+ *  - A table with plural `databaseIds` pushes to EACH of them.
+ *  - With `createMissing: false` (default), a table is pushed to a database
+ *    only if it already exists there; missing ones are reported, not created.
+ *  - With `createMissing: true`, missing tables are created too.
+ *  - An explicit `databaseId` arg overrides per-table targeting.
+ */
+async function handlePushLocalConfig(
+  input: unknown,
+  context: ToolContext
+): Promise<{
+  success: boolean;
+  createMissing: boolean;
+  databases: Array<{ databaseId: string; pushed: string[]; skippedMissing: string[] }>;
+  unassigned: string[];
+}> {
+  const validated = pushLocalConfigSchema.parse(input);
+
+  const adapter = await getAdapter(context);
+  const config = await loadLocalConfig(context);
+  if (!config) {
+    throw new Error(
+      'No local Appwrite config found to push. Run from inside the project tree or select_appwrite_project with a projectDir that contains appwriteConfig.yaml / appwrite.json.'
+    );
+  }
+
+  // Mirror the CLI: let the sync engine know which API surface to target.
+  try {
+    if (!config.apiMode || config.apiMode === 'auto') {
+      config.apiMode = adapter.getApiMode();
+    }
+  } catch {
+    /* getApiMode optional */
+  }
+
+  const entries = [
+    ...(Array.isArray(config.collections) ? config.collections : []),
+    ...(Array.isArray(config.tables) ? config.tables : []),
+  ].filter((e: any) => e && (e.$id || e.name));
+
+  const filtered = validated.tableId
+    ? entries.filter((e: any) => e.$id === validated.tableId || e.name === validated.tableId)
+    : entries;
+  if (validated.tableId && filtered.length === 0) {
+    throw new Error(`Table "${validated.tableId}" not found in local config.`);
+  }
+
+  const configDbIds = (Array.isArray(config.databases) ? config.databases : [])
+    .map((d: any) => d?.$id)
+    .filter((id: unknown): id is string => typeof id === 'string' && !!id);
+
+  // Map databaseId -> entries to push there.
+  const targets = new Map<string, any[]>();
+  const unassigned: string[] = [];
+  for (const e of filtered) {
+    let dbs: string[];
+    if (validated.databaseId) {
+      dbs = [validated.databaseId];
+    } else if (typeof e.databaseId === 'string' && e.databaseId) {
+      dbs = [e.databaseId];
+    } else if (Array.isArray(e.databaseIds) && e.databaseIds.length > 0) {
+      dbs = e.databaseIds.filter((x: any): x is string => typeof x === 'string' && !!x);
+    } else if (configDbIds.length === 1) {
+      dbs = [configDbIds[0]];
+    } else {
+      unassigned.push(e.name ?? e.$id);
+      continue;
+    }
+    for (const db of dbs) {
+      if (!targets.has(db)) targets.set(db, []);
+      targets.get(db)!.push(e);
+    }
+  }
+
+  const databases: Array<{ databaseId: string; pushed: string[]; skippedMissing: string[] }> = [];
+  for (const [dbId, dbEntries] of targets) {
+    let toProcess = dbEntries;
+    let skippedMissing: string[] = [];
+
+    if (!validated.createMissing) {
+      const existsFlags = await Promise.all(
+        dbEntries.map(async (e: any) => {
+          if (e.$id) {
+            try {
+              await adapter.getTable({ databaseId: dbId, tableId: e.$id });
+              return true;
+            } catch {
+              /* not found by id, try name */
+            }
+          }
+          try {
+            const list = await adapter.listTables({
+              databaseId: dbId,
+              queries: [Query.equal('name', e.name)],
+            });
+            const items = (list as any).tables ?? (list as any).collections ?? [];
+            return items.length > 0;
+          } catch {
+            return false;
+          }
+        })
+      );
+      toProcess = dbEntries.filter((_, i) => existsFlags[i]);
+      skippedMissing = dbEntries.filter((_, i) => !existsFlags[i]).map((e: any) => e.name ?? e.$id);
+    }
+
+    if (toProcess.length > 0) {
+      // Reset per-database queue state, same as the CLI's multi-db push.
+      try {
+        clearProcessingState();
+      } catch {
+        /* non-fatal */
+      }
+      await createOrUpdateCollectionsViaAdapter(adapter, dbId, config as any, [], toProcess as any);
+    }
+
+    databases.push({
+      databaseId: dbId,
+      pushed: toProcess.map((e: any) => e.name ?? e.$id),
+      skippedMissing,
+    });
+  }
+
+  return {
+    success: true,
+    createMissing: validated.createMissing,
+    databases,
+    unassigned,
+  };
+}
+
+const pushLocalConfigTool: ToolDefinition = {
+  name: 'push_local_config_to_appwrite',
+  description:
+    'Push the local config (collections/tables, columns, indexes, relationships) up to the Appwrite instance via the shared sync engine. Each table goes to its own databaseId / databaseIds; pass databaseId to target one. By default only UPDATES tables that already exist in a target database (missing ones reported in skippedMissing) — set createMissing:true to also create them. Pass tableId to push a single table.',
+  inputSchema: pushLocalConfigSchema,
+  handler: handlePushLocalConfig,
+  requiresAuth: true,
+};
+
+// ──────────────────────────────────────────────────
 // TOOL GROUP EXPORT
 // ──────────────────────────────────────────────────
 
@@ -1196,5 +1371,7 @@ export const tablesToolGroup: ToolGroupDefinition = {
     createColumnTool,
     updateColumnTool,
     deleteColumnTool,
+    // Config push
+    pushLocalConfigTool,
   ],
 };

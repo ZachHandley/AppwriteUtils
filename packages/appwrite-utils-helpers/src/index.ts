@@ -39,3 +39,13 @@ export * from "./teams/index.js";
 
 // User utilities for managing users, sessions, identities, prefs
 export * from "./users/index.js";
+
+// Database sync engine — create/update collections & tables, columns, indexes,
+// and the operation queue for deferred relationship resolution. Relocated from
+// appwrite-utils-cli so both the CLI and the MCP can drive a config → Appwrite
+// push without either package depending on the other.
+export * from "./collections/methods.js";
+export * from "./collections/columns.js";
+export * from "./collections/tableOperations.js";
+export * from "./tables/indexManager.js";
+export * from "./shared/operationQueue.js";
