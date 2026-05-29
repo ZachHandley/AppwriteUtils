@@ -9,8 +9,12 @@
  */
 
 import { z } from "zod";
+import { isAbsolute, resolve as resolvePath } from "node:path";
+import { stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import type { ToolGroupDefinition, ToolContext } from "../ToolGroup.js";
 import { chunkCache } from "../../state/chunkCache.js";
+import { resolveProjectConfig } from "../../auth/ProjectConfigResolver.js";
 
 const ListToolGroupsInputSchema = z.object({});
 
@@ -36,29 +40,43 @@ const EnableAllToolGroupsInputSchema = z.object({});
 
 const ListAppwriteProjectsInputSchema = z.object({});
 
-const SelectAppwriteProjectInputSchema = z.object({
-  projectId: z
-    .string()
-    .min(1)
-    .describe("Appwrite project ID to pin as the active project for this MCP server."),
-  endpoint: z
-    .string()
-    .url()
-    .optional()
-    .describe(
-      "Optional endpoint URL. If omitted, the resolver tries to derive one from ~/.appwrite/prefs.json (prefs[projectId] direct match, then endpoint scan)."
-    ),
-  apiKey: z
-    .string()
-    .optional()
-    .describe(
-      "Optional API key. If omitted, the resolver tries to find one via prefs.json (endpoint scan)."
-    ),
-  sessionCookie: z
-    .string()
-    .optional()
-    .describe("Optional session cookie. Use instead of apiKey for cookie-based auth."),
-});
+const SelectAppwriteProjectInputSchema = z
+  .object({
+    projectId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Appwrite project ID to pin as the active project for this MCP server. Optional when `projectDir` is provided — the project ID is then auto-discovered from the config file in that directory."
+      ),
+    projectDir: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Absolute path of the project's source directory (the directory containing `appwriteConfig.yaml` / `appwrite.json`). Persisted to `~/.appwrite/projects.json` so future `select_appwrite_project({projectId})` calls can rehydrate it. Supports a leading `~/` shorthand."
+      ),
+    endpoint: z
+      .string()
+      .url()
+      .optional()
+      .describe(
+        "Optional endpoint URL. If omitted, the resolver tries to derive one from `projectDir`'s config file, then from `~/.appwrite/prefs.json` (prefs[projectId] direct match, then endpoint scan)."
+      ),
+    apiKey: z
+      .string()
+      .optional()
+      .describe(
+        "Optional API key. If omitted, the resolver tries to find one via prefs.json (endpoint scan)."
+      ),
+    sessionCookie: z
+      .string()
+      .optional()
+      .describe("Optional session cookie. Use instead of apiKey for cookie-based auth."),
+  })
+  .refine((v) => !!(v.projectId || v.projectDir), {
+    message: "select_appwrite_project requires at least one of `projectId` or `projectDir`.",
+  });
 
 const ClearAppwriteProjectInputSchema = z.object({});
 
@@ -224,7 +242,11 @@ async function listAppwriteProjects(input: unknown, context: ToolContext): Promi
   const sessionService = context.authResolver.getSessionService();
   const projectConfig = await context.authResolver.getProjectConfig();
   const override = context.authResolver.getOverride();
+  const effectiveConfigDir = context.authResolver.getEffectiveConfigDir();
   const prefs = await sessionService.loadSessionPrefs();
+  const registeredProjects = context.projectRegistry
+    ? await context.projectRegistry.list()
+    : [];
 
   // Enumerate prefs.json entries without leaking creds.
   const prefsEntries: Array<{
@@ -262,6 +284,7 @@ async function listAppwriteProjects(input: unknown, context: ToolContext): Promi
   }
 
   return {
+    effectiveConfigDir,
     cwdProject: projectConfig
       ? {
           projectId: projectConfig.projectId,
@@ -276,37 +299,140 @@ async function listAppwriteProjects(input: unknown, context: ToolContext): Promi
       ? {
           projectId: override.projectId,
           endpoint: override.endpoint || null,
+          projectDir: override.projectDir || null,
           hasApiKey: !!override.apiKey,
           hasSessionCookie: !!override.sessionCookie,
         }
       : null,
+    registeredProjects: registeredProjects.map((entry) => ({
+      projectId: entry.projectId,
+      projectDir: entry.projectDir,
+      endpoint: entry.endpoint || null,
+      lastSelectedAt: entry.lastSelectedAt,
+    })),
+    registryPath: context.projectRegistry?.getFilePath() ?? null,
     prefsEntries,
     prefsCount: prefsEntries.length,
   };
 }
 
+/**
+ * Resolve a user-supplied path (possibly relative or `~/...`) to an absolute
+ * directory path. Throws when the path doesn't exist or isn't a directory —
+ * fast-fail at selection time beats silently binding to a non-existent dir
+ * and surfacing the failure five tool calls later.
+ */
+async function resolveProjectDirInput(input: string): Promise<string> {
+  const expanded =
+    input.startsWith("~/") || input === "~"
+      ? input.replace(/^~/, homedir())
+      : input;
+  const abs = isAbsolute(expanded) ? expanded : resolvePath(process.cwd(), expanded);
+  let info: Awaited<ReturnType<typeof stat>>;
+  try {
+    info = await stat(abs);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`projectDir does not exist or is unreadable: ${abs} (${msg})`);
+  }
+  if (!info.isDirectory()) {
+    throw new Error(`projectDir is not a directory: ${abs}`);
+  }
+  return abs;
+}
+
 async function selectAppwriteProject(input: unknown, context: ToolContext): Promise<unknown> {
   const parsed = SelectAppwriteProjectInputSchema.parse(input);
 
+  // 1) If a projectDir was provided, resolve + discover the config there.
+  let resolvedProjectDir: string | undefined;
+  let discoveredProjectId: string | undefined;
+  let discoveredEndpoint: string | undefined;
+  let configSource: string | null = null;
+  if (parsed.projectDir) {
+    resolvedProjectDir = await resolveProjectDirInput(parsed.projectDir);
+    const discovered = await resolveProjectConfig(resolvedProjectDir);
+    if (discovered) {
+      discoveredProjectId = discovered.projectId;
+      discoveredEndpoint = discovered.endpoint;
+      configSource = discovered.source;
+    } else if (!parsed.projectId) {
+      throw new Error(
+        `No Appwrite config (appwriteConfig.yaml / appwrite.json) was found under ${resolvedProjectDir}. ` +
+          `Pass an explicit projectId, or run select_appwrite_project with a projectDir that actually contains a project config.`
+      );
+    }
+  }
+
+  // 2) If only projectId was given, try to rehydrate the dir from the registry.
+  if (!resolvedProjectDir && parsed.projectId && context.projectRegistry) {
+    const cached = await context.projectRegistry.get(parsed.projectId);
+    if (cached) {
+      // Cached path may have been deleted/moved since last selection. Validate
+      // before binding so we don't silently keep using a stale path.
+      try {
+        const info = await stat(cached.projectDir);
+        if (info.isDirectory()) {
+          resolvedProjectDir = cached.projectDir;
+          discoveredEndpoint = discoveredEndpoint ?? cached.endpoint;
+        }
+      } catch {
+        /* stale entry — fall through with no projectDir */
+      }
+    }
+  }
+
+  // Caller-supplied projectId wins over discovered. Otherwise use the
+  // discovered one. At least one path above must produce a projectId, else
+  // we have nothing to bind.
+  const finalProjectId = parsed.projectId ?? discoveredProjectId;
+  if (!finalProjectId) {
+    throw new Error(
+      "select_appwrite_project: could not determine a projectId. Provide one explicitly or point projectDir at a directory containing a valid appwrite config."
+    );
+  }
+
   context.authResolver.setOverride({
-    projectId: parsed.projectId,
-    endpoint: parsed.endpoint,
+    projectId: finalProjectId,
+    endpoint: parsed.endpoint ?? discoveredEndpoint,
     apiKey: parsed.apiKey,
     sessionCookie: parsed.sessionCookie,
+    projectDir: resolvedProjectDir,
   });
 
   // Invalidate any cached clients keyed on the previous credentials so the
   // next tool call goes through full re-resolution.
   context.clientRegistry.invalidate();
 
+  // Persist the mapping so a future `select_appwrite_project({projectId})`
+  // (possibly across an MCP restart) can rehydrate the dir automatically.
+  let registryWritten = false;
+  if (resolvedProjectDir && context.projectRegistry) {
+    try {
+      await context.projectRegistry.set(finalProjectId, {
+        projectDir: resolvedProjectDir,
+        endpoint: parsed.endpoint ?? discoveredEndpoint,
+      });
+      registryWritten = true;
+    } catch (err) {
+      console.error(
+        `[appwrite-mcp] failed to persist project registry entry: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
   const override = context.authResolver.getOverride()!;
   return {
     active: true,
     projectId: override.projectId,
     endpoint: override.endpoint || null,
+    projectDir: override.projectDir || null,
+    configSource,
     hasApiKey: !!override.apiKey,
     hasSessionCookie: !!override.sessionCookie,
-    note: "Override is in-memory only and dies when this MCP server stops. Use clear_appwrite_project to drop it.",
+    registryWritten,
+    registryPath: context.projectRegistry?.getFilePath() ?? null,
+    note: "Auth override (endpoint + creds) is in-memory only. The projectId -> projectDir mapping is persisted to ~/.appwrite/projects.json so future selections by projectId can rehydrate the dir. Use clear_appwrite_project to drop the in-memory override.",
   };
 }
 
@@ -485,7 +611,7 @@ export const metaToolGroup: ToolGroupDefinition = {
     {
       name: "select_appwrite_project",
       description:
-        "Pin a project as the active one for THIS MCP server (in-memory only — dies on restart, never persists, never leaks to other MCP instances). Use when auto-resolution picks wrong or you need to temporarily target a different project. Pass only projectId to inherit endpoint/auth from prefs.json; pass endpoint/apiKey/sessionCookie to override them too.",
+        "Pin a project as the active one for THIS MCP server. Pass `projectDir` (absolute path to a directory containing appwriteConfig.yaml / appwrite.json) to bind both the project ID and the config-discovery directory — required when the MCP was started outside the project's tree (e.g. you cd'd into ~/github and the project lives in ~/github/MyApp). Pass only `projectId` to rehydrate the dir from ~/.appwrite/projects.json (set by prior selections) and inherit endpoint/auth from prefs.json. Pass endpoint/apiKey/sessionCookie to override credentials. The in-memory auth override dies on restart; the projectId -> projectDir mapping persists.",
       inputSchema: SelectAppwriteProjectInputSchema,
       handler: selectAppwriteProject,
       requiresAuth: false,

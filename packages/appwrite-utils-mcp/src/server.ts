@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { parseFlags, getEnabledToolGroups, type ServerFlags } from './config/FlagParser.js';
 import { AuthResolver } from './auth/AuthResolver.js';
 import { ClientRegistry } from './state/ClientRegistry.js';
+import { ProjectRegistry } from './state/ProjectRegistry.js';
 import { StateManager } from './state/StateManager.js';
 import { ToolRegistry } from './tools/ToolRegistry.js';
 import type { ToolContext } from './tools/ToolGroup.js';
@@ -62,6 +63,7 @@ export class AppwriteMCPServer {
   // Core components
   private readonly authResolver: AuthResolver;
   private readonly clientRegistry: ClientRegistry;
+  private readonly projectRegistry: ProjectRegistry;
   private readonly stateManager: StateManager;
   private readonly toolRegistry: ToolRegistry;
 
@@ -103,6 +105,7 @@ export class AppwriteMCPServer {
     });
 
     this.clientRegistry = new ClientRegistry();
+    this.projectRegistry = new ProjectRegistry();
     this.stateManager = new StateManager();
 
     // Meta tools are always-on except in locked-scope mode (per-group bins).
@@ -310,9 +313,9 @@ Server instance ID: ${this.instanceId}
       const context: ToolContext = {
         authResolver: this.authResolver,
         clientRegistry: this.clientRegistry,
+        projectRegistry: this.projectRegistry,
         stateManager: this.stateManager,
         projectId: this.flags.projectId,
-        configDir: this.flags.configDir,
         toolRegistry: this.toolRegistry,
         notifyToolsChanged: this.flags.lockedScope
           ? undefined

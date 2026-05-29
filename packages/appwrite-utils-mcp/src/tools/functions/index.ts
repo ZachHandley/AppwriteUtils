@@ -513,7 +513,7 @@ async function handleDeployFunction(
   if (!functionPath) {
     // Try to find function directory automatically
     const foundPath = await functionManager.findFunctionDirectory(fn.name, {
-      searchPaths: [context.configDir ?? process.cwd()],
+      searchPaths: [context.authResolver.getEffectiveConfigDir()],
       verbose: false,
     });
 
@@ -685,7 +685,7 @@ async function handleDeployFunctions(
   for (const fnCfg of selected) {
     try {
       const foundPath = await functionManager.findFunctionDirectory(fnCfg.name, {
-        searchPaths: [context.configDir ?? process.cwd()],
+        searchPaths: [context.authResolver.getEffectiveConfigDir()],
         verbose: false,
       });
       if (!foundPath) {

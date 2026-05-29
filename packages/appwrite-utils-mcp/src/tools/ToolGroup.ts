@@ -6,6 +6,7 @@
 import type { z } from 'zod';
 import type { StateManager } from '../state/StateManager.js';
 import type { ClientRegistry } from '../state/ClientRegistry.js';
+import type { ProjectRegistry } from '../state/ProjectRegistry.js';
 import type { AuthResolver } from '../auth/AuthResolver.js';
 import type { ToolRegistry } from './ToolRegistry.js';
 
@@ -22,11 +23,13 @@ export interface ToolContext {
   /** Optional project ID for the current operation */
   projectId?: string;
   /**
-   * Directory the server should treat as the "current project" when
-   * resolving config files (appwrite.json) and function bundle paths.
-   * Falls back to process.cwd() when unset.
+   * Persistent projectId -> projectDir registry backed by
+   * ~/.appwrite/projects.json. Lets `select_appwrite_project` rehydrate a
+   * project directory across MCP restarts when only a projectId is given.
+   * Optional so locked-scope binaries that don't expose meta tools don't
+   * need to plumb one through.
    */
-  configDir?: string;
+  projectRegistry?: ProjectRegistry;
   /** Tool registry — present for meta tools that mutate the enabled-group set */
   toolRegistry?: ToolRegistry;
   /** Send notifications/tools/list_changed to the MCP client */

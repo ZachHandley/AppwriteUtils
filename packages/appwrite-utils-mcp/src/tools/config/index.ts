@@ -54,6 +54,7 @@ async function getConfig(
     ? {
         projectId: overrideRaw.projectId,
         endpoint: overrideRaw.endpoint || null,
+        projectDir: overrideRaw.projectDir || null,
         hasApiKey: !!overrideRaw.apiKey,
         hasCookie: !!overrideRaw.sessionCookie,
       }
@@ -123,6 +124,7 @@ async function getConfig(
       configDir: serverDefaults.configDir || null,
       hasApiKey: !!serverDefaults.apiKey,
     },
+    effectiveConfigDir: context.authResolver.getEffectiveConfigDir(),
     cwdProject,
     sessionOverride,
     prefsCurrent,
@@ -150,7 +152,9 @@ async function validateConfig(
     if (!actualConfigPath) {
       const { ConfigDiscoveryService } = await import("appwrite-utils-helpers");
       const discoveryService = new ConfigDiscoveryService();
-      const discovered = await discoveryService.findConfig(context.configDir ?? process.cwd());
+      const discovered = await discoveryService.findConfig(
+        context.authResolver.getEffectiveConfigDir()
+      );
       if (!discovered) {
         throw new Error("No Appwrite configuration file found. Please provide a configPath or ensure appwrite.json exists.");
       }
@@ -239,6 +243,7 @@ async function getAuthStatus(
     ? {
         projectId: overrideRaw.projectId,
         endpoint: overrideRaw.endpoint || null,
+        projectDir: overrideRaw.projectDir || null,
         hasApiKey: !!overrideRaw.apiKey,
         hasCookie: !!overrideRaw.sessionCookie,
       }
@@ -276,6 +281,7 @@ async function getAuthStatus(
       hasApiKey: !!serverDefaults.apiKey,
       configDir: serverDefaults.configDir || null,
     },
+    effectiveConfigDir: context.authResolver.getEffectiveConfigDir(),
     cwdProject,
     sessionOverride,
   };

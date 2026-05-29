@@ -91,6 +91,13 @@ export interface ProjectOverride {
   endpoint?: string;
   apiKey?: string;
   sessionCookie?: string;
+  /**
+   * Absolute path of the project's source directory. When set, the resolver
+   * uses it as the effective working directory for config discovery instead
+   * of the server's startup CWD. Lets one MCP server hop between project
+   * trees without restarting from a different working directory.
+   */
+  projectDir?: string;
 }
 
 /**
@@ -165,9 +172,15 @@ export class AuthResolver {
   /**
    * Set the in-memory project override. Used by the select_appwrite_project
    * meta tool to pin the active project for this server instance.
+   *
+   * Resets the project-config cache so the next `getProjectConfig()` call
+   * re-resolves against the new effective configDir — otherwise switching
+   * projectDir mid-session would still return the previous project's config.
    */
   public setOverride(override: ProjectOverride): void {
     this.sessionOverride = { ...override };
+    this.projectConfigCache = { loaded: false };
+    this.loggedMissingConfig = false;
   }
 
   /**
@@ -175,6 +188,8 @@ export class AuthResolver {
    */
   public clearOverride(): void {
     this.sessionOverride = null;
+    this.projectConfigCache = { loaded: false };
+    this.loggedMissingConfig = false;
   }
 
   /**
@@ -185,21 +200,33 @@ export class AuthResolver {
   }
 
   /**
-   * Resolve the project config bound to this MCP's working directory. Cached
-   * for the resolver lifetime. Returns `null` when no config exists in CWD.
+   * The directory the resolver should treat as the project root for config
+   * discovery. Override wins over server-default, server-default wins over
+   * the live `process.cwd()` (defensive fallback for direct test
+   * instantiation).
+   */
+  public getEffectiveConfigDir(): string {
+    return (
+      this.sessionOverride?.projectDir ??
+      this.serverDefaults.configDir ??
+      process.cwd()
+    );
+  }
+
+  /**
+   * Resolve the project config bound to this MCP's effective working
+   * directory. Cached until the next `setOverride` / `clearOverride` call —
+   * those reset the cache so the new projectDir takes effect.
    */
   public async getProjectConfig(): Promise<ResolvedProjectConfig | null> {
     if (this.projectConfigCache.loaded) return this.projectConfigCache.config;
-    // serverDefaults.configDir is always set by AppwriteMCPServer (snapshots
-    // process.cwd() at construction). The `?? process.cwd()` here is a
-    // defensive fallback only — direct AuthResolver instantiation in tests.
-    const workingDir = this.serverDefaults.configDir ?? process.cwd();
+    const workingDir = this.getEffectiveConfigDir();
     const config = await resolveProjectConfig(workingDir);
     this.projectConfigCache = { config, loaded: true };
     if (!config && !this.loggedMissingConfig) {
       this.loggedMissingConfig = true;
       console.error(
-        `[appwrite-mcp] no appwrite config found from workingDir=${workingDir} — set --configDir, --endpoint+--projectId, or run from inside a project tree`
+        `[appwrite-mcp] no appwrite config found from workingDir=${workingDir} — set --configDir, --endpoint+--projectId, run from inside a project tree, or call select_appwrite_project with a projectDir`
       );
     }
     return config;
