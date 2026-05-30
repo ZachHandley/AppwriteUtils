@@ -19,6 +19,7 @@ import {
   logger,
   AuthenticationError,
   configureLoggingPreset,
+  getActiveLogPaths,
 } from "appwrite-utils-helpers";
 import { ConfirmationDialogs } from "./shared/confirmationDialogs.js";
 import { SelectionDialogs } from "./shared/selectionDialogs.js";
@@ -99,6 +100,7 @@ interface CliOptions {
   useSession?: boolean;
   sessionCookie?: string;
   debug?: boolean;
+  logDir?: string;
   listBackups?: boolean;
   autoSync?: boolean;
   selectBuckets?: boolean;
@@ -497,7 +499,7 @@ const argv = yargs(hideBin(process.argv))
   .option("autoSync", {
     alias: ["auto"],
     type: "boolean",
-    description: "Skip prompts and sync all databases, tables, and buckets (current behavior)"
+    description: "Skip every interactive prompt for --push and --sync: select all databases, all local tables, no confirmation. The flag CI workflows want."
   })
   .option("selectBuckets", {
     type: "boolean",
@@ -839,6 +841,11 @@ const argv = yargs(hideBin(process.argv))
     default: false,
     description: "Enable verbose helpers logging (debug level + console transport). Use when auth/discovery is failing silently.",
   })
+  .option("logDir", {
+    alias: ["log-dir"],
+    type: "string",
+    description: "Override the directory where the CLI writes combined.log and error.log. Defaults to ~/.appwrite-utils-cli/logs/.",
+  })
   .parse() as ParsedArgv;
 
 // Idempotent process-wide exit. Multiple SIGINTs (or SIGINT-then-SIGTERM)
@@ -854,6 +861,15 @@ function __awuExit(code: number): void {
 process.on("SIGINT", () => __awuExit(130));
 process.on("SIGTERM", () => __awuExit(143));
 
+// Tell the user where the centralized log file lives, both at startup and on
+// failure. Without this they hunt for it; with it they can paste one path.
+function __awuPrintLogPath(): void {
+  const paths = getActiveLogPaths();
+  if (!paths) return;
+  // eslint-disable-next-line no-console
+  console.error(`📝 Full log: ${paths.combined}`);
+}
+
 // Global error capture. Without these handlers, an inquirer-internal crash
 // (or any other top-level throw inside an async path) just dumps a raw stack
 // trace and dies — making bug reports impossible to triage because the
@@ -866,6 +882,7 @@ process.on("uncaughtException", (error) => {
     error,
     context: { cwd: process.cwd() },
   });
+  __awuPrintLogPath();
   __awuExit(1);
 });
 process.on("unhandledRejection", (reason) => {
@@ -875,6 +892,7 @@ process.on("unhandledRejection", (reason) => {
     error: reason,
     context: { cwd: process.cwd() },
   });
+  __awuPrintLogPath();
   __awuExit(1);
 });
 
@@ -882,13 +900,19 @@ async function main() {
   const startTime = Date.now();
   const operationStats: Record<string, number> = {};
 
-  // --debug: flip the helpers winston logger from silent default to
-  // debug-level with console transport. Without this, all the diagnostic
-  // logs in SessionAuthService/ConfigManager are invisible — the silent
-  // default is great for production but useless when something's broken.
+  // Centralized logging: write everything to a stable, predictable file path
+  // by default so users can always paste a single log. --debug additionally
+  // turns on the console transport at debug level. --logDir overrides the
+  // directory both presets write to.
   if (argv.debug) {
-    configureLoggingPreset("debug");
+    configureLoggingPreset("debug", argv.logDir);
     MessageFormatter.info("Debug logging enabled (helpers logs → console at debug level)", { prefix: "CLI" });
+  } else {
+    configureLoggingPreset("file", argv.logDir);
+  }
+  const __logPaths = getActiveLogPaths();
+  if (__logPaths) {
+    MessageFormatter.info(`Logs → ${__logPaths.combined}`, { prefix: "CLI" });
   }
 
   if ((argv.schemaFormat || argv.schemaOutDir) && !argv.generate) {
@@ -1645,6 +1669,13 @@ async function main() {
       let selectedDbIds: string[] = [];
       if (parsedArgv.dbIds) {
         selectedDbIds = parsedArgv.dbIds.split(/[,\s]+/).filter(Boolean);
+      } else if (parsedArgv.autoSync) {
+        // --auto: skip the interactive picker and push every available DB.
+        selectedDbIds = availableDatabases.map(db => db.$id);
+        MessageFormatter.info(
+          `--auto: selected all ${selectedDbIds.length} database(s): ${selectedDbIds.join(", ")}`,
+          { prefix: "Push" }
+        );
       } else {
         selectedDbIds = await SelectionDialogs.selectDatabases(
           availableDatabases,
@@ -1704,6 +1735,9 @@ async function main() {
         if (parsedArgv.tableIds) {
           // Non-interactive: respect provided table IDs as-is (apply to each selected DB)
           selectedTableIds = parsedArgv.tableIds.split(/[\,\s]+/).filter(Boolean);
+        } else if (parsedArgv.autoSync) {
+          // --auto: take every local item for this DB, no prompt.
+          selectedTableIds = [...localItemIds];
         } else {
           const inquirer = (await import("inquirer")).default;
           const choices: Array<{ name: string; value: string }> = [];
@@ -1788,8 +1822,9 @@ async function main() {
         collections: databaseSelections.reduce((sum, s) => sum + s.tableIds.length, 0),
         details: databaseSelections.map(s => `${s.databaseId}: ${s.tableIds.length} items`),
       };
-      // Skip confirmation if both dbIds and tableIds are provided (non-interactive)
-      if (!(parsedArgv.dbIds && parsedArgv.tableIds)) {
+      // Skip confirmation when running non-interactively: either --auto, or
+      // both --dbIds and --tableIds explicitly provided.
+      if (!parsedArgv.autoSync && !(parsedArgv.dbIds && parsedArgv.tableIds)) {
         const confirmed = await ConfirmationDialogs.showOperationSummary('Push', pushSummary, { confirmationRequired: true });
         if (!confirmed) {
           MessageFormatter.info("Push operation cancelled", { prefix: "Push" });
@@ -1963,5 +1998,6 @@ main().catch((error) => {
     return;
   }
   MessageFormatter.error("CLI execution failed", error, { prefix: "CLI" });
+  __awuPrintLogPath();
   process.exit(1);
 });

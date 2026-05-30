@@ -1,5 +1,6 @@
 import winston from "winston";
 import fs from "fs";
+import os from "os";
 import path from "path";
 
 export interface LoggingConfig {
@@ -8,6 +9,18 @@ export interface LoggingConfig {
   logDirectory?: string;
   console: boolean;
 }
+
+/**
+ * The CLI's stable, predictable log directory. Lives under the user's home so
+ * a single path is always valid regardless of cwd — that's what users paste
+ * when something breaks. Override with config.logging.logDirectory or
+ * --logDir.
+ */
+export const DEFAULT_LOG_DIRECTORY = path.join(
+  os.homedir(),
+  ".appwrite-utils-cli",
+  "logs"
+);
 
 /**
  * Predefined logging configurations for common debugging scenarios
@@ -30,6 +43,12 @@ export const LOGGING_PRESETS = {
     enabled: true,
     level: 'debug',
     console: true
+  },
+  /** File-only: capture everything to disk without spamming the user's terminal. The default for any CLI run. */
+  file: {
+    enabled: true,
+    level: 'info',
+    console: false
   },
   /** Silent - no logging output */
   silent: {
@@ -78,7 +97,7 @@ const createLogger = () => {
 
   // Add file transports if logging is enabled
   if (loggingConfig.enabled) {
-    const logDir = loggingConfig.logDirectory || path.join(process.cwd(), "zlogs");
+    const logDir = loggingConfig.logDirectory || DEFAULT_LOG_DIRECTORY;
 
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true });
@@ -147,3 +166,22 @@ export const disableLogging = () => {
  * Get current logging configuration
  */
 export const getLoggingConfig = () => ({ ...loggingConfig });
+
+/**
+ * Return the absolute paths the file transports are writing to right now, or
+ * null when file logging is disabled. main.ts uses this to print the paths up
+ * front and on failure so the user has one thing to paste.
+ */
+export const getActiveLogPaths = (): {
+  directory: string;
+  combined: string;
+  error: string;
+} | null => {
+  if (!loggingConfig.enabled) return null;
+  const directory = loggingConfig.logDirectory || DEFAULT_LOG_DIRECTORY;
+  return {
+    directory,
+    combined: path.join(directory, "combined.log"),
+    error: path.join(directory, "error.log"),
+  };
+};
