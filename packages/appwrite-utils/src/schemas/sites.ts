@@ -56,6 +56,12 @@ export const AppwriteSiteSchema = z.object({
   predeployCommands: z.array(z.string()).optional(),
   deployDir: z.string().optional(),
   ignore: z.array(z.string()).optional(),
+  /**
+   * Custom domains to attach as Appwrite Proxy Rules during site deploys.
+   * Missing rules are created; existing matching rules are left alone
+   * (idempotent). Use --pruneDomains on the CLI to also delete extras.
+   */
+  domains: z.array(z.string()).optional(),
 });
 
 export type AppwriteSite = z.infer<typeof AppwriteSiteSchema>;

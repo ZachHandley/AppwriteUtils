@@ -92,6 +92,13 @@ interface CliOptions {
   functionPredeployCommands?: string;
   functionDeployDir?: string;
   functionIgnore?: string;
+  functionDomains?: string;
+  pruneDomains?: boolean;
+  listRules?: string;
+  createRule?: boolean;
+  deleteRule?: string;
+  domain?: string;
+  siteId?: string;
   migrateConfig?: boolean;
   generateConstants?: boolean;
   constantsLanguages?: string;
@@ -728,6 +735,40 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Override AppwriteFunction.ignore (comma-separated glob patterns) for a single-function --deployFunctions.",
   })
+  .option("functionDomains", {
+    alias: ["function-domains", "domains"],
+    type: "string",
+    description: "Comma-separated custom domains to attach as Appwrite Proxy Rules during --deployFunctions. For single-function deploys, overrides the config's domains[]. For multi-function deploys, each function's declared domains[] is reconciled.",
+  })
+  .option("pruneDomains", {
+    alias: ["prune-domains"],
+    type: "boolean",
+    description: "When reconciling proxy rules, delete rules whose domain is not listed in the function's declared domains. Off by default (only creates missing).",
+  })
+  .option("listRules", {
+    alias: ["list-rules"],
+    type: "string",
+    description: "List proxy rules attached to a resource. Pair with --functionId or --siteId.",
+  })
+  .option("createRule", {
+    alias: ["create-rule"],
+    type: "boolean",
+    description: "Create a single proxy rule. Requires --domain and either --functionId or --siteId.",
+  })
+  .option("deleteRule", {
+    alias: ["delete-rule"],
+    type: "string",
+    description: "Delete a proxy rule by its $id.",
+  })
+  .option("domain", {
+    type: "string",
+    description: "Domain for --createRule (e.g. fn.example.com).",
+  })
+  .option("siteId", {
+    alias: ["site-id"],
+    type: "string",
+    description: "Appwrite Site $id, used with --createRule / --listRules.",
+  })
   .option("migrateConfig", {
     alias: ["migrate"],
     type: "boolean",
@@ -935,6 +976,100 @@ async function main() {
     // ConfigManager will handle config discovery and auth decisions
     // Users can provide credentials via CLI flags even without a config file
 
+    // Standalone proxy-rule commands run BEFORE controller.init() because
+    // they don't need a config file — just bare credentials. Placing them
+    // here means `appwrite-migrate --listRules <id> --functionId <id>
+    // --endpoint ... --projectId ... --apiKey ...` works in any cwd.
+    if (argv.listRules !== undefined || argv.createRule || argv.deleteRule) {
+      const {
+        listRulesForResource,
+        createFunctionRule,
+        createSiteRule,
+        deleteRule,
+      } = await import("./functions/proxyRules.js");
+      const { resolveCliCredentials, getClientWithAuth } = await import(
+        "appwrite-utils-helpers"
+      );
+      const creds = resolveCliCredentials({
+        argv: {
+          endpoint: argv.endpoint,
+          projectId: argv.projectId,
+          apiKey: argv.apiKey,
+        },
+      });
+      if (!creds) {
+        MessageFormatter.error(
+          "Proxy rule commands need credentials. Pass --endpoint, --projectId, --apiKey (or APPWRITE_* env vars).",
+          undefined,
+          { prefix: "Proxy" }
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const client = getClientWithAuth(
+        creds.endpoint,
+        creds.projectId!,
+        creds.apiKey,
+        argv.sessionCookie
+      );
+
+      if (argv.deleteRule) {
+        await deleteRule(client, argv.deleteRule);
+        MessageFormatter.success(`Deleted rule ${argv.deleteRule}`, { prefix: "Proxy" });
+        return;
+      }
+
+      if (argv.createRule) {
+        if (!argv.domain || (!argv.functionId && !argv.siteId)) {
+          MessageFormatter.error(
+            "--createRule requires --domain and either --functionId or --siteId.",
+            undefined,
+            { prefix: "Proxy" }
+          );
+          process.exitCode = 1;
+          return;
+        }
+        const rule = argv.functionId
+          ? await createFunctionRule(client, { domain: argv.domain, functionId: argv.functionId })
+          : await createSiteRule(client, { domain: argv.domain, siteId: argv.siteId! });
+        MessageFormatter.success(
+          `Created rule ${rule.$id} (${rule.domain}, status=${rule.status ?? "unknown"})`,
+          { prefix: "Proxy" }
+        );
+        return;
+      }
+
+      // --listRules: the flag's value is the resource id; pair with --siteId
+      // to mark it as a site (default treats it as a function).
+      const explicitId = typeof argv.listRules === "string" && argv.listRules.length > 0 ? argv.listRules : undefined;
+      const resourceId = explicitId || argv.functionId || argv.siteId;
+      if (!resourceId) {
+        MessageFormatter.error(
+          "--listRules needs a resource id (pass it as the flag value, or via --functionId / --siteId).",
+          undefined,
+          { prefix: "Proxy" }
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const resourceType: "function" | "site" =
+        argv.siteId ? "site" : "function";
+      const rules = await listRulesForResource(client, resourceType, resourceId);
+      if (rules.length === 0) {
+        MessageFormatter.info(`No proxy rules for ${resourceType} ${resourceId}.`, { prefix: "Proxy" });
+      } else {
+        MessageFormatter.info(
+          `Proxy rules for ${resourceType} ${resourceId}:`,
+          { prefix: "Proxy" }
+        );
+        for (const r of rules) {
+          // eslint-disable-next-line no-console
+          console.log(`  ${r.domain}  [${r.status ?? "unknown"}]  ${r.$id}`);
+        }
+      }
+      return;
+    }
+
     const controller = UtilsController.getInstance(process.cwd());
 
     // Build init options from CLI flags
@@ -1059,7 +1194,9 @@ async function main() {
           predeployCommands: argv.functionPredeployCommands,
           deployDir: argv.functionDeployDir,
           ignore: argv.functionIgnore,
+          domains: argv.functionDomains,
         },
+        pruneDomains: argv.pruneDomains,
       });
       if (failed > 0) {
         process.exitCode = 1;

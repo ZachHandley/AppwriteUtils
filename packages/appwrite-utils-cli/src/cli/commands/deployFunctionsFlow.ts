@@ -38,6 +38,8 @@ export interface DeployFunctionFieldOverrides {
   predeployCommands?: string;
   deployDir?: string;
   ignore?: string;
+  /** Comma-separated domains for --functionDomains. Reconciled after deploy. */
+  domains?: string;
 }
 
 export interface DeployFunctionsFlowOptions {
@@ -59,6 +61,9 @@ export interface DeployFunctionsFlowOptions {
   };
   /** Per-field overrides; only valid when exactly one function is targeted. */
   overrides?: DeployFunctionFieldOverrides;
+  /** When true, proxy rules attached to a function but absent from its
+   *  declared `domains` list are deleted after deploy. Default: false. */
+  pruneDomains?: boolean;
 }
 
 function expandTilde(p: string): string {
@@ -202,6 +207,7 @@ function applyOverrides(
   }
   if (overrides.deployDir !== undefined) next.deployDir = overrides.deployDir;
   if (overrides.ignore !== undefined) next.ignore = splitCsv(overrides.ignore);
+  if (overrides.domains !== undefined) next.domains = splitCsv(overrides.domains);
   return next;
 }
 
@@ -362,5 +368,42 @@ export async function runDeployFunctionsFlow(
   const results = await deployFunctionsBatch(client, items, {
     buildConcurrency: opts.buildConcurrency,
   });
+
+  // 8. Reconcile proxy rules ("domains") for every function that declared any
+  //    and whose deploy succeeded. Failures here don't fail the deploy — the
+  //    code is already on the server — but they're logged loudly.
+  const { reconcileResourceDomains } = await import("../../functions/proxyRules.js");
+  for (const item of items) {
+    const declared = (item.functionConfig as AppwriteFunction).domains ?? [];
+    if (declared.length === 0) continue;
+    const result = results.find((r) => r.functionId === (item.functionConfig as AppwriteFunction).$id);
+    if (!result || result.status !== "ready") continue;
+    try {
+      const summary = await reconcileResourceDomains(
+        client,
+        "function",
+        (item.functionConfig as AppwriteFunction).$id,
+        declared,
+        { prune: opts.pruneDomains }
+      );
+      const parts: string[] = [];
+      if (summary.created.length) parts.push(`created [${summary.created.join(", ")}]`);
+      if (summary.kept.length) parts.push(`kept [${summary.kept.join(", ")}]`);
+      if (summary.deleted.length) parts.push(`deleted [${summary.deleted.join(", ")}]`);
+      MessageFormatter.success(
+        `Domains for ${item.functionName}: ${parts.join("; ") || "no changes"}`,
+        { prefix: "Functions" }
+      );
+    } catch (err) {
+      MessageFormatter.error(
+        `Failed to reconcile domains for ${item.functionName}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        undefined,
+        { prefix: "Functions" }
+      );
+    }
+  }
+
   return results.filter((r) => r.status === "failed").length + skipped.length;
 }

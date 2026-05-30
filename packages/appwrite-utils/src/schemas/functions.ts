@@ -58,6 +58,13 @@ export const AppwriteFunctionSchema = z.object({
   templateVersion: z.string().optional(),
   buildSpecification: FunctionSpecifications.optional(),
   runtimeSpecification: FunctionSpecifications.optional(),
+  /**
+   * Custom domains to attach as Appwrite Proxy Rules during --deployFunctions.
+   * Missing rules are created on every deploy; existing matching rules are left
+   * alone (idempotent). Use --pruneDomains on the CLI to also delete rules not
+   * listed here.
+   */
+  domains: z.array(z.string()).optional(),
 });
 
 export type AppwriteFunction = z.infer<typeof AppwriteFunctionSchema>;
