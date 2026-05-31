@@ -36,6 +36,31 @@ const DEFAULT_IGNORED = [
 const PREBUILT_IGNORED = [".git", ".vscode", ".DS_Store"];
 
 /**
+ * Best-effort filesystem flush + brief wait. Called after a prebuilt build
+ * command (`bun install`, `npm install && npm run build`, etc.) and before
+ * tar walks the directory. Bun's package installer in particular finishes
+ * the foreground process before all its hardlink/cache writes have been
+ * fully flushed by the kernel; tar's lstat-then-read pattern then trips
+ * the size-mismatch check at write-entry.js:382 ("did not encounter
+ * expected EOF") for one or two files. `sync(1)` flushes the pending
+ * writes; the 2s wait covers userspace coordination in the installer.
+ *
+ * Wait is async (setTimeout) so the event loop stays responsive while we
+ * pause. On Windows there is no `sync(1)` — only the wait runs.
+ */
+const settleFilesystem = async (): Promise<void> => {
+  const isWindows = platform() === "win32";
+  if (!isWindows) {
+    try {
+      execSync("sync", { stdio: "ignore", windowsHide: true });
+    } catch {
+      // sync unavailable / blocked; the wait below still helps.
+    }
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+};
+
+/**
  * Upload-only phase of a deployment: tars + uploads the function source and
  * creates the deployment record. Does NOT wait for the build to finish and
  * does NOT explicitly call activateDeployment — the returned deployment is
@@ -334,6 +359,14 @@ export const prepareFunctionDeployment = async (
       );
       throw error;
     }
+
+    // Bun's installer (and some other tools) settle lazily: hardlink and
+    // cache materializations can leak past the foreground process exit.
+    // If tar starts walking immediately, lstat sees size N but the read
+    // returns more bytes than that, failing with
+    // "did not encounter expected EOF" (tar/dist/.../write-entry.js:382).
+    // Flush pending FS writes and give the kernel a moment before tarring.
+    await settleFilesystem();
   }
 
   // Pick the ignore list. User-supplied `ignore` always wins. Otherwise:

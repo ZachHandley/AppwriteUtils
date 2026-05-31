@@ -315,8 +315,10 @@ export class SiteManager {
           { label: "install", command: siteConfig.installCommand },
           { label: "build", command: siteConfig.buildCommand },
         ];
+        let ranAny = false;
         for (const step of localSteps) {
           if (!step.command || step.command.trim().length === 0) continue;
+          ranAny = true;
           if (verbose) {
             MessageFormatter.processing(
               `[prebuilt] Running ${step.label} locally: ${step.command}`,
@@ -324,6 +326,12 @@ export class SiteManager {
             );
           }
           await this.executePredeployCommands([step.command], sitePath, { verbose });
+        }
+        if (ranAny) {
+          // bun-style installers leak hardlink/cache writes past process
+          // exit; tar's lstat-then-read then fails with
+          // "did not encounter expected EOF". Flush + brief wait.
+          await this.settleFilesystem();
         }
       }
 
@@ -660,6 +668,24 @@ export class SiteManager {
     if (verbose) {
       MessageFormatter.success("Pre-deploy commands completed", { prefix: "Sites" });
     }
+  }
+
+  /**
+   * Best-effort filesystem flush + brief wait — same rationale as the
+   * functions path. Called after the prebuilt install/build commands and
+   * before tar walks the directory.
+   */
+  private async settleFilesystem(): Promise<void> {
+    const { execSync } = await import("child_process");
+    const { platform } = await import("node:os");
+    if (platform() !== "win32") {
+      try {
+        execSync("sync", { stdio: "ignore", windowsHide: true });
+      } catch {
+        // sync unavailable; the wait below still helps.
+      }
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
   }
 
   // ──────────────────────────────────────────────────

@@ -30,6 +30,25 @@ const DEFAULT_SITE_IGNORED = [
 // Slim ignore for prebuilt site deploys: ship built artifacts.
 const PREBUILT_SITE_IGNORED = [".git", ".vscode", ".DS_Store"];
 
+/**
+ * Best-effort filesystem flush + brief wait — same rationale as the
+ * functions path (see deployments.ts in functions/). Some site builds
+ * (bun-based installers, watcher-style bundlers that leak finalizers)
+ * leave files mid-write after the foreground command exits, which trips
+ * tar's "did not encounter expected EOF" check on the next walk.
+ */
+const settleFilesystem = async (): Promise<void> => {
+  const isWindows = platform() === "win32";
+  if (!isWindows) {
+    try {
+      execSync("sync", { stdio: "ignore", windowsHide: true });
+    } catch {
+      // sync unavailable; wait below still helps.
+    }
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+};
+
 export const deploySite = async (
   client: Client,
   siteId: string,
@@ -247,8 +266,10 @@ export const deployLocalSite = async (
       { label: "install", command: siteConfig.installCommand },
       { label: "build", command: siteConfig.buildCommand },
     ];
+    let ranAny = false;
     for (const step of localSteps) {
       if (!step.command || step.command.trim().length === 0) continue;
+      ranAny = true;
       MessageFormatter.processing(
         `[prebuilt] Running ${step.label} locally: ${step.command}`,
         { prefix: "Deployment" }
@@ -268,6 +289,9 @@ export const deployLocalSite = async (
         );
         throw error;
       }
+    }
+    if (ranAny) {
+      await settleFilesystem();
     }
   }
 

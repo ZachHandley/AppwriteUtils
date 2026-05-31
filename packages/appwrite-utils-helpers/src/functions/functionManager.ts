@@ -385,6 +385,10 @@ export class FunctionManager {
         );
       }
       await this.executePredeployCommands([functionConfig.commands], functionPath, { verbose });
+      // Some installers (notably bun) leak hardlink/cache writes past the
+      // foreground process exit; tar's lstat-then-read then trips
+      // "did not encounter expected EOF" on a tail file. Flush + brief wait.
+      await this.settleFilesystem();
     }
 
     return await this.createDeployment(
@@ -514,6 +518,28 @@ export class FunctionManager {
     if (verbose) {
       MessageFormatter.success("Pre-deploy commands completed", { prefix: "Functions" });
     }
+  }
+
+  /**
+   * Best-effort filesystem flush + brief wait. Called after a prebuilt
+   * build command and before tar walks the directory. Bun's installer
+   * (and a handful of build watchers) leave hardlink/cache writes
+   * pending after the foreground process exits, causing tar to fail
+   * with "did not encounter expected EOF" on a tail file. `sync(1)`
+   * flushes the kernel; the 2s wait covers userspace coordination.
+   * Windows lacks `sync(1)` — only the wait runs.
+   */
+  private async settleFilesystem(): Promise<void> {
+    const { execSync } = await import("child_process");
+    const { platform } = await import("node:os");
+    if (platform() !== "win32") {
+      try {
+        execSync("sync", { stdio: "ignore", windowsHide: true });
+      } catch {
+        // sync unavailable / blocked; the wait below still helps.
+      }
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
   }
 
   private async createDeployment(
