@@ -175,7 +175,14 @@ export const uploadFunctionDeployment = async (
     return functionResponse;
   } catch (error) {
     progressBar.stop();
-    MessageFormatter.error("Upload failed", error instanceof Error ? error : undefined, { prefix: "Deployment" });
+    // Tar/node-fs errors carry the offending file path on `err.path`. Surface it
+    // so failures like "did not encounter expected EOF" name the file that
+    // tripped the size-mismatch check instead of leaving the operator guessing.
+    const errPath =
+      error && typeof error === "object" && "path" in error && typeof (error as { path: unknown }).path === "string"
+        ? ` (file: ${(error as { path: string }).path})`
+        : "";
+    MessageFormatter.error(`Upload failed${errPath}`, error instanceof Error ? error : undefined, { prefix: "Deployment" });
     throw error;
   } finally {
     try {
