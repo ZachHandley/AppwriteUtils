@@ -104,32 +104,45 @@ export const uploadFunctionDeployment = async (
     hideCursor: true,
   });
 
-  await createTarball(
-    {
-      gzip: true,
-      file: tarPath,
-      cwd: codePath,
-      filter: (path, stat) => {
-        const relativePath = relative(
-          codePath,
-          join(codePath, path)
-        ).toLowerCase();
-        if (
-          ignoredLower.some(
-            (pattern) =>
-              relativePath.startsWith(pattern) ||
-              relativePath.includes(`/${pattern}`) ||
-              relativePath.includes(`\\${pattern}`)
-          )
-        ) {
-          MessageFormatter.debug(`Ignoring ${path}`, undefined, { prefix: "Deployment" });
-          return false;
-        }
-        return true;
+  try {
+    await createTarball(
+      {
+        gzip: true,
+        file: tarPath,
+        cwd: codePath,
+        filter: (path, stat) => {
+          const relativePath = relative(
+            codePath,
+            join(codePath, path)
+          ).toLowerCase();
+          if (
+            ignoredLower.some(
+              (pattern) =>
+                relativePath.startsWith(pattern) ||
+                relativePath.includes(`/${pattern}`) ||
+                relativePath.includes(`\\${pattern}`)
+            )
+          ) {
+            MessageFormatter.debug(`Ignoring ${path}`, undefined, { prefix: "Deployment" });
+            return false;
+          }
+          return true;
+        },
       },
-    },
-    ["."]
-  );
+      ["."]
+    );
+  } catch (error) {
+    // node-tar errors carry the offending file on `err.path`. Rewrite the
+    // error message so it survives the BatchDeploy re-log path and operators
+    // can see WHICH file tripped checks like "did not encounter expected EOF".
+    if (error && typeof error === "object" && "path" in error) {
+      const path = (error as { path: unknown }).path;
+      if (typeof path === "string" && error instanceof Error) {
+        error.message = `${error.message} (file: ${path})`;
+      }
+    }
+    throw error;
+  }
 
   const fileBuffer = await fs.promises.readFile(tarPath);
   const fileObject = InputFile.fromBuffer(
