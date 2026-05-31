@@ -3,7 +3,7 @@ import { InputFile } from "node-appwrite/file";
 import { create as createTarball } from "tar";
 import { join, relative } from "node:path";
 import fs from "node:fs";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { type AppwriteFunction, type Specification } from "appwrite-utils";
 import chalk from "chalk";
 import cliProgress from "cli-progress";
@@ -81,7 +81,14 @@ export const uploadFunctionDeployment = async (
   MessageFormatter.processing("Preparing function deployment...", { prefix: "Deployment" });
 
   const ignoredLower = ignored.map((pattern) => pattern.toLowerCase());
-  const tarPath = join(process.cwd(), `function-${functionId}.tar.gz`);
+  // Write the tarball into the OS temp dir, not the cwd we are tarring.
+  // Otherwise tar's recursive walk visits the output file while it is still
+  // being written, the size grows mid-read, and node-tar throws
+  // "did not encounter expected EOF" (write-entry.js:382). The function's
+  // own `ignore` list typically doesn't list `function-*.tar.gz` because it
+  // is implementation detail of this CLI, so the only safe fix is to move
+  // the output entirely out of the walked tree.
+  const tarPath = join(tmpdir(), `function-${functionId}-${Date.now()}.tar.gz`);
 
   if (!fs.existsSync(codePath)) {
     throw new Error(`Function directory not found at ${codePath}`);
