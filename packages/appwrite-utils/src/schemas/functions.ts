@@ -21,6 +21,7 @@ import { EventTypeSchema } from "./eventTypes.js";
  * predeployCommands?: string[], -- These are custom and ours, and they will be evaluated on the host machine before the function is deployed
  * deployDir?: string, -- The directory to deploy the function from, if not provided, the function will be deployed from the function's directory
  * commands?: string,
+ * prebuilt?: boolean, -- When true, `commands` runs locally before tarring, node_modules/build artifacts ship inside the tarball, and Appwrite is told to skip its build step (empty commands sent to createDeployment). Avoids server-side build entirely (no GitHub token needed on Appwrite for private deps).
  * scopes?: string[],
  * installationId?: string,
  * providerRepositoryId?: string,
@@ -46,6 +47,7 @@ export const AppwriteFunctionSchema = z.object({
   predeployCommands: z.array(z.string()).optional(),
   deployDir: z.string().optional(),
   commands: z.string().optional(),
+  prebuilt: z.boolean().optional(),
   scopes: z.array(FunctionScopes).optional(),
   installationId: z.string().optional(),
   providerRepositoryId: z.string().optional(),

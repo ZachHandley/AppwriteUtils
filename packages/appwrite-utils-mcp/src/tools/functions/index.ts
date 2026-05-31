@@ -173,6 +173,12 @@ const deployFunctionsSchema = z.object({
     .positive()
     .optional()
     .describe('Poll interval (ms) while waiting for builds. Default 3000.'),
+  prebuilt: z
+    .boolean()
+    .optional()
+    .describe(
+      "When true, force every function in this batch into prebuilt mode: run each function's `commands` LOCALLY before tarring, ship the resulting build artifacts inside the tarball, and tell Appwrite to skip its build step. Bypasses Appwrite's build container entirely so private GitHub deps don't need an installation/GitHub token on Appwrite. Per-function `prebuilt: true` in the YAML config still applies when this flag is omitted."
+    ),
 });
 
 /**
@@ -739,8 +745,15 @@ async function handleDeployFunctions(
     : allLocal;
 
   // Resolve a code directory for each function.
-  const items: Array<{ functionConfig: AppwriteFunction; functionPath: string }> = [];
+  const items: Array<{
+    functionConfig: AppwriteFunction;
+    functionPath: string;
+    options?: { prebuilt?: boolean };
+  }> = [];
   const earlyFailures: BatchDeployResult[] = [];
+  // Batch-level prebuilt forces every item into prebuilt mode. Per-function
+  // YAML `prebuilt: true` still applies when this is omitted.
+  const batchPrebuilt = validated.prebuilt === true ? { prebuilt: true } : undefined;
   for (const fnCfg of selected) {
     try {
       const foundPath = await functionManager.findFunctionDirectory(fnCfg.name, {
@@ -752,7 +765,11 @@ async function handleDeployFunctions(
           `Could not find function directory for "${fnCfg.name}" (id ${fnCfg.$id}). Place the source under <configDir>/functions/<name>/ or pre-set dirPath in the YAML.`
         );
       }
-      items.push({ functionConfig: fnCfg, functionPath: foundPath });
+      items.push({
+        functionConfig: fnCfg,
+        functionPath: foundPath,
+        options: batchPrebuilt,
+      });
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       earlyFailures.push({

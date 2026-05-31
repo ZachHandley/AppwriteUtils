@@ -93,6 +93,7 @@ interface CliOptions {
   functionDeployDir?: string;
   functionIgnore?: string;
   functionDomains?: string;
+  prebuilt?: boolean;
   pruneDomains?: boolean;
   listRules?: string;
   createRule?: boolean;
@@ -740,6 +741,11 @@ const argv = yargs(hideBin(process.argv))
     type: "string",
     description: "Comma-separated custom domains to attach as Appwrite Proxy Rules during --deployFunctions. For single-function deploys, overrides the config's domains[]. For multi-function deploys, each function's declared domains[] is reconciled.",
   })
+  .option("prebuilt", {
+    alias: ["function-prebuilt", "functionPrebuilt"],
+    type: "boolean",
+    description: "Single-function --deployFunctions override: run the function's `commands` (build step) LOCALLY before tarring, ship the resulting node_modules/dist inside the tarball, and tell Appwrite to skip its build step (empty commands sent to createDeployment). Bypasses Appwrite's build container entirely so private GitHub deps don't need an installation/GitHub token on Appwrite. For multi-function deploys, set `prebuilt: true` per-function in .fnconfig.yaml / config.yaml instead.",
+  })
   .option("pruneDomains", {
     alias: ["prune-domains"],
     type: "boolean",
@@ -1195,6 +1201,7 @@ async function main() {
           deployDir: argv.functionDeployDir,
           ignore: argv.functionIgnore,
           domains: argv.functionDomains,
+          prebuilt: argv.prebuilt,
         },
         pruneDomains: argv.pruneDomains,
       });

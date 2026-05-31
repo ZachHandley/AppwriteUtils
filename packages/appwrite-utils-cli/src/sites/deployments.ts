@@ -18,6 +18,18 @@ import {
 import { MessageFormatter } from "appwrite-utils-helpers";
 import { resolveFunctionDirectory, validateFunctionDirectory } from "appwrite-utils-helpers";
 
+const DEFAULT_SITE_IGNORED = [
+  "node_modules",
+  ".git",
+  ".vscode",
+  ".DS_Store",
+  "__pycache__",
+  ".venv",
+];
+
+// Slim ignore for prebuilt site deploys: ship built artifacts.
+const PREBUILT_SITE_IGNORED = [".git", ".vscode", ".DS_Store"];
+
 export const deploySite = async (
   client: Client,
   siteId: string,
@@ -26,14 +38,7 @@ export const deploySite = async (
   installCommand?: string,
   buildCommand?: string,
   outputDirectory?: string,
-  ignored: string[] = [
-    "node_modules",
-    ".git",
-    ".vscode",
-    ".DS_Store",
-    "__pycache__",
-    ".venv",
-  ]
+  ignored: string[] = DEFAULT_SITE_IGNORED
 ) => {
   const sites = new Sites(client);
   MessageFormatter.processing("Preparing site deployment...", { prefix: "Deployment" });
@@ -196,9 +201,10 @@ export const deployLocalSite = async (
     throw new Error(`Site directory is invalid or missing required files: ${resolvedPath}`);
   }
 
+  const isWindows = platform() === "win32";
+
   if (siteConfig.predeployCommands?.length) {
     MessageFormatter.processing("Executing predeploy commands...", { prefix: "Deployment" });
-    const isWindows = platform() === "win32";
 
     for (const command of siteConfig.predeployCommands) {
       try {
@@ -232,14 +238,47 @@ export const deployLocalSite = async (
     ? join(resolvedPath, siteConfig.deployDir)
     : resolvedPath;
 
+  // Prebuilt mode: run installCommand then buildCommand locally in deployPath
+  // so the build output (dist/, .output/, etc.) lands inside the tarball.
+  // Appwrite is then told to skip its build step (empty install+build commands).
+  const prebuilt = siteConfig.prebuilt === true;
+  if (prebuilt) {
+    const localSteps: Array<{ label: string; command?: string }> = [
+      { label: "install", command: siteConfig.installCommand },
+      { label: "build", command: siteConfig.buildCommand },
+    ];
+    for (const step of localSteps) {
+      if (!step.command || step.command.trim().length === 0) continue;
+      MessageFormatter.processing(
+        `[prebuilt] Running ${step.label} locally: ${step.command}`,
+        { prefix: "Deployment" }
+      );
+      try {
+        execSync(step.command, {
+          cwd: deployPath,
+          stdio: "inherit",
+          shell: isWindows ? "cmd.exe" : "/bin/sh",
+          windowsHide: true,
+        });
+      } catch (error) {
+        MessageFormatter.error(
+          `[prebuilt] Local ${step.label} failed: ${step.command}`,
+          error instanceof Error ? error : undefined,
+          { prefix: "Deployment" }
+        );
+        throw error;
+      }
+    }
+  }
+
   return deploySite(
     client,
     siteConfig.$id,
     deployPath,
     true,
-    siteConfig.installCommand,
-    siteConfig.buildCommand,
+    prebuilt ? "" : siteConfig.installCommand,
+    prebuilt ? "" : siteConfig.buildCommand,
     siteConfig.outputDirectory,
-    siteConfig.ignore
+    siteConfig.ignore ?? (prebuilt ? PREBUILT_SITE_IGNORED : DEFAULT_SITE_IGNORED)
   );
 };

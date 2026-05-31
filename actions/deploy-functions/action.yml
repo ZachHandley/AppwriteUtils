@@ -84,6 +84,10 @@ inputs:
     description: "Override whether function logging is enabled (true/false)."
     required: false
     default: ""
+  prebuilt:
+    description: "Single-function override: run the function's build commands LOCALLY before tarring, ship node_modules/dist inside the tarball, and tell Appwrite to skip its build step. Bypasses Appwrite's build container entirely so private GitHub deps don't need an installation/GitHub token on Appwrite. (true/false)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -116,3 +120,4 @@ runs:
         AWU_FN_EXECUTE: ${{ inputs.execute }}
         AWU_FN_ENABLED: ${{ inputs.enabled }}
         AWU_FN_LOGGING: ${{ inputs.logging }}
+        AWU_PREBUILT: ${{ inputs.prebuilt }}

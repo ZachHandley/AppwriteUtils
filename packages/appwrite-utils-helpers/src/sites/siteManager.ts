@@ -25,6 +25,13 @@ export interface SiteDeploymentOptions {
   ignored?: string[];
   verbose?: boolean;
   /**
+   * When true (or `siteConfig.prebuilt === true`), run installCommand then
+   * buildCommand LOCALLY in the site directory before tarring, ship the
+   * build output (dist/, .output/, node_modules) inside the tarball, and
+   * tell Appwrite to skip its build step (empty install+build commands).
+   */
+  prebuilt?: boolean;
+  /**
    * @deprecated The site config is now always pushed when the site exists;
    * this flag is retained for back-compat and is a no-op.
    */
@@ -244,15 +251,26 @@ export class SiteManager {
     sitePath: string,
     options: SiteDeploymentOptions = {}
   ): Promise<Models.Deployment> {
+    const prebuilt =
+      options.prebuilt === true || siteConfig.prebuilt === true;
     const {
       activate = true,
-      installCommand = siteConfig.installCommand,
-      buildCommand = siteConfig.buildCommand,
       outputDirectory = siteConfig.outputDirectory,
-      ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
       pollOptions,
     } = options;
+    // installCommand/buildCommand/ignored have prebuilt-aware defaults:
+    // empty install+build so Appwrite skips its build; slim ignore so built
+    // artifacts ship.
+    const installCommand =
+      options.installCommand ?? (prebuilt ? "" : siteConfig.installCommand);
+    const buildCommand =
+      options.buildCommand ?? (prebuilt ? "" : siteConfig.buildCommand);
+    const ignored =
+      options.ignored ??
+      (prebuilt
+        ? [".git", ".vscode", ".DS_Store"]
+        : ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"]);
 
     return await siteLimit(async () => {
       if (verbose) {
@@ -288,6 +306,25 @@ export class SiteManager {
       // Execute pre-deploy commands if specified
       if (siteConfig.predeployCommands?.length) {
         await this.executePredeployCommands(siteConfig.predeployCommands, sitePath, { verbose });
+      }
+
+      // Prebuilt: run installCommand then buildCommand LOCALLY in sitePath so
+      // the build output lands inside the tarball.
+      if (prebuilt) {
+        const localSteps: Array<{ label: string; command?: string }> = [
+          { label: "install", command: siteConfig.installCommand },
+          { label: "build", command: siteConfig.buildCommand },
+        ];
+        for (const step of localSteps) {
+          if (!step.command || step.command.trim().length === 0) continue;
+          if (verbose) {
+            MessageFormatter.processing(
+              `[prebuilt] Running ${step.label} locally: ${step.command}`,
+              { prefix: "Sites" }
+            );
+          }
+          await this.executePredeployCommands([step.command], sitePath, { verbose });
+        }
       }
 
       // Deploy the site

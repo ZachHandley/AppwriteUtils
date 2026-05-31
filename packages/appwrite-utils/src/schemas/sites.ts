@@ -30,6 +30,7 @@ import { FunctionSpecifications } from "./functionSpecifications.js";
  * predeployCommands?: string[], -- These are custom and ours, and they will be evaluated on the host machine before the site is deployed
  * deployDir?: string, -- The directory to deploy the site from, if not provided, the site will be deployed from the site's directory
  * ignore?: string[], -- Files/directories to ignore when deploying
+ * prebuilt?: boolean, -- When true, installCommand+buildCommand run locally before tarring, the build output (e.g. dist/, node_modules) ships inside the tarball, and Appwrite is told to skip its build step (empty install+build commands sent to createDeployment). Avoids server-side build entirely (no GitHub token needed on Appwrite for private deps).
  */
 export const AppwriteSiteSchema = z.object({
   dirPath: z.string().optional(),
@@ -56,6 +57,7 @@ export const AppwriteSiteSchema = z.object({
   predeployCommands: z.array(z.string()).optional(),
   deployDir: z.string().optional(),
   ignore: z.array(z.string()).optional(),
+  prebuilt: z.boolean().optional(),
   /**
    * Custom domains to attach as Appwrite Proxy Rules during site deploys.
    * Missing rules are created; existing matching rules are left alone

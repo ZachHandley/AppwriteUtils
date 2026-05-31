@@ -40,6 +40,12 @@ export interface DeployFunctionFieldOverrides {
   ignore?: string;
   /** Comma-separated domains for --functionDomains. Reconciled after deploy. */
   domains?: string;
+  /**
+   * When true (from --prebuilt), run the function's `commands` locally and
+   * ship the resulting build artifacts inside the tarball; Appwrite is told
+   * to skip its build step. Single-function only.
+   */
+  prebuilt?: boolean;
 }
 
 export interface DeployFunctionsFlowOptions {
@@ -208,6 +214,7 @@ function applyOverrides(
   if (overrides.deployDir !== undefined) next.deployDir = overrides.deployDir;
   if (overrides.ignore !== undefined) next.ignore = splitCsv(overrides.ignore);
   if (overrides.domains !== undefined) next.domains = splitCsv(overrides.domains);
+  if (overrides.prebuilt !== undefined) next.prebuilt = overrides.prebuilt;
   return next;
 }
 

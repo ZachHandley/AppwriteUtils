@@ -30,6 +30,11 @@ const DEFAULT_IGNORED = [
   ".venv",
 ];
 
+// Slimmer ignore list for `prebuilt: true` deploys: built artifacts
+// (node_modules, .venv, __pycache__) MUST ship so Appwrite can skip its
+// build step entirely. Only strip VCS/editor noise.
+const PREBUILT_IGNORED = [".git", ".vscode", ".DS_Store"];
+
 /**
  * Upload-only phase of a deployment: tars + uploads the function source and
  * creates the deployment record. Does NOT wait for the build to finish and
@@ -225,8 +230,13 @@ export interface PreparedFunctionDeployment {
   functionName: string;
   deployPath: string;
   entrypoint: string;
+  /**
+   * Commands string sent to Appwrite's createDeployment. Empty when the
+   * function is prebuilt — Appwrite skips the build step entirely.
+   */
   commands: string;
   ignored: string[];
+  prebuilt: boolean;
 }
 
 /**
@@ -264,9 +274,10 @@ export const prepareFunctionDeployment = async (
     throw new Error(`Function directory is invalid or missing required files: ${resolvedPath}`);
   }
 
+  const isWindows = platform() === "win32";
+
   if (functionConfig.predeployCommands?.length) {
     MessageFormatter.processing("Executing predeploy commands...", { prefix: "Deployment" });
-    const isWindows = platform() === "win32";
 
     for (const command of functionConfig.predeployCommands) {
       try {
@@ -299,13 +310,46 @@ export const prepareFunctionDeployment = async (
     ? join(resolvedPath, functionConfig.deployDir)
     : resolvedPath;
 
+  // Prebuilt mode: run the function's build commands locally now (in deployPath
+  // so the built artifacts land alongside the source we're about to tar), then
+  // tell Appwrite to skip its build step by passing empty commands.
+  const prebuilt = functionConfig.prebuilt === true;
+  if (prebuilt && functionConfig.commands && functionConfig.commands.trim().length > 0) {
+    MessageFormatter.processing(
+      `[prebuilt] Running build locally: ${functionConfig.commands}`,
+      { prefix: "Deployment" }
+    );
+    try {
+      execSync(functionConfig.commands, {
+        cwd: deployPath,
+        stdio: "inherit",
+        shell: isWindows ? "cmd.exe" : "/bin/sh",
+        windowsHide: true,
+      });
+    } catch (error) {
+      MessageFormatter.error(
+        `[prebuilt] Local build failed: ${functionConfig.commands}`,
+        error instanceof Error ? error : undefined,
+        { prefix: "Deployment" }
+      );
+      throw error;
+    }
+  }
+
+  // Pick the ignore list. User-supplied `ignore` always wins. Otherwise:
+  //   - prebuilt: slim list (ship node_modules, .venv, __pycache__)
+  //   - normal:   classic DEFAULT_IGNORED (strip those)
+  const ignored =
+    functionConfig.ignore ?? (prebuilt ? PREBUILT_IGNORED : DEFAULT_IGNORED);
+
   return {
     functionId: functionConfig.$id,
     functionName,
     deployPath,
     entrypoint: functionConfig.entrypoint ?? "main.js",
-    commands: functionConfig.commands ?? "npm install",
-    ignored: functionConfig.ignore ?? DEFAULT_IGNORED,
+    commands: prebuilt ? "" : (functionConfig.commands ?? "npm install"),
+    ignored,
+    prebuilt,
   };
 };
 

@@ -92,6 +92,8 @@ function buildArgv(): string[] {
       if (enabled !== undefined) argv.push(`--functionEnabled=${enabled}`);
       const logging = env("AWU_FN_LOGGING");
       if (logging !== undefined) argv.push(`--functionLogging=${logging}`);
+      const prebuilt = env("AWU_PREBUILT");
+      if (prebuilt !== undefined) argv.push(`--prebuilt=${prebuilt}`);
       break;
     }
     case "push": {

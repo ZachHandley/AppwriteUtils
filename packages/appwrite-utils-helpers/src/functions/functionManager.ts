@@ -73,6 +73,15 @@ export interface FunctionDeploymentOptions {
   ignored?: string[];
   verbose?: boolean;
   /**
+   * When true (or when `functionConfig.prebuilt === true`), run the function's
+   * `commands` LOCALLY before tarring, ship the resulting build artifacts
+   * inside the tarball (slim ignore list), and tell Appwrite to skip its
+   * build step (empty commands sent to createDeployment). Bypasses Appwrite's
+   * build container entirely so private GitHub deps don't need an
+   * installation/GitHub token on Appwrite.
+   */
+  prebuilt?: boolean;
+  /**
    * @deprecated The function config is now always pushed when the function
    * exists; this flag is retained for back-compat and is a no-op.
    */
@@ -315,18 +324,31 @@ export class FunctionManager {
     functionPath: string,
     options: FunctionDeploymentOptions = {}
   ): Promise<Models.Deployment> {
+    const prebuilt =
+      options.prebuilt === true || functionConfig.prebuilt === true;
     const {
       activate = true,
       entrypoint = functionConfig.entrypoint || "main.js",
-      commands = functionConfig.commands || "npm install",
-      ignored = ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"],
       verbose = false,
     } = options;
+    // commands/ignored have prebuilt-aware defaults: empty commands so Appwrite
+    // skips its build, slim ignore so built artifacts ship.
+    const commands =
+      options.commands ??
+      (prebuilt ? "" : functionConfig.commands || "npm install");
+    const ignored =
+      options.ignored ??
+      (prebuilt
+        ? [".git", ".vscode", ".DS_Store"]
+        : ["node_modules", ".git", ".vscode", ".DS_Store", "__pycache__", ".venv"]);
 
     if (verbose) {
       MessageFormatter.processing(`Uploading function: ${functionConfig.name}`, { prefix: "Functions" });
       MessageFormatter.debug(`Path: ${functionPath}`, undefined, { prefix: "Functions" });
       MessageFormatter.debug(`Entrypoint: ${entrypoint}`, undefined, { prefix: "Functions" });
+      if (prebuilt) {
+        MessageFormatter.debug(`Mode: prebuilt (local build; Appwrite skips build step)`, undefined, { prefix: "Functions" });
+      }
     }
 
     if (!await this.isValidFunctionDirectory(functionPath)) {
@@ -351,6 +373,18 @@ export class FunctionManager {
 
     if (functionConfig.predeployCommands?.length) {
       await this.executePredeployCommands(functionConfig.predeployCommands, functionPath, { verbose });
+    }
+
+    // Prebuilt: run the build LOCALLY in functionPath so artifacts land
+    // alongside source before tarring.
+    if (prebuilt && functionConfig.commands && functionConfig.commands.trim().length > 0) {
+      if (verbose) {
+        MessageFormatter.processing(
+          `[prebuilt] Running build locally: ${functionConfig.commands}`,
+          { prefix: "Functions" }
+        );
+      }
+      await this.executePredeployCommands([functionConfig.commands], functionPath, { verbose });
     }
 
     return await this.createDeployment(
