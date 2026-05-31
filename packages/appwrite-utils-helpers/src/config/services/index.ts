@@ -34,3 +34,5 @@ export {
   type AuthErrorCode,
   type AuthErrorDetails
 } from "../errors/AuthenticationError.js";
+
+export { NoConfigError } from "../errors/NoConfigError.js";

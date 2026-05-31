@@ -9,6 +9,7 @@ import {
   ConfigValidationService,
   SessionAuthService,
   AuthenticationError,
+  NoConfigError,
   type ConfigOverrides,
   type SessionAuthInfo,
   type AuthenticationStatus,
@@ -281,10 +282,9 @@ export class ConfigManager {
 
     if (!configPath) {
       const searchDir = options.configDir || process.cwd();
-      throw new Error(
-        `No Appwrite configuration found in "${searchDir}".\n` +
-        `Searched for: YAML (.appwrite/config.yaml), TypeScript (appwriteConfig.ts), or JSON (appwrite.json).\n` +
-        `Suggestion: Create a configuration file using "npx appwrite-migrate --init" or refer to the documentation.`
+      throw new NoConfigError(
+        searchDir,
+        ["YAML (.appwrite/config.yaml)", "TypeScript (appwriteConfig.ts)", "JSON (appwrite.json)"]
       );
     }
 

@@ -18,6 +18,7 @@ import {
   MessageFormatter,
   logger,
   AuthenticationError,
+  NoConfigError,
   configureLoggingPreset,
   getActiveLogPaths,
 } from "appwrite-utils-helpers";
@@ -1094,14 +1095,38 @@ async function main() {
       };
     }
 
+    // Commands that legitimately tolerate controller.init() failures.
+    //   allowsNoAuth: command doesn't need Appwrite credentials right now —
+    //     schema gen / sidecar reads happen against the local config file
+    //     without ever calling the API.
+    //   allowsNoConfigFile: command can do its work with ONLY argv credentials
+    //     and no local config file at all. Strictly narrower because flows
+    //     like --generate / --syncExtensions / --pullSelective genuinely need
+    //     a config file even when they don't need creds.
+    const allowsNoAuth =
+      argv.init || argv.upgradeConfig || argv.passthrough || argv.regen ||
+      argv.syncExtensions || argv.pullSelective || argv.generate ||
+      argv.deployFunctions;
+    const allowsNoConfigFile =
+      argv.init || argv.upgradeConfig || argv.passthrough || argv.regen ||
+      argv.deployFunctions;
+
     try {
       await controller.init(initOptions);
     } catch (error) {
       if (error instanceof AuthenticationError) {
-        // --init / --upgradeConfig / --passthrough can legitimately run without a fully wired config.
-        // Defer auth handling to those flows; otherwise surface the error and exit.
-        if (!argv.init && !argv.upgradeConfig && !argv.passthrough && !argv.regen && !argv.syncExtensions && !argv.pullSelective && !argv.generate && !argv.deployFunctions) {
+        if (!allowsNoAuth) {
           MessageFormatter.error(error.getFormattedMessage(), undefined, { prefix: "Auth" });
+          process.exit(1);
+        }
+      } else if (error instanceof NoConfigError) {
+        if (!allowsNoConfigFile) {
+          MessageFormatter.error(
+            `${error.message}\n` +
+              `Or pass --endpoint --projectId --apiKey on argv (or set APPWRITE_ENDPOINT/APPWRITE_PROJECT_ID/APPWRITE_API_KEY env vars) to run config-free commands like --deployFunctions, --regen, --init, --upgradeConfig, --passthrough.`,
+            undefined,
+            { prefix: "Config" }
+          );
           process.exit(1);
         }
       } else {
