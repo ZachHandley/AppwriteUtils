@@ -297,7 +297,55 @@ export class JsonSchemaGenerator {
     const camelName = toCamelCase(collectionName);
 
     return `// Auto-generated JSON schema for ${collectionName}
-import type { JSONSchema7 } from "json-schema";
+// Inlined JSONSchema7 type alias so consumers don't need @types/json-schema.
+type JSONSchema7 = {
+  $id?: string;
+  $ref?: string;
+  $schema?: string;
+  $comment?: string;
+  type?: string | string[];
+  enum?: unknown[];
+  const?: unknown;
+  multipleOf?: number;
+  maximum?: number;
+  exclusiveMaximum?: number;
+  minimum?: number;
+  exclusiveMinimum?: number;
+  maxLength?: number;
+  minLength?: number;
+  pattern?: string;
+  items?: JSONSchema7 | JSONSchema7[];
+  additionalItems?: JSONSchema7;
+  maxItems?: number;
+  minItems?: number;
+  uniqueItems?: boolean;
+  contains?: JSONSchema7;
+  maxProperties?: number;
+  minProperties?: number;
+  required?: string[];
+  properties?: Record<string, JSONSchema7>;
+  patternProperties?: Record<string, JSONSchema7>;
+  additionalProperties?: JSONSchema7 | boolean;
+  dependencies?: Record<string, JSONSchema7 | string[]>;
+  propertyNames?: JSONSchema7;
+  if?: JSONSchema7;
+  then?: JSONSchema7;
+  else?: JSONSchema7;
+  allOf?: JSONSchema7[];
+  anyOf?: JSONSchema7[];
+  oneOf?: JSONSchema7[];
+  not?: JSONSchema7;
+  format?: string;
+  contentMediaType?: string;
+  contentEncoding?: string;
+  definitions?: Record<string, JSONSchema7>;
+  title?: string;
+  description?: string;
+  default?: unknown;
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  examples?: unknown[];
+};
 
 export const ${camelName}JsonSchema: JSONSchema7 = ${JSON.stringify(schema, null, 2)} as const;
 
