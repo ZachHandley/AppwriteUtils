@@ -43,6 +43,11 @@ export const AppwriteFunctionSchema = z.object({
   enabled: z.boolean().optional(),
   logging: z.boolean().optional(),
   ignore: z.array(z.string()).optional(),
+  // When `prebuilt: true`, entries listed in `keep` are filtered out of
+  // `ignore` so build artifacts (node_modules, target, .venv, etc.) cannot
+  // be accidentally stripped from the tarball by a legacy ignore list.
+  // Omit `keep` to use the per-runtime default; set `keep: []` to disable.
+  keep: z.array(z.string()).optional(),
   entrypoint: z.string().optional(),
   predeployCommands: z.array(z.string()).optional(),
   deployDir: z.string().optional(),

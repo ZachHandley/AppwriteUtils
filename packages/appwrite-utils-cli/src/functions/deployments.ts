@@ -35,6 +35,37 @@ const DEFAULT_IGNORED = [
 // build step entirely. Only strip VCS/editor noise.
 const PREBUILT_IGNORED = [".git", ".vscode", ".DS_Store"];
 
+// Default `.fnconfig.yml#keep` applied when `prebuilt: true` and the user
+// did not supply a `keep:` list. Any of these entries appearing in
+// `ignore:` get filtered out, so build artifacts the prebuilt deploy
+// depends on can't be stripped by a stale ignore block. Users can set
+// `keep: [...]` to extend or replace, or `keep: []` to disable.
+const DEFAULT_PREBUILT_KEEP = [
+  // JS / TS (npm / pnpm / bun)
+  "node_modules",
+  "dist",
+  "build",
+  ".next",
+  ".nuxt",
+  "out",
+  // Rust (cargo)
+  "target",
+  // Go
+  "bin",
+  "vendor",
+  // Python
+  ".venv",
+  "venv",
+  "__pycache__",
+  // Elixir / Erlang
+  "_build",
+  "deps",
+  // Dart / Flutter
+  ".dart_tool",
+  // Java / Kotlin (Gradle wrapper)
+  ".gradle",
+];
+
 /**
  * Best-effort filesystem flush + brief wait. Called after a prebuilt build
  * command (`bun install`, `npm install && npm run build`, etc.) and before
@@ -396,11 +427,21 @@ export const prepareFunctionDeployment = async (
     await settleFilesystem();
   }
 
-  // Pick the ignore list. User-supplied `ignore` always wins. Otherwise:
-  //   - prebuilt: slim list (ship node_modules, .venv, __pycache__)
-  //   - normal:   classic DEFAULT_IGNORED (strip those)
-  const ignored =
-    functionConfig.ignore ?? (prebuilt ? PREBUILT_IGNORED : DEFAULT_IGNORED);
+  // Pick the ignore list. User-supplied `ignore` wins, except when
+  // `prebuilt: true` — then we filter out entries that appear in `keep`
+  // (defaulting to DEFAULT_PREBUILT_KEEP) so a legacy `ignore:` block can't
+  // accidentally strip the very artifacts the prebuilt deploy depends on.
+  let ignored: string[];
+  if (functionConfig.ignore) {
+    if (prebuilt) {
+      const keep = new Set(functionConfig.keep ?? DEFAULT_PREBUILT_KEEP);
+      ignored = functionConfig.ignore.filter((entry) => !keep.has(entry));
+    } else {
+      ignored = functionConfig.ignore;
+    }
+  } else {
+    ignored = prebuilt ? PREBUILT_IGNORED : DEFAULT_IGNORED;
+  }
 
   return {
     functionId: functionConfig.$id,
