@@ -230,6 +230,30 @@ function anyOverrideSet(o: DeployFunctionFieldOverrides | undefined): boolean {
 export async function runDeployFunctionsFlow(
   opts: DeployFunctionsFlowOptions
 ): Promise<number> {
+  // Force-write any unhandled rejection / uncaught exception to stderr BEFORE
+  // main.ts's global handler triggers __awuExit. Without this, silent-exit
+  // failures during the upload phase (e.g. winston transport blow-ups during
+  // a tar-walk over a large node_modules) terminate the process with no
+  // diagnostic. Prepend so we run ahead of main.ts's handler.
+  const __deployFlowOnError =
+    (kind: string) => (reason: unknown) => {
+      process.stderr.write(
+        `\n[deployFunctions ${kind}] ${
+          reason instanceof Error
+            ? (reason.stack ?? reason.message)
+            : String(reason)
+        }\n`
+      );
+    };
+  process.prependListener(
+    "unhandledRejection",
+    __deployFlowOnError("unhandledRejection")
+  );
+  process.prependListener(
+    "uncaughtException",
+    __deployFlowOnError("uncaughtException")
+  );
+
   const cwd = opts.cwd;
 
   // 1. Build SDK client. Prefer the controller's already-wired client; fall

@@ -142,13 +142,14 @@ export const uploadFunctionDeployment = async (
     hideCursor: true,
   });
 
+  let ignoredCount = 0;
   try {
     await createTarball(
       {
         gzip: true,
         file: tarPath,
         cwd: codePath,
-        filter: (path, stat) => {
+        filter: (path, _stat) => {
           const relativePath = relative(
             codePath,
             join(codePath, path)
@@ -161,13 +162,17 @@ export const uploadFunctionDeployment = async (
                 relativePath.includes(`\\${pattern}`)
             )
           ) {
-            MessageFormatter.debug(`Ignoring ${path}`, undefined, { prefix: "Deployment" });
+            ignoredCount++;
             return false;
           }
           return true;
         },
       },
       ["."]
+    );
+    MessageFormatter.info(
+      `Tarball written; ignored ${ignoredCount} entries`,
+      { prefix: "Deployment" }
     );
   } catch (error) {
     // node-tar errors carry the offending file on `err.path`. Rewrite the
@@ -182,11 +187,48 @@ export const uploadFunctionDeployment = async (
     throw error;
   }
 
-  const fileBuffer = await fs.promises.readFile(tarPath);
-  const fileObject = InputFile.fromBuffer(
-    new Uint8Array(fileBuffer),
-    `function-${functionId}.tar.gz`
+  // Stream the tarball from disk via InputFile.fromPath instead of buffering
+  // the whole file into memory. This avoids the 2x peak-memory hit
+  // (readFile Buffer + Uint8Array copy) and removes a silent OOM exit vector
+  // on large prebuilt deploys (node_modules + dist can be hundreds of MiB).
+  let tarballBytes = 0;
+  try {
+    const stat = await fs.promises.stat(tarPath);
+    tarballBytes = stat.size;
+  } catch (error) {
+    MessageFormatter.error(
+      `Tarball stat failed at ${tarPath}`,
+      error instanceof Error ? error : undefined,
+      { prefix: "Deployment" }
+    );
+    throw error;
+  }
+  if (tarballBytes === 0) {
+    const empty = new Error(
+      `Tarball is empty (${tarPath}) — createTarball resolved without writing bytes`
+    );
+    MessageFormatter.error(empty.message, empty, { prefix: "Deployment" });
+    throw empty;
+  }
+  MessageFormatter.info(
+    `Tarball ${(tarballBytes / 1024 / 1024).toFixed(1)} MiB ready for upload`,
+    { prefix: "Deployment" }
   );
+
+  let fileObject;
+  try {
+    fileObject = InputFile.fromPath(
+      tarPath,
+      `function-${functionId}.tar.gz`
+    );
+  } catch (error) {
+    MessageFormatter.error(
+      `InputFile.fromPath failed for ${tarPath}`,
+      error instanceof Error ? error : undefined,
+      { prefix: "Deployment" }
+    );
+    throw error;
+  }
 
   try {
     MessageFormatter.processing("Creating deployment...", { prefix: "Deployment" });
