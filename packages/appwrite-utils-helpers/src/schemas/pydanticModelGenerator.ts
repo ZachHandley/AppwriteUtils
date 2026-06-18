@@ -55,13 +55,19 @@ ${entityClassVarComment}
     )
     database_id: str = Field(..., alias="$databaseId", description="Appwrite database ID")
     ${entityIdField}: str = Field(..., alias="${entityIdAlias}", description="${entityIdDesc}")
-    sequence: int = Field(..., alias="$sequence", description="Document sequence number")
+    sequence: str = Field(..., alias="$sequence", description="Document sequence number")
 
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,
         extra="allow",
     )
+
+    @field_validator("sequence", mode="before")
+    @classmethod
+    def coerce_sequence(cls, v: object) -> object:
+        """Appwrite returns $sequence as an integer; keep it a string here."""
+        return str(v) if v is not None else v
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod
@@ -117,7 +123,7 @@ class CreateBase(BaseModel):
     ${entityIdField}: str | None = Field(
         None, alias="${entityIdAlias}", description="Auto-set ${isTablesMode ? 'table' : 'collection'} ID"
     )
-    sequence: int | None = Field(
+    sequence: str | None = Field(
         None, alias="$sequence", description="Auto-generated sequence number"
     )
 
@@ -126,6 +132,12 @@ class CreateBase(BaseModel):
         populate_by_name=True,
         extra="allow",
     )
+
+    @field_validator("sequence", mode="before")
+    @classmethod
+    def coerce_sequence(cls, v: object) -> object:
+        """Appwrite returns $sequence as an integer; keep it a string here."""
+        return str(v) if v is not None else v
 
     @field_validator("created_at", "updated_at", mode="before")
     @classmethod
