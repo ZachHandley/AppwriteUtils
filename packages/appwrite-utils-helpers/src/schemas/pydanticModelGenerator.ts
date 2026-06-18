@@ -55,7 +55,7 @@ ${entityClassVarComment}
     )
     database_id: str = Field(..., alias="$databaseId", description="Appwrite database ID")
     ${entityIdField}: str = Field(..., alias="${entityIdAlias}", description="${entityIdDesc}")
-    sequence: str = Field(..., alias="$sequence", description="Document sequence number")
+    sequence: int = Field(..., alias="$sequence", description="Document sequence number")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -117,7 +117,7 @@ class CreateBase(BaseModel):
     ${entityIdField}: str | None = Field(
         None, alias="${entityIdAlias}", description="Auto-set ${isTablesMode ? 'table' : 'collection'} ID"
     )
-    sequence: str | None = Field(
+    sequence: int | None = Field(
         None, alias="$sequence", description="Auto-generated sequence number"
     )
 

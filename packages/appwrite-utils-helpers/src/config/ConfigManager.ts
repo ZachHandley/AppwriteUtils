@@ -188,6 +188,11 @@ export class ConfigManager {
   private lastLoadTimestamp: number = 0;
   private isInitialized: boolean = false;
   private cachedClient: Client | null = null;
+  // Remember CLI/env overrides (e.g. --apiKey/--endpoint/--projectId) from the
+  // last loadConfig so reloadConfig() re-applies them. Without this, a push
+  // that reloads config from disk drops the argv credentials and falls back to
+  // whatever the on-disk config.yaml carries (often a placeholder key) → 401.
+  private lastOverrides: ConfigOverrides | null = null;
 
   // Service dependencies
   private discoveryService: ConfigDiscoveryService;
@@ -411,10 +416,13 @@ export class ConfigManager {
       });
     }
 
-    // 6. Apply CLI/env overrides
+    // 6. Apply CLI/env overrides (remember them so reloadConfig re-applies)
     if (options.overrides) {
+      this.lastOverrides = options.overrides;
+    }
+    if (this.lastOverrides) {
       logger.debug("Applying configuration overrides", { prefix: "ConfigManager" });
-      config = this.mergeService.applyOverrides(config, options.overrides);
+      config = this.mergeService.applyOverrides(config, this.lastOverrides);
     }
 
     // 7. Validate if requested
