@@ -299,10 +299,23 @@ async function clearOutputDir(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const collected = await collectSchemas();
-  const previousHash = await readLastHash();
   const outputExists = existsSync(OUTPUT_DIR);
   const indexExists = existsSync(join(OUTPUT_DIR, "index.ts"));
+
+  let collected: CollectedSchemas;
+  try {
+    collected = await collectSchemas();
+  } catch (err) {
+    // The generated schemas are committed, so an unreachable spec source (appwrite/appwrite
+    // stopped tracking app/config/specs in git) must not block a build that only needs them.
+    // Only a forced refresh, or a checkout with no committed output, still has to fail.
+    if (!FORCE_REFRESH && outputExists && indexExists) {
+      console.warn(`[generate-zod] WARN: ${(err as Error).message} Using the committed schemas in ${OUTPUT_DIR}.`);
+      process.exit(0);
+    }
+    throw err;
+  }
+  const previousHash = await readLastHash();
 
   if (!FORCE_REFRESH && previousHash === collected.inputHash && outputExists && indexExists) {
     // No work needed.
