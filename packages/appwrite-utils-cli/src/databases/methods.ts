@@ -9,6 +9,9 @@ export const fetchAllDatabases = async (
   const databases = await tryAwaitWithRetry(
     async () => await database.list([Query.limit(25)])
   );
+  if (!databases || !databases.databases) {
+    return [];
+  }
   const allDatabases = databases.databases;
   if (allDatabases.length === 0) return [];
   let lastDatabaseId = allDatabases[allDatabases.length - 1].$id;
